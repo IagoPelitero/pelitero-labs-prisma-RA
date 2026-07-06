@@ -9,18 +9,19 @@
    id, a tela carrega os dados desse atendimento; se vier vazio/nulo, a
    tela abre em branco para um cadastro novo.
 
+   Campos do formulário: Data, Protocolo, Nome, CPF, Status, "Pendente com"
+   (só visível quando Status = "Em análise") e Observações. O campo
+   "Responsável" só aparece para o perfil Supervisor (analista nunca
+   escolhe responsável — o sistema identifica automaticamente quem criou
+   o atendimento, em Services.gs/getActor_()).
+
    Funções que começam com "_" são de uso interno da própria página.
    Fluxo resumido:
      render(id)                 → se tiver id, busca o atendimento no
                                    servidor; depois chama _renderForm().
      _renderForm(container)      → desenha todos os campos do formulário.
-     _bindEvents()                → liga os eventos dos campos (troca de
-                                   produto atualiza categorias, mudar
-                                   status recalcula SLA, etc.).
-     _recalcularSLA()             → chama calcularSLA()/
-                                   calcularVencimentoSLA() no servidor
-                                   (Services.gs) para saber o prazo do
-                                   atendimento.
+     _bindEvents()                → liga os eventos dos campos (mudar
+                                   status mostra/esconde "Pendente com").
      _validarFormulario()         → confere se os campos obrigatórios
                                    foram preenchidos antes de salvar.
      _coletarDados()              → junta os valores dos campos da tela
@@ -37,8 +38,6 @@ Pages.novoAtendimento = {
     atendimentoId: null,
     atendimento: null,
     timeline: [],
-    categoriasFiltradas: [],
-    slaCalculado: null,
     salvando: false
   },
 
@@ -47,8 +46,6 @@ Pages.novoAtendimento = {
     self.state.atendimentoId = atendimentoId || null;
     self.state.atendimento = null;
     self.state.timeline = [];
-    self.state.categoriasFiltradas = [];
-    self.state.slaCalculado = null;
     self.state.salvando = false;
 
     var container = document.getElementById('content-area') || document.querySelector('.content-area');
@@ -84,11 +81,11 @@ Pages.novoAtendimento = {
     var isEdit = !!self.state.atendimentoId;
     var atd = self.state.atendimento || {};
     var dd = App.dropdownData || {};
+    var isSupervisor = self._isSupervisor();
 
     var hoje = new Date().toISOString().split('T')[0];
     var dataAbertura = atd.dataAbertura ? self._formatDateForInput(atd.dataAbertura) : hoje;
-    var dataPrevista = atd.dataPrevista ? self._formatDateForInput(atd.dataPrevista) : '';
-    var slaHoras = atd.slaHoras || '';
+    var statusAtual = atd.status || (dd.status || [])[0] || '';
 
     var titulo = isEdit ? 'Editar Atendimento #' + self.state.atendimentoId : 'Novo Atendimento';
 
@@ -100,136 +97,49 @@ Pages.novoAtendimento = {
     html += '<div class="card">';
     html += '  <form id="form-atendimento" autocomplete="off">';
 
-    // Linha 1: Número RA + Cliente
+    // Linha 1: Data + Protocolo
     html += '  <div class="form-row">';
     html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-ra">Número RA <span style="color:var(--danger)">*</span></label>';
-    html += '      <input type="text" id="campo-ra" class="form-control" placeholder="Digite o número do RA" value="' + self._escape(atd.numeroRA || '') + '" required>';
-    html += '      <small id="ra-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
+    html += '      <label class="form-label" for="campo-data-abertura">Data <span style="color:var(--danger)">*</span></label>';
+    html += '      <input type="date" id="campo-data-abertura" class="form-control" value="' + dataAbertura + '" required>';
     html += '    </div>';
     html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-cliente">Cliente <span style="color:var(--danger)">*</span></label>';
-    html += '      <input type="text" id="campo-cliente" class="form-control" placeholder="Nome do cliente" value="' + self._escape(atd.cliente || '') + '" required>';
+    html += '      <label class="form-label" for="campo-ra">Protocolo <span style="color:var(--danger)">*</span></label>';
+    html += '      <input type="text" id="campo-ra" class="form-control" placeholder="Número do protocolo" value="' + self._escape(atd.numeroRA || '') + '" required>';
+    html += '      <small id="ra-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
     html += '    </div>';
     html += '  </div>';
 
-    // Linha 2: CPF + Produto
+    // Linha 2: Nome + CPF
     html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-cliente">Nome <span style="color:var(--danger)">*</span></label>';
+    html += '      <input type="text" id="campo-cliente" class="form-control" placeholder="Nome do cliente" value="' + self._escape(atd.cliente || '') + '" required>';
+    html += '    </div>';
     html += '    <div class="form-group">';
     html += '      <label class="form-label" for="campo-cpf">CPF</label>';
     html += '      <input type="text" id="campo-cpf" class="form-control" placeholder="000.000.000-00" value="' + self._escape(atd.cpf || '') + '" maxlength="14">';
     html += '      <small id="cpf-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
     html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-produto">Produto <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-produto" class="form-control" required>';
-    html += '        <option value="">Selecione o produto</option>';
-    if (dd.produtos) {
-      dd.produtos.forEach(function(p) {
-        var sel = (atd.produto === p) ? ' selected' : '';
-        html += '        <option value="' + self._escape(p) + '"' + sel + '>' + self._escape(p) + '</option>';
-      });
-    }
-    html += '      </select>';
-    html += '    </div>';
     html += '  </div>';
 
-    // Linha 3: Categoria + Canal
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-categoria">Categoria <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-categoria" class="form-control" required>';
-    html += '        <option value="">Selecione a categoria</option>';
-    if (dd.categorias && atd.produto) {
-      var cats = self._filtrarCategorias(atd.produto, dd.categorias);
-      cats.forEach(function(c) {
-        var sel = (atd.categoria === c) ? ' selected' : '';
-        html += '        <option value="' + self._escape(c) + '"' + sel + '>' + self._escape(c) + '</option>';
-      });
-    }
-    html += '      </select>';
-    html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-canal">Canal <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-canal" class="form-control" required>';
-    html += '        <option value="">Selecione o canal</option>';
-    if (dd.canais) {
-      dd.canais.forEach(function(c) {
-        var sel = (atd.canal === c) ? ' selected' : '';
-        html += '        <option value="' + self._escape(c) + '"' + sel + '>' + self._escape(c) + '</option>';
-      });
-    }
-    html += '      </select>';
-    html += '    </div>';
-    html += '  </div>';
-
-    // Linha 4: Tipo de atendimento
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-tipo-atendimento">Tipo de Atendimento</label>';
-    html += '      <select id="campo-tipo-atendimento" class="form-control">';
-    html += '        <option value="">Selecione o tipo</option>';
-    if (dd.tiposAtendimento) {
-      dd.tiposAtendimento.forEach(function(t) {
-        var selectedType = (atd.tipoAtendimento === t || (!isEdit && !atd.tipoAtendimento && t === 'Reclamação')) ? ' selected' : '';
-        html += '        <option value="' + self._escape(t) + '"' + selectedType + '>' + self._escape(t) + '</option>';
-      });
-    }
-    html += '      </select>';
-    html += '    </div>';
-    html += '    <div class="form-group"></div>';
-    html += '  </div>';
-
-    // Linha 5: Responsável + Prioridade
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-responsavel">Responsável <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-responsavel" class="form-control" required>';
-    html += '        <option value="">Selecione o responsável</option>';
-    if (dd.responsaveis) {
-      dd.responsaveis.forEach(function(r) {
-        var sel = (atd.responsavel === r) ? ' selected' : '';
-        html += '        <option value="' + self._escape(r) + '"' + sel + '>' + self._escape(r) + '</option>';
-      });
-    }
-    html += '      </select>';
-    html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-prioridade">Prioridade <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-prioridade" class="form-control" required>';
-    html += '        <option value="">Selecione a prioridade</option>';
-    if (dd.prioridades) {
-      dd.prioridades.forEach(function(p) {
-        var sel = (atd.prioridade === p) ? ' selected' : '';
-        html += '        <option value="' + self._escape(p) + '"' + sel + '>' + self._escape(p) + '</option>';
-      });
-    }
-    html += '      </select>';
-    html += '    </div>';
-    html += '  </div>';
-
-    // Linha 6: Status + Motivo da Pendência
+    // Linha 3: Status + Pendente com
     html += '  <div class="form-row">';
     html += '    <div class="form-group">';
     html += '      <label class="form-label" for="campo-status">Status <span style="color:var(--danger)">*</span></label>';
     html += '      <select id="campo-status" class="form-control" required>';
     if (dd.status) {
-      if (isEdit) {
-        dd.status.forEach(function(s) {
-          var sel = (atd.status === s) ? ' selected' : '';
-          html += '        <option value="' + self._escape(s) + '"' + sel + '>' + self._escape(s) + '</option>';
-        });
-      } else {
-        var statusInicial = dd.status[0] || 'Aberto';
-        html += '        <option value="' + self._escape(statusInicial) + '" selected>' + self._escape(statusInicial) + '</option>';
-      }
+      dd.status.forEach(function(s) {
+        var sel = (statusAtual === s) ? ' selected' : '';
+        html += '        <option value="' + self._escape(s) + '"' + sel + '>' + self._escape(s) + '</option>';
+      });
     }
     html += '      </select>';
     html += '    </div>';
-    html += '    <div class="form-group" id="grupo-motivo-pendencia" style="' + (self._isStatusAguardando(atd.status) ? '' : 'display:none;') + '">';
-    html += '      <label class="form-label" for="campo-motivo-pendencia">Motivo da Pendência <span style="color:var(--danger)">*</span></label>';
+    html += '    <div class="form-group" id="grupo-motivo-pendencia" style="' + (self._isStatusEmAnalise(statusAtual) ? '' : 'display:none;') + '">';
+    html += '      <label class="form-label" for="campo-motivo-pendencia">Pendente com <span style="color:var(--danger)">*</span></label>';
     html += '      <select id="campo-motivo-pendencia" class="form-control">';
-    html += '        <option value="">Selecione o motivo</option>';
+    html += '        <option value="">Selecione</option>';
     if (dd.motivosPendencia) {
       dd.motivosPendencia.forEach(function(m) {
         var sel = (atd.motivoPendencia === m) ? ' selected' : '';
@@ -240,39 +150,31 @@ Pages.novoAtendimento = {
     html += '    </div>';
     html += '  </div>';
 
-    // Linha 6: Descrição
-    html += '  <div class="form-group">';
-    html += '    <label class="form-label" for="campo-descricao">Descrição <span style="color:var(--danger)">*</span></label>';
-    html += '    <textarea id="campo-descricao" class="form-control" rows="4" placeholder="Descreva o atendimento detalhadamente" required>' + self._escape(atd.descricao || '') + '</textarea>';
-    html += '  </div>';
+    // Responsável: exceção visível apenas para Supervisor (escolhe o analista).
+    // Analista não vê este campo — o sistema identifica o criador automaticamente.
+    if (isSupervisor) {
+      html += '  <div class="form-row" data-supervisor-only>';
+      html += '    <div class="form-group">';
+      html += '      <label class="form-label" for="campo-responsavel">Responsável</label>';
+      html += '      <select id="campo-responsavel" class="form-control">';
+      html += '        <option value="">Automático (eu mesmo)</option>';
+      if (dd.responsaveis) {
+        dd.responsaveis.forEach(function(r) {
+          var sel = (atd.responsavel === r) ? ' selected' : '';
+          html += '        <option value="' + self._escape(r) + '"' + sel + '>' + self._escape(r) + '</option>';
+        });
+      }
+      html += '      </select>';
+      html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Somente supervisores escolhem o analista responsável.</small>';
+      html += '    </div>';
+      html += '    <div class="form-group"></div>';
+      html += '  </div>';
+    }
 
-    // Linha 7: Observações
+    // Observações
     html += '  <div class="form-group">';
     html += '    <label class="form-label" for="campo-observacoes">Observações</label>';
-    html += '    <textarea id="campo-observacoes" class="form-control" rows="3" placeholder="Observações adicionais (opcional)">' + self._escape(atd.observacoes || '') + '</textarea>';
-    html += '  </div>';
-
-    // Linha 8: Data Abertura + Data Prevista
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-data-abertura">Data de Abertura</label>';
-    html += '      <input type="date" id="campo-data-abertura" class="form-control" value="' + dataAbertura + '">';
-    html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-data-prevista">Data Prevista</label>';
-    html += '      <input type="date" id="campo-data-prevista" class="form-control" value="' + dataPrevista + '">';
-    html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Calculada automaticamente pelo SLA. Pode ser ajustada manualmente.</small>';
-    html += '    </div>';
-    html += '  </div>';
-
-    // Linha 9: SLA em Horas
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-sla-horas">SLA em Horas</label>';
-    html += '      <input type="number" id="campo-sla-horas" class="form-control" placeholder="Calculado automaticamente" value="' + self._escape(String(slaHoras)) + '" min="1">';
-    html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Calculado ao selecionar Produto, Categoria e Canal.</small>';
-    html += '    </div>';
-    html += '    <div class="form-group"></div>';
+    html += '    <textarea id="campo-observacoes" class="form-control" rows="4" placeholder="Observações sobre o atendimento (opcional)">' + self._escape(atd.observacoes || '') + '</textarea>';
     html += '  </div>';
 
     // Botões de ação
@@ -321,16 +223,10 @@ Pages.novoAtendimento = {
 
     // Vincular eventos
     self._bindEvents();
-
-    // Se editando e tem produto, filtrar categorias
-    if (isEdit && atd.produto) {
-      self._atualizarCategorias(atd.produto, atd.categoria);
-    }
   },
 
   _bindEvents: function() {
     var self = this;
-    var isEdit = !!self.state.atendimentoId;
 
     // Máscara CPF
     var campoCpf = document.getElementById('campo-cpf');
@@ -343,7 +239,7 @@ Pages.novoAtendimento = {
       });
     }
 
-    // Verificar duplicidade do RA
+    // Verificar duplicidade do Protocolo
     var campoRA = document.getElementById('campo-ra');
     if (campoRA) {
       campoRA.addEventListener('blur', function() {
@@ -351,59 +247,13 @@ Pages.novoAtendimento = {
       });
     }
 
-    // Produto muda → atualizar categorias e SLA
-    var campoProduto = document.getElementById('campo-produto');
-    if (campoProduto) {
-      campoProduto.addEventListener('change', function() {
-        self._atualizarCategorias(this.value, null);
-        self._recalcularSLA();
-      });
-    }
-
-    // Categoria muda → recalcular SLA
-    var campoCategoria = document.getElementById('campo-categoria');
-    if (campoCategoria) {
-      campoCategoria.addEventListener('change', function() {
-        self._recalcularSLA();
-      });
-    }
-
-    // Canal muda → recalcular SLA
-    var campoCanal = document.getElementById('campo-canal');
-    if (campoCanal) {
-      campoCanal.addEventListener('change', function() {
-        self._recalcularSLA();
-      });
-    }
-
-    var campoTipo = document.getElementById('campo-tipo-atendimento');
-    if (campoTipo) {
-      campoTipo.addEventListener('change', function() {
-        self._recalcularSLA();
-      });
-    }
-
-    var campoPrioridade = document.getElementById('campo-prioridade');
-    if (campoPrioridade) {
-      campoPrioridade.addEventListener('change', function() {
-        self._recalcularSLA();
-      });
-    }
-
-    var campoSlaManual = document.getElementById('campo-sla-horas');
-    if (campoSlaManual) {
-      campoSlaManual.addEventListener('change', function() {
-        self._recalcularVencimentoManual();
-      });
-    }
-
-    // Status muda → mostrar/esconder motivo pendência
+    // Status muda → mostrar/esconder "Pendente com" (só aparece em "Em análise")
     var campoStatus = document.getElementById('campo-status');
     if (campoStatus) {
       campoStatus.addEventListener('change', function() {
         var grupoMotivo = document.getElementById('grupo-motivo-pendencia');
         if (grupoMotivo) {
-          if (self._isStatusAguardando(this.value)) {
+          if (self._isStatusEmAnalise(this.value)) {
             grupoMotivo.style.display = '';
           } else {
             grupoMotivo.style.display = 'none';
@@ -457,77 +307,6 @@ Pages.novoAtendimento = {
     }
   },
 
-  _atualizarCategorias: function(produto, categoriaSelecionada) {
-    var dd = App.dropdownData || {};
-    var select = document.getElementById('campo-categoria');
-    if (!select) return;
-
-    var categorias = this._filtrarCategorias(produto, dd.categorias);
-    this.state.categoriasFiltradas = categorias;
-
-    var html = '<option value="">Selecione a categoria</option>';
-    categorias.forEach(function(c) {
-      var sel = (categoriaSelecionada === c) ? ' selected' : '';
-      html += '<option value="' + Pages.novoAtendimento._escape(c) + '"' + sel + '>' + Pages.novoAtendimento._escape(c) + '</option>';
-    });
-    select.innerHTML = html;
-  },
-
-  _filtrarCategorias: function(produto, categorias) {
-    if (!categorias || !produto) return categorias || [];
-    var categoryMap = (App.dropdownData || {}).categoriasPorProduto || {};
-    if (categoryMap[produto]) {
-      return categoryMap[produto].concat(categoryMap.Geral || []);
-    }
-    if (Array.isArray(categorias)) return categorias;
-    if (typeof categorias === 'object' && categorias[produto]) {
-      return categorias[produto];
-    }
-    return Object.values(categorias).reduce(function(acc, arr) {
-      return acc.concat(arr);
-    }, []);
-  },
-
-  _recalcularSLA: function() {
-    var produto = document.getElementById('campo-produto');
-    var categoria = document.getElementById('campo-categoria');
-    var canal = document.getElementById('campo-canal');
-    var tipo = document.getElementById('campo-tipo-atendimento');
-    var prioridade = document.getElementById('campo-prioridade');
-
-    if (!produto || !categoria || !canal) return;
-    if (!produto.value || !categoria.value || !canal.value) return;
-
-    var self = this;
-
-    google.script.run
-      .withSuccessHandler(function(result) {
-        if (result) {
-          self.state.slaCalculado = result;
-          var campoSla = document.getElementById('campo-sla-horas');
-          var campoDataPrevista = document.getElementById('campo-data-prevista');
-          if (campoSla && result.slaHoras) {
-            campoSla.value = result.slaHoras;
-          }
-          if (campoDataPrevista && result.dataVencimento) {
-            var dv = self._formatDateForInput(result.dataVencimento);
-            if (dv) campoDataPrevista.value = dv;
-          }
-          Components.toast('SLA calculado: ' + result.slaHoras + ' horas', 'success', 3000);
-        }
-      })
-      .withFailureHandler(function(err) {
-        console.error('Erro ao calcular SLA:', err);
-      })
-      .calcularSLA(
-        produto.value,
-        categoria.value,
-        canal.value,
-        tipo ? tipo.value : '',
-        prioridade ? prioridade.value : ''
-      );
-  },
-
   _verificarDuplicidadeRA: function(valor) {
     if (!valor || !valor.trim()) return;
     var self = this;
@@ -561,23 +340,6 @@ Pages.novoAtendimento = {
         }
       })
       .pesquisarAtendimentos(valor.trim());
-  },
-
-  _recalcularVencimentoManual: function() {
-    var abertura = document.getElementById('campo-data-abertura');
-    var horas = document.getElementById('campo-sla-horas');
-    var prevista = document.getElementById('campo-data-prevista');
-    if (!abertura || !horas || !prevista || !abertura.value || !horas.value) return;
-    google.script.run
-      .withSuccessHandler(function(result) {
-        if (result && result.dataVencimento) {
-          prevista.value = Pages.novoAtendimento._formatDateForInput(result.dataVencimento);
-        }
-      })
-      .withFailureHandler(function(error) {
-        Components.toast('Não foi possível recalcular o vencimento: ' + error.message, 'warning');
-      })
-      .calcularVencimentoSLA(abertura.value, horas.value);
   },
 
   _validarCPF: function(cpf) {
@@ -637,38 +399,35 @@ Pages.novoAtendimento = {
     feedback.textContent = '✅ CPF válido.';
   },
 
-  _isStatusAguardando: function(status) {
+  _isSupervisor: function() {
+    var allowed = ['supervisor', 'gestor', 'administrador', 'admin'];
+    var profile = String((App.user || {}).perfil || '').toLowerCase();
+    return allowed.indexOf(profile) !== -1;
+  },
+
+  _isStatusEmAnalise: function(status) {
     if (!status) return false;
-    return status.toLowerCase().indexOf('aguardando') !== -1;
+    var normalized = status.toLowerCase();
+    return normalized.indexOf('análise') !== -1 || normalized.indexOf('analise') !== -1;
   },
 
   _validarFormulario: function() {
     var erros = [];
 
+    var dataAbertura = document.getElementById('campo-data-abertura');
     var ra = document.getElementById('campo-ra');
     var cliente = document.getElementById('campo-cliente');
-    var produto = document.getElementById('campo-produto');
-    var categoria = document.getElementById('campo-categoria');
-    var canal = document.getElementById('campo-canal');
-    var responsavel = document.getElementById('campo-responsavel');
-    var prioridade = document.getElementById('campo-prioridade');
     var status = document.getElementById('campo-status');
-    var descricao = document.getElementById('campo-descricao');
     var motivoPendencia = document.getElementById('campo-motivo-pendencia');
 
-    if (!ra || !ra.value.trim()) erros.push('Número RA é obrigatório.');
-    if (!cliente || !cliente.value.trim()) erros.push('Cliente é obrigatório.');
-    if (!produto || !produto.value) erros.push('Produto é obrigatório.');
-    if (!categoria || !categoria.value) erros.push('Categoria é obrigatória.');
-    if (!canal || !canal.value) erros.push('Canal é obrigatório.');
-    if (!responsavel || !responsavel.value) erros.push('Responsável é obrigatório.');
-    if (!prioridade || !prioridade.value) erros.push('Prioridade é obrigatória.');
+    if (!dataAbertura || !dataAbertura.value) erros.push('Data é obrigatória.');
+    if (!ra || !ra.value.trim()) erros.push('Protocolo é obrigatório.');
+    if (!cliente || !cliente.value.trim()) erros.push('Nome é obrigatório.');
     if (!status || !status.value) erros.push('Status é obrigatório.');
-    if (!descricao || !descricao.value.trim()) erros.push('Descrição é obrigatória.');
 
-    if (status && this._isStatusAguardando(status.value)) {
+    if (status && this._isStatusEmAnalise(status.value)) {
       if (!motivoPendencia || !motivoPendencia.value) {
-        erros.push('Motivo da Pendência é obrigatório quando o status contém "Aguardando".');
+        erros.push('"Pendente com" é obrigatório quando o Status é "Em análise".');
       }
     }
 
@@ -685,23 +444,17 @@ Pages.novoAtendimento = {
   },
 
   _coletarDados: function() {
+    var campoResponsavel = document.getElementById('campo-responsavel');
+    var campoMotivo = document.getElementById('campo-motivo-pendencia');
     return {
       numeroRA: (document.getElementById('campo-ra').value || '').trim(),
       cliente: (document.getElementById('campo-cliente').value || '').trim(),
       cpf: (document.getElementById('campo-cpf').value || '').trim(),
-      produto: document.getElementById('campo-produto').value || '',
-      categoria: document.getElementById('campo-categoria').value || '',
-      canal: document.getElementById('campo-canal').value || '',
-      tipoAtendimento: document.getElementById('campo-tipo-atendimento').value || '',
-      responsavel: document.getElementById('campo-responsavel').value || '',
-      prioridade: document.getElementById('campo-prioridade').value || '',
       status: document.getElementById('campo-status').value || '',
-      descricao: (document.getElementById('campo-descricao').value || '').trim(),
       observacoes: (document.getElementById('campo-observacoes').value || '').trim(),
       dataAbertura: document.getElementById('campo-data-abertura').value || '',
-      dataPrevista: document.getElementById('campo-data-prevista').value || '',
-      slaHoras: document.getElementById('campo-sla-horas').value || '',
-      motivoPendencia: document.getElementById('campo-motivo-pendencia').value || ''
+      motivoPendencia: campoMotivo ? (campoMotivo.value || '') : '',
+      responsavel: campoResponsavel ? (campoResponsavel.value || '') : ''
     };
   },
 
@@ -894,13 +647,7 @@ Pages.novoAtendimento = {
       campoData.value = new Date().toISOString().split('T')[0];
     }
 
-    // Limpar campos calculados
-    var campoSla = document.getElementById('campo-sla-horas');
-    if (campoSla) campoSla.value = '';
-    var campoDataPrev = document.getElementById('campo-data-prevista');
-    if (campoDataPrev) campoDataPrev.value = '';
-
-    // Esconder motivo pendência
+    // Esconder "Pendente com"
     var grupoMotivo = document.getElementById('grupo-motivo-pendencia');
     if (grupoMotivo) grupoMotivo.style.display = 'none';
 
@@ -909,10 +656,6 @@ Pages.novoAtendimento = {
     if (raFeedback) { raFeedback.style.display = 'none'; raFeedback.textContent = ''; }
     var cpfFeedback = document.getElementById('cpf-feedback');
     if (cpfFeedback) { cpfFeedback.style.display = 'none'; cpfFeedback.textContent = ''; }
-
-    // Limpar categorias
-    var catSelect = document.getElementById('campo-categoria');
-    if (catSelect) catSelect.innerHTML = '<option value="">Selecione a categoria</option>';
 
     Components.toast('Formulário limpo.', 'success', 2000);
   },
