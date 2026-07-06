@@ -1,0 +1,656 @@
+<script>
+Pages.indicadores = {
+  _charts: [],
+
+  _destroyCharts: function () {
+    if (Pages.indicadores._charts && Pages.indicadores._charts.length) {
+      Pages.indicadores._charts.forEach(function (chart) {
+        if (chart && typeof chart.destroy === 'function') {
+          chart.destroy();
+        }
+      });
+    }
+    Pages.indicadores._charts = [];
+  },
+
+  _createChart: function (canvasId, type, data, options) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    var ctx = canvas.getContext('2d');
+    var defaults = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 800,
+        easing: 'easeOutQuart'
+      },
+      plugins: {
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.82)',
+          titleFont: { size: 13, weight: '600' },
+          bodyFont: { size: 12 },
+          padding: 12,
+          cornerRadius: 8,
+          displayColors: true,
+          boxPadding: 4
+        },
+        legend: {
+          labels: {
+            font: { size: 12 },
+            padding: 16,
+            usePointStyle: true,
+            pointStyleWidth: 10
+          }
+        }
+      }
+    };
+    var merged = Pages.indicadores._mergeOptions(defaults, options || {});
+    var chart = new Chart(ctx, { type: type, data: data, options: merged });
+    Pages.indicadores._charts.push(chart);
+    return chart;
+  },
+
+  _mergeOptions: function (target, source) {
+    var result = {};
+    var key;
+    for (key in target) {
+      if (target.hasOwnProperty(key)) {
+        if (typeof target[key] === 'object' && target[key] !== null && !Array.isArray(target[key])) {
+          result[key] = Pages.indicadores._mergeOptions(target[key], source[key] || {});
+        } else {
+          result[key] = target[key];
+        }
+      }
+    }
+    for (key in source) {
+      if (source.hasOwnProperty(key)) {
+        if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key]) && typeof result[key] === 'object') {
+          result[key] = Pages.indicadores._mergeOptions(result[key] || {}, source[key]);
+        } else {
+          result[key] = source[key];
+        }
+      }
+    }
+    return result;
+  },
+
+  _portoColors: [
+    '#0046C0', '#00A3E0', '#FF9800', '#FFC107', '#43A047',
+    '#E53935', '#9C27B0', '#00BCD4', '#795548', '#607D8B',
+    '#FF5722', '#3F51B5'
+  ],
+
+  _getColor: function (index) {
+    return Pages.indicadores._portoColors[index % Pages.indicadores._portoColors.length];
+  },
+
+  _getColors: function (count) {
+    var colors = [];
+    for (var i = 0; i < count; i++) {
+      colors.push(Pages.indicadores._getColor(i));
+    }
+    return colors;
+  },
+
+  _statusColors: {
+    'Aberto': '#0046C0',
+    'Em Andamento': '#00A3E0',
+    'Aguardando Cliente': '#FF9800',
+    'Aguardando Área': '#FFC107',
+    'Finalizado': '#43A047',
+    'Cancelado': '#E53935',
+    'Reaberto': '#9C27B0',
+    'Pendente': '#607D8B'
+  },
+
+  _getStatusColors: function (labels) {
+    var self = Pages.indicadores;
+    return labels.map(function (label, i) {
+      return self._statusColors[label] || self._getColor(i);
+    });
+  },
+
+  _getGaugeColor: function (hours) {
+    if (hours < 12) return '#43A047';
+    if (hours <= 24) return '#FFC107';
+    return '#E53935';
+  },
+
+  _getGaugeLabel: function (hours) {
+    if (hours < 12) return 'Dentro da meta';
+    if (hours <= 24) return 'Atenção';
+    return 'Acima da meta';
+  },
+
+  _getGaugePercent: function (hours) {
+    var max = 48;
+    var pct = Math.min((hours / max) * 100, 100);
+    return Math.max(pct, 3);
+  },
+
+  _buildKpiCard: function (id, title, hours) {
+    var color = Pages.indicadores._getGaugeColor(hours);
+    var label = Pages.indicadores._getGaugeLabel(hours);
+    var pct = Pages.indicadores._getGaugePercent(hours);
+    var formattedHours = typeof hours === 'number' ? hours.toFixed(1) : '0.0';
+
+    return '' +
+      '<div class="chart-card" id="' + id + '-card">' +
+        '<h3>' + title + '</h3>' +
+        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:220px;padding:24px 16px;">' +
+          '<div style="font-size:48px;font-weight:700;color:' + color + ';line-height:1;margin-bottom:8px;">' +
+            formattedHours + '<span style="font-size:18px;font-weight:400;color:#8896A6;margin-left:4px;">horas</span>' +
+          '</div>' +
+          '<div style="font-size:13px;color:' + color + ';font-weight:600;margin-bottom:20px;">' + label + '</div>' +
+          '<div style="width:100%;max-width:320px;">' +
+            '<div style="width:100%;height:14px;background:#E8ECF1;border-radius:7px;overflow:hidden;position:relative;">' +
+              '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:7px;transition:width 0.8s ease;"></div>' +
+            '</div>' +
+            '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:11px;color:#8896A6;">' +
+              '<span>0h</span><span>12h</span><span>24h</span><span>48h</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  },
+
+  render: function () {
+    var container = document.querySelector('.content-area');
+    if (!container) return;
+
+    Pages.indicadores._destroyCharts();
+
+    container.innerHTML = '' +
+      '<div class="page-header">' +
+        '<div>' +
+          '<h1 class="page-title">Indicadores</h1>' +
+          '<p style="color:#8896A6;margin:4px 0 0;font-size:14px;">Análise de desempenho</p>' +
+        '</div>' +
+      '</div>' +
+      '<div class="grid-2" id="indicadores-grid">' +
+        '<div class="chart-card">' +
+          '<h3>Atendimentos por Dia</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-atendimentos-dia"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Atendimentos por Semana</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-atendimentos-semana"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Atendimentos por Mês</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-atendimentos-mes"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Atendimentos por Analista</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-atendimentos-analista"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Atendimentos por Produto</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-atendimentos-produto"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Atendimentos por Categoria</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-atendimentos-categoria"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Status dos Atendimentos</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-status-atendimentos"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>SLA Dentro x Fora</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-sla"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Tempo Médio de Resolução</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-tempo-resolucao"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Volume por Canal</h3>' +
+          '<div style="position:relative;height:280px;"><canvas id="chart-volume-canal"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card" style="grid-column: span 2;">' +
+          '<h3>Evolução Mensal</h3>' +
+          '<div style="position:relative;height:320px;"><canvas id="chart-evolucao-mensal"></canvas></div>' +
+        '</div>' +
+        '<div class="chart-card">' +
+          '<h3>Ranking de Analistas</h3>' +
+          '<div style="position:relative;height:340px;"><canvas id="chart-ranking-analistas"></canvas></div>' +
+        '</div>' +
+        '<div id="kpi-area-placeholder" class="chart-card">' +
+          '<h3>Tempo Médio Aguardando Área</h3>' +
+          '<div style="display:flex;align-items:center;justify-content:center;height:220px;color:#8896A6;">Carregando...</div>' +
+        '</div>' +
+        '<div id="kpi-cliente-placeholder" class="chart-card">' +
+          '<h3>Tempo Médio Aguardando Cliente</h3>' +
+          '<div style="display:flex;align-items:center;justify-content:center;height:220px;color:#8896A6;">Carregando...</div>' +
+        '</div>' +
+      '</div>';
+
+    Components.showLoading('Carregando indicadores...');
+
+    google.script.run
+      .withSuccessHandler(function (data) {
+        Components.hideLoading();
+        if (!data) {
+          Components.toast('Nenhum dado encontrado.', 'warning');
+          return;
+        }
+        Pages.indicadores._renderCharts(data);
+      })
+      .withFailureHandler(function (err) {
+        Components.hideLoading();
+        Components.toast('Erro ao carregar indicadores: ' + (err.message || err), 'error', 5000);
+      })
+      .getIndicadores(App.getFilters());
+  },
+
+  _renderCharts: function (data) {
+    var self = Pages.indicadores;
+    var portoColors = self._portoColors;
+
+    // 1. Atendimentos por Dia
+    if (data.atendimentosPorDia && data.atendimentosPorDia.labels.length) {
+      self._createChart('chart-atendimentos-dia', 'bar', {
+        labels: data.atendimentosPorDia.labels,
+        datasets: [{
+          label: 'Atendimentos',
+          data: data.atendimentosPorDia.values,
+          backgroundColor: '#0046C0',
+          borderColor: '#0046C0',
+          borderWidth: 1,
+          borderRadius: 6,
+          maxBarThickness: 40
+        }]
+      }, {
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          x: {
+            grid: { display: false }
+          }
+        },
+        plugins: { legend: { display: false } }
+      });
+    }
+
+    // 2. Atendimentos por Semana
+    if (data.atendimentosPorSemana && data.atendimentosPorSemana.labels.length) {
+      self._createChart('chart-atendimentos-semana', 'bar', {
+        labels: data.atendimentosPorSemana.labels,
+        datasets: [{
+          label: 'Atendimentos',
+          data: data.atendimentosPorSemana.values,
+          backgroundColor: '#00A3E0',
+          borderColor: '#00A3E0',
+          borderWidth: 1,
+          borderRadius: 6,
+          maxBarThickness: 40
+        }]
+      }, {
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          x: {
+            grid: { display: false }
+          }
+        },
+        plugins: { legend: { display: false } }
+      });
+    }
+
+    // 3. Atendimentos por Mês
+    if (data.atendimentosPorMes && data.atendimentosPorMes.labels.length) {
+      self._createChart('chart-atendimentos-mes', 'bar', {
+        labels: data.atendimentosPorMes.labels,
+        datasets: [{
+          label: 'Atendimentos',
+          data: data.atendimentosPorMes.values,
+          backgroundColor: '#FF9800',
+          borderColor: '#FF9800',
+          borderWidth: 1,
+          borderRadius: 6,
+          maxBarThickness: 40
+        }]
+      }, {
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          x: {
+            grid: { display: false }
+          }
+        },
+        plugins: { legend: { display: false } }
+      });
+    }
+
+    // 4. Atendimentos por Analista (horizontal bar)
+    if (data.atendimentosPorAnalista && data.atendimentosPorAnalista.labels.length) {
+      self._createChart('chart-atendimentos-analista', 'bar', {
+        labels: data.atendimentosPorAnalista.labels,
+        datasets: [{
+          label: 'Atendimentos',
+          data: data.atendimentosPorAnalista.values,
+          backgroundColor: self._getColors(data.atendimentosPorAnalista.labels.length),
+          borderWidth: 0,
+          borderRadius: 6,
+          maxBarThickness: 28
+        }]
+      }, {
+        indexAxis: 'y',
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          y: {
+            grid: { display: false }
+          }
+        },
+        plugins: { legend: { display: false } }
+      });
+    }
+
+    // 5. Atendimentos por Produto (doughnut)
+    if (data.atendimentosPorProduto && data.atendimentosPorProduto.labels.length) {
+      self._createChart('chart-atendimentos-produto', 'doughnut', {
+        labels: data.atendimentosPorProduto.labels,
+        datasets: [{
+          data: data.atendimentosPorProduto.values,
+          backgroundColor: self._getColors(data.atendimentosPorProduto.labels.length),
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverBorderWidth: 3,
+          hoverOffset: 8
+        }]
+      }, {
+        cutout: '55%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { font: { size: 11 }, padding: 10, usePointStyle: true, pointStyleWidth: 8 }
+          }
+        }
+      });
+    }
+
+    // 6. Atendimentos por Categoria (doughnut)
+    if (data.atendimentosPorCategoria && data.atendimentosPorCategoria.labels.length) {
+      self._createChart('chart-atendimentos-categoria', 'doughnut', {
+        labels: data.atendimentosPorCategoria.labels,
+        datasets: [{
+          data: data.atendimentosPorCategoria.values,
+          backgroundColor: self._getColors(data.atendimentosPorCategoria.labels.length),
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverBorderWidth: 3,
+          hoverOffset: 8
+        }]
+      }, {
+        cutout: '55%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { font: { size: 11 }, padding: 10, usePointStyle: true, pointStyleWidth: 8 }
+          }
+        }
+      });
+    }
+
+    // 7. Status dos Atendimentos (doughnut with custom colors)
+    if (data.statusAtendimentos && data.statusAtendimentos.labels.length) {
+      var statusBgColors = self._getStatusColors(data.statusAtendimentos.labels);
+      self._createChart('chart-status-atendimentos', 'doughnut', {
+        labels: data.statusAtendimentos.labels,
+        datasets: [{
+          data: data.statusAtendimentos.values,
+          backgroundColor: statusBgColors,
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverBorderWidth: 3,
+          hoverOffset: 8
+        }]
+      }, {
+        cutout: '55%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { font: { size: 11 }, padding: 10, usePointStyle: true, pointStyleWidth: 8 }
+          }
+        }
+      });
+    }
+
+    // 8. SLA Dentro x Fora (pie)
+    if (data.slaDentroFora && data.slaDentroFora.labels.length) {
+      self._createChart('chart-sla', 'pie', {
+        labels: data.slaDentroFora.labels,
+        datasets: [{
+          data: data.slaDentroFora.values,
+          backgroundColor: ['#4CAF50', '#E53935'],
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverBorderWidth: 3,
+          hoverOffset: 8
+        }]
+      }, {
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true, pointStyleWidth: 10 }
+          },
+          tooltip: {
+            callbacks: {
+              label: function (context) {
+                var total = context.dataset.data.reduce(function (a, b) { return a + b; }, 0);
+                var pct = total > 0 ? ((context.parsed / total) * 100).toFixed(1) : 0;
+                return context.label + ': ' + context.parsed + ' (' + pct + '%)';
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 9. Tempo Médio de Resolução (bar trend)
+    if (data.tempoMedioResolucao && data.tempoMedioResolucao.labels.length) {
+      self._createChart('chart-tempo-resolucao', 'bar', {
+        labels: data.tempoMedioResolucao.labels,
+        datasets: [{
+          label: 'Horas',
+          data: data.tempoMedioResolucao.values,
+          backgroundColor: function (context) {
+            var chart = context.chart;
+            var ctx2 = chart.ctx;
+            var area = chart.chartArea;
+            if (!area) return '#9C27B0';
+            var gradient = ctx2.createLinearGradient(0, area.bottom, 0, area.top);
+            gradient.addColorStop(0, 'rgba(156, 39, 176, 0.6)');
+            gradient.addColorStop(1, 'rgba(156, 39, 176, 1)');
+            return gradient;
+          },
+          borderColor: '#9C27B0',
+          borderWidth: 1,
+          borderRadius: 6,
+          maxBarThickness: 40
+        }]
+      }, {
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'Horas', font: { size: 11 } },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          x: {
+            grid: { display: false }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (context) {
+                return 'Tempo médio: ' + (typeof context.parsed.y === 'number' ? context.parsed.y.toFixed(1) : context.parsed.y) + 'h';
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 10. Volume por Canal (bar)
+    if (data.volumePorCanal && data.volumePorCanal.labels.length) {
+      self._createChart('chart-volume-canal', 'bar', {
+        labels: data.volumePorCanal.labels,
+        datasets: [{
+          label: 'Volume',
+          data: data.volumePorCanal.values,
+          backgroundColor: self._getColors(data.volumePorCanal.labels.length),
+          borderWidth: 0,
+          borderRadius: 6,
+          maxBarThickness: 48
+        }]
+      }, {
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          x: {
+            grid: { display: false }
+          }
+        },
+        plugins: { legend: { display: false } }
+      });
+    }
+
+    // 11. Evolução Mensal (line, 2 lines)
+    if (data.evolucaoMensal && data.evolucaoMensal.labels.length) {
+      self._createChart('chart-evolucao-mensal', 'line', {
+        labels: data.evolucaoMensal.labels,
+        datasets: [
+          {
+            label: 'Novos',
+            data: data.evolucaoMensal.novos,
+            borderColor: '#0046C0',
+            backgroundColor: 'rgba(0, 70, 192, 0.08)',
+            borderWidth: 3,
+            pointBackgroundColor: '#0046C0',
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 2,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            tension: 0.35,
+            fill: true
+          },
+          {
+            label: 'Finalizados',
+            data: data.evolucaoMensal.finalizados,
+            borderColor: '#43A047',
+            backgroundColor: 'rgba(67, 160, 71, 0.08)',
+            borderWidth: 3,
+            pointBackgroundColor: '#43A047',
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 2,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            tension: 0.35,
+            fill: true
+          }
+        ]
+      }, {
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          x: {
+            grid: { display: false }
+          }
+        },
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { font: { size: 12, weight: '600' }, padding: 20, usePointStyle: true, pointStyleWidth: 10 }
+          }
+        }
+      });
+    }
+
+    // 12. Ranking de Analistas (horizontal bar sorted)
+    if (data.rankingAnalistas && data.rankingAnalistas.labels.length) {
+      var rankLabels = data.rankingAnalistas.labels.slice();
+      var rankValues = data.rankingAnalistas.values.slice();
+      var combined = rankLabels.map(function (label, i) {
+        return { label: label, value: rankValues[i] };
+      });
+      combined.sort(function (a, b) { return b.value - a.value; });
+      var sortedLabels = combined.map(function (item) { return item.label; });
+      var sortedValues = combined.map(function (item) { return item.value; });
+
+      var rankBarColors = sortedValues.map(function (val, i) {
+        if (i === 0) return '#FFD700';
+        if (i === 1) return '#C0C0C0';
+        if (i === 2) return '#CD7F32';
+        return '#0046C0';
+      });
+
+      self._createChart('chart-ranking-analistas', 'bar', {
+        labels: sortedLabels,
+        datasets: [{
+          label: 'Atendimentos',
+          data: sortedValues,
+          backgroundColor: rankBarColors,
+          borderWidth: 0,
+          borderRadius: 6,
+          maxBarThickness: 24
+        }]
+      }, {
+        indexAxis: 'y',
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { precision: 0 },
+            grid: { color: 'rgba(0,0,0,0.06)' }
+          },
+          y: {
+            grid: { display: false }
+          }
+        },
+        plugins: { legend: { display: false } }
+      });
+    }
+
+    // 13. Tempo Médio Aguardando Área (KPI + gauge)
+    var areaHours = typeof data.tempoMedioAguardandoArea === 'number' ? data.tempoMedioAguardandoArea : 0;
+    var areaPlaceholder = document.getElementById('kpi-area-placeholder');
+    if (areaPlaceholder) {
+      var areaCard = self._buildKpiCard('kpi-area', 'Tempo Médio Aguardando Área', areaHours);
+      var tempDiv = document.createElement('div');
+      tempDiv.innerHTML = areaCard;
+      areaPlaceholder.parentNode.replaceChild(tempDiv.firstChild, areaPlaceholder);
+    }
+
+    // 14. Tempo Médio Aguardando Cliente (KPI + gauge)
+    var clienteHours = typeof data.tempoMedioAguardandoCliente === 'number' ? data.tempoMedioAguardandoCliente : 0;
+    var clientePlaceholder = document.getElementById('kpi-cliente-placeholder');
+    if (clientePlaceholder) {
+      var clienteCard = self._buildKpiCard('kpi-cliente', 'Tempo Médio Aguardando Cliente', clienteHours);
+      var tempDiv2 = document.createElement('div');
+      tempDiv2.innerHTML = clienteCard;
+      clientePlaceholder.parentNode.replaceChild(tempDiv2.firstChild, clientePlaceholder);
+    }
+  }
+};
+</script>

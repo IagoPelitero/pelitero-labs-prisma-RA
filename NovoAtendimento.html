@@ -1,0 +1,908 @@
+<script>
+Pages.novoAtendimento = {
+  state: {
+    atendimentoId: null,
+    atendimento: null,
+    timeline: [],
+    categoriasFiltradas: [],
+    slaCalculado: null,
+    salvando: false
+  },
+
+  render: function(atendimentoId) {
+    var self = this;
+    self.state.atendimentoId = atendimentoId || null;
+    self.state.atendimento = null;
+    self.state.timeline = [];
+    self.state.categoriasFiltradas = [];
+    self.state.slaCalculado = null;
+    self.state.salvando = false;
+
+    var container = document.getElementById('content-area') || document.querySelector('.content-area');
+    if (!container) return;
+
+    if (atendimentoId) {
+      Components.showLoading('Carregando atendimento...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          Components.hideLoading();
+          if (result && result.atendimento) {
+            self.state.atendimento = result.atendimento;
+            self.state.timeline = result.timeline || [];
+            self._renderForm(container);
+          } else {
+            Components.toast('Atendimento não encontrado.', 'danger');
+            App.navigateTo('atendimentos');
+          }
+        })
+        .withFailureHandler(function(err) {
+          Components.hideLoading();
+          Components.toast('Erro ao carregar atendimento: ' + err.message, 'danger');
+          App.navigateTo('atendimentos');
+        })
+        .getAtendimento(atendimentoId);
+    } else {
+      self._renderForm(container);
+    }
+  },
+
+  _renderForm: function(container) {
+    var self = this;
+    var isEdit = !!self.state.atendimentoId;
+    var atd = self.state.atendimento || {};
+    var dd = App.dropdownData || {};
+
+    var hoje = new Date().toISOString().split('T')[0];
+    var dataAbertura = atd.dataAbertura ? self._formatDateForInput(atd.dataAbertura) : hoje;
+    var dataPrevista = atd.dataPrevista ? self._formatDateForInput(atd.dataPrevista) : '';
+    var slaHoras = atd.slaHoras || '';
+
+    var titulo = isEdit ? 'Editar Atendimento #' + self.state.atendimentoId : 'Novo Atendimento';
+
+    var html = '';
+    html += '<div class="page-header">';
+    html += '  <h1 class="page-title">' + titulo + '</h1>';
+    html += '</div>';
+
+    html += '<div class="card">';
+    html += '  <form id="form-atendimento" autocomplete="off">';
+
+    // Linha 1: Número RA + Cliente
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-ra">Número RA <span style="color:var(--danger)">*</span></label>';
+    html += '      <input type="text" id="campo-ra" class="form-control" placeholder="Digite o número do RA" value="' + self._escape(atd.numeroRA || '') + '" required>';
+    html += '      <small id="ra-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-cliente">Cliente <span style="color:var(--danger)">*</span></label>';
+    html += '      <input type="text" id="campo-cliente" class="form-control" placeholder="Nome do cliente" value="' + self._escape(atd.cliente || '') + '" required>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 2: CPF + Produto
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-cpf">CPF</label>';
+    html += '      <input type="text" id="campo-cpf" class="form-control" placeholder="000.000.000-00" value="' + self._escape(atd.cpf || '') + '" maxlength="14">';
+    html += '      <small id="cpf-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-produto">Produto <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-produto" class="form-control" required>';
+    html += '        <option value="">Selecione o produto</option>';
+    if (dd.produtos) {
+      dd.produtos.forEach(function(p) {
+        var sel = (atd.produto === p) ? ' selected' : '';
+        html += '        <option value="' + self._escape(p) + '"' + sel + '>' + self._escape(p) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 3: Categoria + Canal
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-categoria">Categoria <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-categoria" class="form-control" required>';
+    html += '        <option value="">Selecione a categoria</option>';
+    if (dd.categorias && atd.produto) {
+      var cats = self._filtrarCategorias(atd.produto, dd.categorias);
+      cats.forEach(function(c) {
+        var sel = (atd.categoria === c) ? ' selected' : '';
+        html += '        <option value="' + self._escape(c) + '"' + sel + '>' + self._escape(c) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-canal">Canal <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-canal" class="form-control" required>';
+    html += '        <option value="">Selecione o canal</option>';
+    if (dd.canais) {
+      dd.canais.forEach(function(c) {
+        var sel = (atd.canal === c) ? ' selected' : '';
+        html += '        <option value="' + self._escape(c) + '"' + sel + '>' + self._escape(c) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 4: Tipo de atendimento
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-tipo-atendimento">Tipo de Atendimento</label>';
+    html += '      <select id="campo-tipo-atendimento" class="form-control">';
+    html += '        <option value="">Selecione o tipo</option>';
+    if (dd.tiposAtendimento) {
+      dd.tiposAtendimento.forEach(function(t) {
+        var selectedType = (atd.tipoAtendimento === t || (!isEdit && !atd.tipoAtendimento && t === 'Reclamação')) ? ' selected' : '';
+        html += '        <option value="' + self._escape(t) + '"' + selectedType + '>' + self._escape(t) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group"></div>';
+    html += '  </div>';
+
+    // Linha 5: Responsável + Prioridade
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-responsavel">Responsável <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-responsavel" class="form-control" required>';
+    html += '        <option value="">Selecione o responsável</option>';
+    if (dd.responsaveis) {
+      dd.responsaveis.forEach(function(r) {
+        var sel = (atd.responsavel === r) ? ' selected' : '';
+        html += '        <option value="' + self._escape(r) + '"' + sel + '>' + self._escape(r) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-prioridade">Prioridade <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-prioridade" class="form-control" required>';
+    html += '        <option value="">Selecione a prioridade</option>';
+    if (dd.prioridades) {
+      dd.prioridades.forEach(function(p) {
+        var sel = (atd.prioridade === p) ? ' selected' : '';
+        html += '        <option value="' + self._escape(p) + '"' + sel + '>' + self._escape(p) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 6: Status + Motivo da Pendência
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-status">Status <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-status" class="form-control" required>';
+    if (dd.status) {
+      if (isEdit) {
+        dd.status.forEach(function(s) {
+          var sel = (atd.status === s) ? ' selected' : '';
+          html += '        <option value="' + self._escape(s) + '"' + sel + '>' + self._escape(s) + '</option>';
+        });
+      } else {
+        var statusInicial = dd.status[0] || 'Aberto';
+        html += '        <option value="' + self._escape(statusInicial) + '" selected>' + self._escape(statusInicial) + '</option>';
+      }
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group" id="grupo-motivo-pendencia" style="' + (self._isStatusAguardando(atd.status) ? '' : 'display:none;') + '">';
+    html += '      <label class="form-label" for="campo-motivo-pendencia">Motivo da Pendência <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-motivo-pendencia" class="form-control">';
+    html += '        <option value="">Selecione o motivo</option>';
+    if (dd.motivosPendencia) {
+      dd.motivosPendencia.forEach(function(m) {
+        var sel = (atd.motivoPendencia === m) ? ' selected' : '';
+        html += '        <option value="' + self._escape(m) + '"' + sel + '>' + self._escape(m) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 6: Descrição
+    html += '  <div class="form-group">';
+    html += '    <label class="form-label" for="campo-descricao">Descrição <span style="color:var(--danger)">*</span></label>';
+    html += '    <textarea id="campo-descricao" class="form-control" rows="4" placeholder="Descreva o atendimento detalhadamente" required>' + self._escape(atd.descricao || '') + '</textarea>';
+    html += '  </div>';
+
+    // Linha 7: Observações
+    html += '  <div class="form-group">';
+    html += '    <label class="form-label" for="campo-observacoes">Observações</label>';
+    html += '    <textarea id="campo-observacoes" class="form-control" rows="3" placeholder="Observações adicionais (opcional)">' + self._escape(atd.observacoes || '') + '</textarea>';
+    html += '  </div>';
+
+    // Linha 8: Data Abertura + Data Prevista
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-data-abertura">Data de Abertura</label>';
+    html += '      <input type="date" id="campo-data-abertura" class="form-control" value="' + dataAbertura + '">';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-data-prevista">Data Prevista</label>';
+    html += '      <input type="date" id="campo-data-prevista" class="form-control" value="' + dataPrevista + '">';
+    html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Calculada automaticamente pelo SLA. Pode ser ajustada manualmente.</small>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 9: SLA em Horas
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-sla-horas">SLA em Horas</label>';
+    html += '      <input type="number" id="campo-sla-horas" class="form-control" placeholder="Calculado automaticamente" value="' + self._escape(String(slaHoras)) + '" min="1">';
+    html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Calculado ao selecionar Produto, Categoria e Canal.</small>';
+    html += '    </div>';
+    html += '    <div class="form-group"></div>';
+    html += '  </div>';
+
+    // Botões de ação
+    html += '  <div class="form-actions">';
+    html += '    <button type="button" id="btn-salvar-atendimento" class="btn btn-primary">💾 Salvar</button>';
+    if (isEdit) {
+      html += '    <button type="button" id="btn-cancelar-atendimento" class="btn btn-secondary">Cancelar</button>';
+      html += '    <button type="button" id="btn-excluir-atendimento" class="btn btn-danger" style="margin-left:auto;">🗑 Excluir Atendimento</button>';
+    } else {
+      html += '    <button type="button" id="btn-limpar-atendimento" class="btn btn-secondary">Limpar</button>';
+    }
+    html += '  </div>';
+
+    html += '  </form>';
+    html += '</div>';
+
+    // Seção de Adicionar Observação (somente edição)
+    if (isEdit) {
+      html += '<div class="card" style="margin-top:20px;">';
+      html += '  <h3 style="margin-bottom:16px;font-size:16px;font-weight:600;">Adicionar Observação</h3>';
+      html += '  <div class="form-group">';
+      html += '    <textarea id="campo-nova-observacao" class="form-control" rows="3" placeholder="Digite uma observação para adicionar ao histórico..."></textarea>';
+      html += '  </div>';
+      html += '  <div class="form-actions">';
+      html += '    <button type="button" id="btn-adicionar-observacao" class="btn btn-primary btn-sm">📝 Adicionar Observação</button>';
+      html += '  </div>';
+      html += '</div>';
+    }
+
+    // Timeline (somente edição)
+    if (isEdit && self.state.timeline && self.state.timeline.length > 0) {
+      html += '<div class="card" style="margin-top:20px;">';
+      html += '  <h3 style="margin-bottom:16px;font-size:16px;font-weight:600;">Histórico do Atendimento</h3>';
+      html += '  <div id="timeline-container">';
+      html += Components.timeline(self.state.timeline);
+      html += '  </div>';
+      html += '</div>';
+    } else if (isEdit) {
+      html += '<div class="card" style="margin-top:20px;">';
+      html += '  <h3 style="margin-bottom:16px;font-size:16px;font-weight:600;">Histórico do Atendimento</h3>';
+      html += Components.emptyState('📋', 'Nenhum registro no histórico.');
+      html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    // Vincular eventos
+    self._bindEvents();
+
+    // Se editando e tem produto, filtrar categorias
+    if (isEdit && atd.produto) {
+      self._atualizarCategorias(atd.produto, atd.categoria);
+    }
+  },
+
+  _bindEvents: function() {
+    var self = this;
+    var isEdit = !!self.state.atendimentoId;
+
+    // Máscara CPF
+    var campoCpf = document.getElementById('campo-cpf');
+    if (campoCpf) {
+      campoCpf.addEventListener('input', function() {
+        App.maskCPF(this);
+      });
+      campoCpf.addEventListener('blur', function() {
+        self._validarCPF(this.value);
+      });
+    }
+
+    // Verificar duplicidade do RA
+    var campoRA = document.getElementById('campo-ra');
+    if (campoRA) {
+      campoRA.addEventListener('blur', function() {
+        self._verificarDuplicidadeRA(this.value);
+      });
+    }
+
+    // Produto muda → atualizar categorias e SLA
+    var campoProduto = document.getElementById('campo-produto');
+    if (campoProduto) {
+      campoProduto.addEventListener('change', function() {
+        self._atualizarCategorias(this.value, null);
+        self._recalcularSLA();
+      });
+    }
+
+    // Categoria muda → recalcular SLA
+    var campoCategoria = document.getElementById('campo-categoria');
+    if (campoCategoria) {
+      campoCategoria.addEventListener('change', function() {
+        self._recalcularSLA();
+      });
+    }
+
+    // Canal muda → recalcular SLA
+    var campoCanal = document.getElementById('campo-canal');
+    if (campoCanal) {
+      campoCanal.addEventListener('change', function() {
+        self._recalcularSLA();
+      });
+    }
+
+    var campoTipo = document.getElementById('campo-tipo-atendimento');
+    if (campoTipo) {
+      campoTipo.addEventListener('change', function() {
+        self._recalcularSLA();
+      });
+    }
+
+    var campoPrioridade = document.getElementById('campo-prioridade');
+    if (campoPrioridade) {
+      campoPrioridade.addEventListener('change', function() {
+        self._recalcularSLA();
+      });
+    }
+
+    var campoSlaManual = document.getElementById('campo-sla-horas');
+    if (campoSlaManual) {
+      campoSlaManual.addEventListener('change', function() {
+        self._recalcularVencimentoManual();
+      });
+    }
+
+    // Status muda → mostrar/esconder motivo pendência
+    var campoStatus = document.getElementById('campo-status');
+    if (campoStatus) {
+      campoStatus.addEventListener('change', function() {
+        var grupoMotivo = document.getElementById('grupo-motivo-pendencia');
+        if (grupoMotivo) {
+          if (self._isStatusAguardando(this.value)) {
+            grupoMotivo.style.display = '';
+          } else {
+            grupoMotivo.style.display = 'none';
+            var campoMotivo = document.getElementById('campo-motivo-pendencia');
+            if (campoMotivo) campoMotivo.value = '';
+          }
+        }
+      });
+    }
+
+    // Botão Salvar
+    var btnSalvar = document.getElementById('btn-salvar-atendimento');
+    if (btnSalvar) {
+      btnSalvar.addEventListener('click', function() {
+        self._salvar();
+      });
+    }
+
+    // Botão Limpar (novo)
+    var btnLimpar = document.getElementById('btn-limpar-atendimento');
+    if (btnLimpar) {
+      btnLimpar.addEventListener('click', function() {
+        self._limparFormulario();
+      });
+    }
+
+    // Botão Cancelar (edição)
+    var btnCancelar = document.getElementById('btn-cancelar-atendimento');
+    if (btnCancelar) {
+      btnCancelar.addEventListener('click', function() {
+        App.navigateTo('atendimentos');
+      });
+    }
+
+    // Botão Excluir (edição)
+    var btnExcluir = document.getElementById('btn-excluir-atendimento');
+    if (btnExcluir) {
+      btnExcluir.addEventListener('click', function() {
+        Components.confirm('Tem certeza que deseja excluir este atendimento? Esta ação não poderá ser desfeita.', function() {
+          self._excluir();
+        });
+      });
+    }
+
+    // Botão Adicionar Observação
+    var btnObservacao = document.getElementById('btn-adicionar-observacao');
+    if (btnObservacao) {
+      btnObservacao.addEventListener('click', function() {
+        self._adicionarObservacao();
+      });
+    }
+  },
+
+  _atualizarCategorias: function(produto, categoriaSelecionada) {
+    var dd = App.dropdownData || {};
+    var select = document.getElementById('campo-categoria');
+    if (!select) return;
+
+    var categorias = this._filtrarCategorias(produto, dd.categorias);
+    this.state.categoriasFiltradas = categorias;
+
+    var html = '<option value="">Selecione a categoria</option>';
+    categorias.forEach(function(c) {
+      var sel = (categoriaSelecionada === c) ? ' selected' : '';
+      html += '<option value="' + Pages.novoAtendimento._escape(c) + '"' + sel + '>' + Pages.novoAtendimento._escape(c) + '</option>';
+    });
+    select.innerHTML = html;
+  },
+
+  _filtrarCategorias: function(produto, categorias) {
+    if (!categorias || !produto) return categorias || [];
+    var categoryMap = (App.dropdownData || {}).categoriasPorProduto || {};
+    if (categoryMap[produto]) {
+      return categoryMap[produto].concat(categoryMap.Geral || []);
+    }
+    if (Array.isArray(categorias)) return categorias;
+    if (typeof categorias === 'object' && categorias[produto]) {
+      return categorias[produto];
+    }
+    return Object.values(categorias).reduce(function(acc, arr) {
+      return acc.concat(arr);
+    }, []);
+  },
+
+  _recalcularSLA: function() {
+    var produto = document.getElementById('campo-produto');
+    var categoria = document.getElementById('campo-categoria');
+    var canal = document.getElementById('campo-canal');
+    var tipo = document.getElementById('campo-tipo-atendimento');
+    var prioridade = document.getElementById('campo-prioridade');
+
+    if (!produto || !categoria || !canal) return;
+    if (!produto.value || !categoria.value || !canal.value) return;
+
+    var self = this;
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result) {
+          self.state.slaCalculado = result;
+          var campoSla = document.getElementById('campo-sla-horas');
+          var campoDataPrevista = document.getElementById('campo-data-prevista');
+          if (campoSla && result.slaHoras) {
+            campoSla.value = result.slaHoras;
+          }
+          if (campoDataPrevista && result.dataVencimento) {
+            var dv = self._formatDateForInput(result.dataVencimento);
+            if (dv) campoDataPrevista.value = dv;
+          }
+          Components.toast('SLA calculado: ' + result.slaHoras + ' horas', 'success', 3000);
+        }
+      })
+      .withFailureHandler(function(err) {
+        console.error('Erro ao calcular SLA:', err);
+      })
+      .calcularSLA(
+        produto.value,
+        categoria.value,
+        canal.value,
+        tipo ? tipo.value : '',
+        prioridade ? prioridade.value : ''
+      );
+  },
+
+  _verificarDuplicidadeRA: function(valor) {
+    if (!valor || !valor.trim()) return;
+    var self = this;
+    var feedback = document.getElementById('ra-feedback');
+
+    google.script.run
+      .withSuccessHandler(function(resultados) {
+        if (!feedback) return;
+        if (resultados && resultados.length > 0) {
+          var isDuplicata = resultados.some(function(r) {
+            if (self.state.atendimentoId && r.id === self.state.atendimentoId) return false;
+            return r.numeroRA === valor.trim();
+          });
+          if (isDuplicata) {
+            feedback.style.display = 'block';
+            feedback.style.color = 'var(--warning)';
+            feedback.textContent = '⚠️ Já existe um atendimento com este número RA.';
+          } else {
+            feedback.style.display = 'none';
+            feedback.textContent = '';
+          }
+        } else {
+          feedback.style.display = 'none';
+          feedback.textContent = '';
+        }
+      })
+      .withFailureHandler(function() {
+        if (feedback) {
+          feedback.style.display = 'none';
+          feedback.textContent = '';
+        }
+      })
+      .pesquisarAtendimentos(valor.trim());
+  },
+
+  _recalcularVencimentoManual: function() {
+    var abertura = document.getElementById('campo-data-abertura');
+    var horas = document.getElementById('campo-sla-horas');
+    var prevista = document.getElementById('campo-data-prevista');
+    if (!abertura || !horas || !prevista || !abertura.value || !horas.value) return;
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result && result.dataVencimento) {
+          prevista.value = Pages.novoAtendimento._formatDateForInput(result.dataVencimento);
+        }
+      })
+      .withFailureHandler(function(error) {
+        Components.toast('Não foi possível recalcular o vencimento: ' + error.message, 'warning');
+      })
+      .calcularVencimentoSLA(abertura.value, horas.value);
+  },
+
+  _validarCPF: function(cpf) {
+    var feedback = document.getElementById('cpf-feedback');
+    if (!feedback) return;
+    if (!cpf || !cpf.trim()) {
+      feedback.style.display = 'none';
+      return;
+    }
+
+    var cpfLimpo = cpf.replace(/\D/g, '');
+
+    if (cpfLimpo.length !== 11) {
+      feedback.style.display = 'block';
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = '❌ CPF deve conter 11 dígitos.';
+      return;
+    }
+
+    // Verificar CPFs com todos dígitos iguais
+    if (/^(\d)\1{10}$/.test(cpfLimpo)) {
+      feedback.style.display = 'block';
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = '❌ CPF inválido.';
+      return;
+    }
+
+    // Validação dos dígitos verificadores
+    var soma = 0;
+    for (var i = 0; i < 9; i++) {
+      soma += parseInt(cpfLimpo.charAt(i)) * (10 - i);
+    }
+    var resto = (soma * 10) % 11;
+    if (resto === 10) resto = 0;
+    if (resto !== parseInt(cpfLimpo.charAt(9))) {
+      feedback.style.display = 'block';
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = '❌ CPF inválido.';
+      return;
+    }
+
+    soma = 0;
+    for (var j = 0; j < 10; j++) {
+      soma += parseInt(cpfLimpo.charAt(j)) * (11 - j);
+    }
+    resto = (soma * 10) % 11;
+    if (resto === 10) resto = 0;
+    if (resto !== parseInt(cpfLimpo.charAt(10))) {
+      feedback.style.display = 'block';
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = '❌ CPF inválido.';
+      return;
+    }
+
+    feedback.style.display = 'block';
+    feedback.style.color = 'var(--success)';
+    feedback.textContent = '✅ CPF válido.';
+  },
+
+  _isStatusAguardando: function(status) {
+    if (!status) return false;
+    return status.toLowerCase().indexOf('aguardando') !== -1;
+  },
+
+  _validarFormulario: function() {
+    var erros = [];
+
+    var ra = document.getElementById('campo-ra');
+    var cliente = document.getElementById('campo-cliente');
+    var produto = document.getElementById('campo-produto');
+    var categoria = document.getElementById('campo-categoria');
+    var canal = document.getElementById('campo-canal');
+    var responsavel = document.getElementById('campo-responsavel');
+    var prioridade = document.getElementById('campo-prioridade');
+    var status = document.getElementById('campo-status');
+    var descricao = document.getElementById('campo-descricao');
+    var motivoPendencia = document.getElementById('campo-motivo-pendencia');
+
+    if (!ra || !ra.value.trim()) erros.push('Número RA é obrigatório.');
+    if (!cliente || !cliente.value.trim()) erros.push('Cliente é obrigatório.');
+    if (!produto || !produto.value) erros.push('Produto é obrigatório.');
+    if (!categoria || !categoria.value) erros.push('Categoria é obrigatória.');
+    if (!canal || !canal.value) erros.push('Canal é obrigatório.');
+    if (!responsavel || !responsavel.value) erros.push('Responsável é obrigatório.');
+    if (!prioridade || !prioridade.value) erros.push('Prioridade é obrigatória.');
+    if (!status || !status.value) erros.push('Status é obrigatório.');
+    if (!descricao || !descricao.value.trim()) erros.push('Descrição é obrigatória.');
+
+    if (status && this._isStatusAguardando(status.value)) {
+      if (!motivoPendencia || !motivoPendencia.value) {
+        erros.push('Motivo da Pendência é obrigatório quando o status contém "Aguardando".');
+      }
+    }
+
+    // Validar CPF se preenchido
+    var cpf = document.getElementById('campo-cpf');
+    if (cpf && cpf.value.trim()) {
+      var cpfLimpo = cpf.value.replace(/\D/g, '');
+      if (cpfLimpo.length !== 11) {
+        erros.push('CPF informado é inválido.');
+      }
+    }
+
+    return erros;
+  },
+
+  _coletarDados: function() {
+    return {
+      numeroRA: (document.getElementById('campo-ra').value || '').trim(),
+      cliente: (document.getElementById('campo-cliente').value || '').trim(),
+      cpf: (document.getElementById('campo-cpf').value || '').trim(),
+      produto: document.getElementById('campo-produto').value || '',
+      categoria: document.getElementById('campo-categoria').value || '',
+      canal: document.getElementById('campo-canal').value || '',
+      tipoAtendimento: document.getElementById('campo-tipo-atendimento').value || '',
+      responsavel: document.getElementById('campo-responsavel').value || '',
+      prioridade: document.getElementById('campo-prioridade').value || '',
+      status: document.getElementById('campo-status').value || '',
+      descricao: (document.getElementById('campo-descricao').value || '').trim(),
+      observacoes: (document.getElementById('campo-observacoes').value || '').trim(),
+      dataAbertura: document.getElementById('campo-data-abertura').value || '',
+      dataPrevista: document.getElementById('campo-data-prevista').value || '',
+      slaHoras: document.getElementById('campo-sla-horas').value || '',
+      motivoPendencia: document.getElementById('campo-motivo-pendencia').value || ''
+    };
+  },
+
+  _salvar: function() {
+    var self = this;
+    if (self.state.salvando) return;
+
+    var erros = self._validarFormulario();
+    if (erros.length > 0) {
+      Components.toast(erros.join('\n'), 'danger', 5000);
+      return;
+    }
+
+    var dados = self._coletarDados();
+    self.state.salvando = true;
+
+    var btnSalvar = document.getElementById('btn-salvar-atendimento');
+    if (btnSalvar) {
+      btnSalvar.disabled = true;
+      btnSalvar.textContent = '⏳ Salvando...';
+    }
+
+    Components.showLoading('Salvando atendimento...');
+
+    if (self.state.atendimentoId) {
+      // Edição: solicitar justificativa
+      var justificativa = '';
+      Components.modal({
+        title: 'Justificativa da Alteração',
+        body: '<div class="form-group"><label class="form-label">Descreva o motivo da alteração:</label><textarea id="campo-justificativa" class="form-control" rows="3" placeholder="Informe o motivo da edição..."></textarea></div>',
+        confirmText: 'Confirmar',
+        cancelText: 'Cancelar',
+        type: 'default',
+        onConfirm: function() {
+          var campoJust = document.getElementById('campo-justificativa');
+          justificativa = campoJust ? campoJust.value.trim() : '';
+          if (!justificativa) {
+            Components.toast('Justificativa é obrigatória para alterações.', 'warning');
+            self.state.salvando = false;
+            if (btnSalvar) {
+              btnSalvar.disabled = false;
+              btnSalvar.textContent = '💾 Salvar';
+            }
+            Components.hideLoading();
+            return;
+          }
+          google.script.run
+            .withSuccessHandler(function(result) {
+              Components.hideLoading();
+              self.state.salvando = false;
+              if (btnSalvar) {
+                btnSalvar.disabled = false;
+                btnSalvar.textContent = '💾 Salvar';
+              }
+              if (result && result.success) {
+                Components.toast('Atendimento atualizado com sucesso!', 'success');
+                App.navigateTo('atendimentos');
+              } else {
+                Components.toast(result.message || 'Erro ao atualizar atendimento.', 'danger');
+              }
+            })
+            .withFailureHandler(function(err) {
+              Components.hideLoading();
+              self.state.salvando = false;
+              if (btnSalvar) {
+                btnSalvar.disabled = false;
+                btnSalvar.textContent = '💾 Salvar';
+              }
+              Components.toast('Erro ao atualizar: ' + err.message, 'danger');
+            })
+            .atualizarAtendimento(self.state.atendimentoId, dados, justificativa);
+        },
+        onCancel: function() {
+          self.state.salvando = false;
+          if (btnSalvar) {
+            btnSalvar.disabled = false;
+            btnSalvar.textContent = '💾 Salvar';
+          }
+          Components.hideLoading();
+        }
+      });
+    } else {
+      // Novo atendimento
+      google.script.run
+        .withSuccessHandler(function(result) {
+          Components.hideLoading();
+          self.state.salvando = false;
+          if (btnSalvar) {
+            btnSalvar.disabled = false;
+            btnSalvar.textContent = '💾 Salvar';
+          }
+          if (result && result.success) {
+            Components.toast('Atendimento #' + result.id + ' criado com sucesso!', 'success');
+            App.navigateTo('atendimentos');
+          } else {
+            Components.toast(result.message || 'Erro ao salvar atendimento.', 'danger');
+          }
+        })
+        .withFailureHandler(function(err) {
+          Components.hideLoading();
+          self.state.salvando = false;
+          if (btnSalvar) {
+            btnSalvar.disabled = false;
+            btnSalvar.textContent = '💾 Salvar';
+          }
+          Components.toast('Erro ao salvar: ' + err.message, 'danger');
+        })
+        .salvarAtendimento(dados);
+    }
+  },
+
+  _excluir: function() {
+    var self = this;
+    Components.showLoading('Excluindo atendimento...');
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (result && result.success) {
+          Components.toast('Atendimento excluído com sucesso.', 'success');
+          App.navigateTo('atendimentos');
+        } else {
+          Components.toast(result.message || 'Erro ao excluir atendimento.', 'danger');
+        }
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao excluir: ' + err.message, 'danger');
+      })
+      .excluirAtendimento(self.state.atendimentoId);
+  },
+
+  _adicionarObservacao: function() {
+    var self = this;
+    var campo = document.getElementById('campo-nova-observacao');
+    if (!campo || !campo.value.trim()) {
+      Components.toast('Digite uma observação antes de adicionar.', 'warning');
+      return;
+    }
+
+    var texto = campo.value.trim();
+    Components.showLoading('Adicionando observação...');
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (result && result.success) {
+          Components.toast('Observação adicionada com sucesso!', 'success');
+          campo.value = '';
+          // Recarregar timeline
+          self._recarregarTimeline();
+        } else {
+          Components.toast('Erro ao adicionar observação.', 'danger');
+        }
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao adicionar observação: ' + err.message, 'danger');
+      })
+      .adicionarObservacao(self.state.atendimentoId, texto);
+  },
+
+  _recarregarTimeline: function() {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(timeline) {
+        self.state.timeline = timeline || [];
+        var container = document.getElementById('timeline-container');
+        if (container) {
+          if (self.state.timeline.length > 0) {
+            container.innerHTML = Components.timeline(self.state.timeline);
+          } else {
+            container.innerHTML = Components.emptyState('📋', 'Nenhum registro no histórico.');
+          }
+        }
+      })
+      .withFailureHandler(function(err) {
+        console.error('Erro ao recarregar timeline:', err);
+      })
+      .getTimeline(self.state.atendimentoId);
+  },
+
+  _limparFormulario: function() {
+    var form = document.getElementById('form-atendimento');
+    if (form) form.reset();
+
+    // Restaurar data de abertura para hoje
+    var campoData = document.getElementById('campo-data-abertura');
+    if (campoData) {
+      campoData.value = new Date().toISOString().split('T')[0];
+    }
+
+    // Limpar campos calculados
+    var campoSla = document.getElementById('campo-sla-horas');
+    if (campoSla) campoSla.value = '';
+    var campoDataPrev = document.getElementById('campo-data-prevista');
+    if (campoDataPrev) campoDataPrev.value = '';
+
+    // Esconder motivo pendência
+    var grupoMotivo = document.getElementById('grupo-motivo-pendencia');
+    if (grupoMotivo) grupoMotivo.style.display = 'none';
+
+    // Limpar feedbacks
+    var raFeedback = document.getElementById('ra-feedback');
+    if (raFeedback) { raFeedback.style.display = 'none'; raFeedback.textContent = ''; }
+    var cpfFeedback = document.getElementById('cpf-feedback');
+    if (cpfFeedback) { cpfFeedback.style.display = 'none'; cpfFeedback.textContent = ''; }
+
+    // Limpar categorias
+    var catSelect = document.getElementById('campo-categoria');
+    if (catSelect) catSelect.innerHTML = '<option value="">Selecione a categoria</option>';
+
+    Components.toast('Formulário limpo.', 'success', 2000);
+  },
+
+  _formatDateForInput: function(dateValue) {
+    if (!dateValue) return '';
+    try {
+      var d = new Date(dateValue);
+      if (isNaN(d.getTime())) return '';
+      var year = d.getFullYear();
+      var month = ('0' + (d.getMonth() + 1)).slice(-2);
+      var day = ('0' + d.getDate()).slice(-2);
+      return year + '-' + month + '-' + day;
+    } catch (e) {
+      return '';
+    }
+  },
+
+  _escape: function(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+};
+</script>

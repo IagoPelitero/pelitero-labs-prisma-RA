@@ -1,0 +1,267 @@
+<script>
+var Pages = {};
+
+var App = {
+  currentPage: 'dashboard',
+  currentParams: {},
+  dropdownData: {},
+  user: {},
+  filters: {},
+  filterTimer: null,
+
+  init: function() {
+    this.bindShell();
+    this.startClock();
+    this.restoreSidebar();
+    Components.showLoading('Inicializando o Porto RA...');
+    this.reloadBootstrap(function() {
+      Components.hideLoading();
+      var initial = window.location.hash ? window.location.hash.replace('#', '') : 'dashboard';
+      if (!Pages[initial] && initial !== 'novoAtendimento') initial = 'dashboard';
+      App.navigateTo(initial, {}, true);
+    }, function(error) {
+      Components.hideLoading();
+      var container = document.getElementById('app');
+      container.innerHTML = Components.emptyState(
+        'error_outline',
+        'Não foi possível iniciar o sistema. ' + (error && error.message ? error.message : '')
+      );
+      Components.toast('Falha na inicialização do sistema.', 'error', 6000);
+    });
+  },
+
+  reloadBootstrap: function(onSuccess, onFailure) {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        App.user = result && result.user ? result.user : {};
+        App.dropdownData = result && result.dropdownData ? result.dropdownData : {};
+        App.populateGlobalFilters();
+        App.renderUser();
+        App.applyRoleVisibility();
+        if (typeof onSuccess === 'function') onSuccess(result);
+      })
+      .withFailureHandler(function(error) {
+        if (typeof onFailure === 'function') onFailure(error);
+        else Components.toast('Erro ao atualizar dados de apoio: ' + error.message, 'error');
+      })
+      .getBootstrapData();
+  },
+
+  bindShell: function() {
+    var sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+      sidebar.addEventListener('click', function(event) {
+        var item = event.target.closest('.sidebar-item');
+        if (!item || !item.getAttribute('data-page')) return;
+        App.navigateTo(item.getAttribute('data-page'));
+        App.closeMobileSidebar();
+      });
+    }
+
+    var filterBar = document.getElementById('global-filters');
+    if (filterBar) {
+      filterBar.addEventListener('change', function() {
+        App.filters = App.getFilters();
+        App.refreshForFilters();
+      });
+      filterBar.addEventListener('input', function(event) {
+        if (event.target.tagName !== 'INPUT' || event.target.type === 'date') return;
+        clearTimeout(App.filterTimer);
+        App.filterTimer = setTimeout(function() {
+          App.filters = App.getFilters();
+          App.refreshForFilters();
+        }, 450);
+      });
+    }
+
+    window.addEventListener('resize', function() {
+      if (window.innerWidth > 768) App.closeMobileSidebar();
+    });
+  },
+
+  navigateTo: function(page, params, replaceHash) {
+    var target = page || 'dashboard';
+    var options = params || {};
+    if (target === 'editar') {
+      target = 'novoAtendimento';
+      options = { id: options.id || options };
+    }
+    if (target === 'novo') target = 'novoAtendimento';
+    if (!Pages[target]) target = 'dashboard';
+
+    this.currentPage = target;
+    this.currentParams = options;
+    var hash = '#' + target;
+    if (replaceHash && window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', hash);
+    } else {
+      window.location.hash = hash;
+    }
+
+    document.querySelectorAll('.sidebar-item').forEach(function(item) {
+      item.classList.toggle('active', item.getAttribute('data-page') === target);
+    });
+
+    var container = document.getElementById('app');
+    container.innerHTML = '';
+    container.scrollTop = 0;
+
+    if (target === 'novoAtendimento') {
+      Pages.novoAtendimento.render(options.id || (typeof params === 'string' ? params : null));
+    } else {
+      Pages[target].render(container);
+    }
+  },
+
+  refreshCurrentPage: function() {
+    this.navigateTo(this.currentPage, this.currentParams, true);
+  },
+
+  refreshForFilters: function() {
+    if (['dashboard', 'atendimentos', 'indicadores', 'relatorios'].indexOf(this.currentPage) !== -1) {
+      this.refreshCurrentPage();
+    }
+  },
+
+  getFilters: function() {
+    var ids = {
+      dataInicio: 'filter-data-inicio',
+      dataFim: 'filter-data-fim',
+      analista: 'filter-analista',
+      produto: 'filter-produto',
+      categoria: 'filter-categoria',
+      status: 'filter-status',
+      prioridade: 'filter-prioridade',
+      canal: 'filter-canal',
+      numeroRA: 'filter-ra',
+      cliente: 'filter-cliente',
+      cpf: 'filter-cpf'
+    };
+    var result = {};
+    Object.keys(ids).forEach(function(key) {
+      var element = document.getElementById(ids[key]);
+      result[key] = element ? element.value.trim() : '';
+    });
+    return result;
+  },
+
+  clearFilters: function() {
+    document.querySelectorAll('#global-filters input, #global-filters select').forEach(function(element) {
+      element.value = '';
+    });
+    this.filters = {};
+    this.refreshForFilters();
+    Components.toast('Filtros limpos.', 'info', 2000);
+  },
+
+  populateGlobalFilters: function() {
+    var dd = this.dropdownData || {};
+    this.fillSelect('filter-analista', dd.responsaveis || [], 'Todos');
+    this.fillSelect('filter-produto', dd.produtos || [], 'Todos');
+    this.fillSelect('filter-categoria', dd.categorias || [], 'Todas');
+    this.fillSelect('filter-status', dd.status || [], 'Todos');
+    this.fillSelect('filter-prioridade', dd.prioridades || [], 'Todas');
+    this.fillSelect('filter-canal', dd.canais || [], 'Todos');
+  },
+
+  fillSelect: function(id, values, blankLabel) {
+    var select = document.getElementById(id);
+    if (!select) return;
+    var previous = select.value;
+    var html = '<option value="">' + blankLabel + '</option>';
+    (values || []).forEach(function(value) {
+      html += '<option value="' + App.escapeHtml(value) + '">' + App.escapeHtml(value) + '</option>';
+    });
+    select.innerHTML = html;
+    if (values.indexOf(previous) !== -1) select.value = previous;
+  },
+
+  renderUser: function() {
+    var name = document.getElementById('current-user-name');
+    var profile = document.getElementById('current-user-profile');
+    if (name) name.textContent = this.user.nome || 'Usuário';
+    if (profile) profile.textContent = this.user.perfil || 'Analista';
+  },
+
+  applyRoleVisibility: function() {
+    var profile = String(this.user.perfil || '').toLowerCase();
+    var allowed = ['supervisor', 'gestor', 'administrador', 'admin'].indexOf(profile) !== -1;
+    document.querySelectorAll('[data-supervisor-only]').forEach(function(element) {
+      element.style.display = allowed ? '' : 'none';
+    });
+    if (!allowed && this.currentPage === 'configuracoes') this.navigateTo('dashboard');
+  },
+
+  toggleSidebar: function() {
+    if (window.innerWidth <= 768) {
+      document.getElementById('sidebar').classList.toggle('mobile-open');
+      document.getElementById('sidebar-backdrop').classList.toggle('active');
+      return;
+    }
+    document.body.classList.toggle('sidebar-collapsed');
+    try {
+      localStorage.setItem('porto-ra-sidebar', document.body.classList.contains('sidebar-collapsed') ? 'collapsed' : 'open');
+    } catch (e) {}
+  },
+
+  restoreSidebar: function() {
+    try {
+      if (localStorage.getItem('porto-ra-sidebar') === 'collapsed') {
+        document.body.classList.add('sidebar-collapsed');
+      }
+    } catch (e) {}
+  },
+
+  closeMobileSidebar: function() {
+    var sidebar = document.getElementById('sidebar');
+    var backdrop = document.getElementById('sidebar-backdrop');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (backdrop) backdrop.classList.remove('active');
+  },
+
+  startClock: function() {
+    var update = function() {
+      var now = new Date();
+      var date = document.getElementById('header-date');
+      var time = document.getElementById('header-time');
+      if (date) date.textContent = now.toLocaleDateString('pt-BR');
+      if (time) time.textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    };
+    update();
+    setInterval(update, 30000);
+  },
+
+  maskCPF: function(input) {
+    var value = String(input.value || '').replace(/\D/g, '').slice(0, 11);
+    value = value.replace(/(\d{3})(\d)/, '$1.$2');
+    value = value.replace(/(\d{3})(\d)/, '$1.$2');
+    value = value.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    input.value = value;
+  },
+
+  formatNumber: function(value) {
+    return Number(value || 0).toLocaleString('pt-BR');
+  },
+
+  timeAgo: function(value) {
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return '';
+    var seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return 'agora';
+    if (seconds < 3600) return 'há ' + Math.floor(seconds / 60) + ' min';
+    if (seconds < 86400) return 'há ' + Math.floor(seconds / 3600) + 'h';
+    if (seconds < 2592000) return 'há ' + Math.floor(seconds / 86400) + ' dia(s)';
+    return date.toLocaleDateString('pt-BR');
+  },
+
+  escapeHtml: function(value) {
+    var div = document.createElement('div');
+    div.textContent = value === undefined || value === null ? '' : String(value);
+    return div.innerHTML;
+  }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+  App.init();
+});
+</script>

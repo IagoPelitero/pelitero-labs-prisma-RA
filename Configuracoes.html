@@ -1,0 +1,330 @@
+<script>
+Pages.configuracoes = {
+  data: {},
+  active: 'produtos',
+  metadata: {
+    produtos: {
+      label: 'Produtos', icon: 'inventory_2',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Descricao', label: 'Descrição', type: 'textarea' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    categorias: {
+      label: 'Categorias', icon: 'category',
+      fields: [
+        { key: 'ProdutoId', label: 'Produto', type: 'reference', source: 'produtos', allowBlank: true },
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Descricao', label: 'Descrição', type: 'textarea' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    status: {
+      label: 'Status', icon: 'swap_horiz',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Tipo', label: 'Tipo', type: 'select', options: ['Inicial', 'Espera', 'Intermediario', 'Final'], required: true },
+        { key: 'Cor', label: 'Cor', type: 'color', defaultValue: '#0046C0' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    prioridades: {
+      label: 'Prioridades', icon: 'priority_high',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Cor', label: 'Cor', type: 'color', defaultValue: '#0046C0' },
+        { key: 'SLAMultiplicador', label: 'Multiplicador do SLA', type: 'number', step: '0.05', defaultValue: 1 },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    canais: {
+      label: 'Canais', icon: 'hub',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Icone', label: 'Ícone' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    tiposAtendimento: {
+      label: 'Tipos de atendimento', icon: 'task',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Descricao', label: 'Descrição', type: 'textarea' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    slas: {
+      label: 'Regras de SLA', icon: 'timer',
+      fields: [
+        { key: 'ProdutoId', label: 'Produto', type: 'reference', source: 'produtos', allowBlank: true },
+        { key: 'CategoriaId', label: 'Categoria', type: 'reference', source: 'categorias', allowBlank: true },
+        { key: 'TipoAtendimentoId', label: 'Tipo de atendimento', type: 'reference', source: 'tiposAtendimento', allowBlank: true },
+        { key: 'CanalId', label: 'Canal', type: 'reference', source: 'canais', allowBlank: true },
+        { key: 'Horas', label: 'Horas úteis', type: 'number', required: true },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true }
+      ]
+    },
+    motivosPendencia: {
+      label: 'Motivos de pendência', icon: 'hourglass_empty',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Descricao', label: 'Descrição', type: 'textarea' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
+    usuarios: {
+      label: 'Usuários e responsáveis', icon: 'group',
+      fields: [
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Email', label: 'E-mail', type: 'email' },
+        { key: 'Perfil', label: 'Perfil', type: 'select', options: ['Analista', 'Supervisor'], required: true },
+        { key: 'Equipe', label: 'Equipe' },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true }
+      ]
+    },
+    configuracoes: {
+      label: 'Parâmetros gerais', icon: 'tune',
+      fields: [
+        { key: 'Chave', label: 'Chave', required: true },
+        { key: 'Valor', label: 'Valor', required: true },
+        { key: 'Descricao', label: 'Descrição', type: 'textarea' }
+      ]
+    }
+  },
+
+  render: function(container) {
+    container = container || document.getElementById('app');
+    container.innerHTML =
+      '<div class="page-header"><div><h1 class="page-title">Configurações</h1>' +
+      '<p class="page-subtitle">Administração operacional sem alteração de código.</p></div></div>' +
+      '<div class="card">' + Components.emptyState('settings', 'Carregando configurações...') + '</div>';
+    this.load();
+  },
+
+  load: function() {
+    var self = this;
+    Components.showLoading('Carregando configurações...');
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        self.data = result && result.entities ? result.entities : {};
+        self.renderShell();
+      })
+      .withFailureHandler(function(error) {
+        Components.hideLoading();
+        Components.toast('Não foi possível carregar as configurações: ' + error.message, 'error');
+        App.navigateTo('dashboard');
+      })
+      .getConfiguracoes();
+  },
+
+  renderShell: function() {
+    var container = document.getElementById('app');
+    var html = '<div class="page-header"><div><h1 class="page-title">Configurações</h1>' +
+      '<p class="page-subtitle">Produtos, filas, SLAs, acessos e parâmetros operacionais.</p></div>' +
+      '<button class="btn btn-primary" onclick="Pages.configuracoes.openForm()">+ Novo registro</button></div>';
+    html += '<div class="config-layout"><aside class="config-nav">';
+    var self = this;
+    Object.keys(this.metadata).forEach(function(key) {
+      var meta = self.metadata[key];
+      html += '<button class="config-nav-item' + (self.active === key ? ' active' : '') +
+        '" onclick="Pages.configuracoes.switchEntity(\'' + key + '\')">' +
+        '<span class="material-icons">' + meta.icon + '</span><span>' + meta.label + '</span>' +
+        '<span class="config-count">' + ((self.data[key] || []).length) + '</span></button>';
+    });
+    html += '</aside><section class="card config-content"><div id="config-table"></div></section></div>';
+    container.innerHTML = html;
+    this.renderTable();
+  },
+
+  switchEntity: function(entity) {
+    this.active = entity;
+    this.renderShell();
+  },
+
+  renderTable: function() {
+    var container = document.getElementById('config-table');
+    var meta = this.metadata[this.active];
+    var rows = this.data[this.active] || [];
+    var html = '<div class="card-header"><div class="card-title"><span class="material-icons">' +
+      meta.icon + '</span>' + meta.label + '</div><span class="badge">' + rows.length + ' registro(s)</span></div>';
+
+    if (!rows.length) {
+      html += Components.emptyState('inbox', 'Nenhum registro cadastrado.');
+      container.innerHTML = html;
+      return;
+    }
+
+    html += '<div class="table-container"><table class="data-table"><thead><tr>';
+    meta.fields.forEach(function(field) {
+      html += '<th>' + field.label + '</th>';
+    });
+    html += '<th style="width:110px">Ações</th></tr></thead><tbody>';
+    var self = this;
+    rows.forEach(function(row, index) {
+      html += '<tr>';
+      meta.fields.forEach(function(field) {
+        html += '<td>' + self.formatCell(row[field.key], field) + '</td>';
+      });
+      html += '<td class="actions">' +
+        '<button class="btn-action" title="Editar" onclick="Pages.configuracoes.openForm(' + index + ')">✏️</button>' +
+        '<button class="btn-action" title="Desativar" onclick="Pages.configuracoes.remove(' + index + ')">🗑️</button>' +
+        '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+  },
+
+  formatCell: function(value, field) {
+    if (field.type === 'checkbox') {
+      return value === true || String(value).toLowerCase() === 'true'
+        ? '<span class="badge badge-success">Ativo</span>'
+        : '<span class="badge badge-neutral">Inativo</span>';
+    }
+    if (field.type === 'color') {
+      return '<span class="color-preview" style="background:' + this.escape(value || '#999') + '"></span>' +
+        this.escape(value || '');
+    }
+    if (field.type === 'reference') {
+      return this.escape(this.referenceLabel(field.source, value) || 'Todos');
+    }
+    return this.escape(value === undefined || value === null || value === '' ? '—' : String(value));
+  },
+
+  referenceLabel: function(source, id) {
+    if (!id) return '';
+    var rows = this.data[source] || [];
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].Id) === String(id)) return rows[i].Nome || rows[i].Id;
+    }
+    return id;
+  },
+
+  openForm: function(index) {
+    var meta = this.metadata[this.active];
+    var record = typeof index === 'number' ? (this.data[this.active] || [])[index] : {};
+    var body = '<div class="config-form-grid">';
+    var self = this;
+    meta.fields.forEach(function(field) {
+      var value = record[field.key];
+      if ((value === undefined || value === '') && field.defaultValue !== undefined) value = field.defaultValue;
+      body += '<div class="form-group' + (field.type === 'textarea' ? ' config-form-wide' : '') + '">';
+      if (field.type === 'checkbox') {
+        body += '<label class="checkbox-label"><input type="checkbox" id="cfg-' + field.key + '"' +
+          (value === true || String(value).toLowerCase() === 'true' ? ' checked' : '') + '> ' + field.label + '</label>';
+      } else {
+        body += '<label class="form-label" for="cfg-' + field.key + '">' + field.label +
+          (field.required ? ' <span class="required">*</span>' : '') + '</label>';
+        body += self.renderInput(field, value);
+      }
+      body += '</div>';
+    });
+    body += '</div>';
+
+    Components.modal({
+      title: (record.Id || record.Chave ? 'Editar ' : 'Novo registro — ') + meta.label,
+      body: body,
+      size: 'lg',
+      confirmText: 'Salvar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        self.save(record.Id || record.Chave || '');
+      }
+    });
+  },
+
+  renderInput: function(field, value) {
+    var safeValue = this.escape(value === undefined || value === null ? '' : String(value));
+    if (field.type === 'textarea') {
+      return '<textarea class="form-control" id="cfg-' + field.key + '" rows="3">' + safeValue + '</textarea>';
+    }
+    if (field.type === 'select') {
+      var html = '<select class="form-control" id="cfg-' + field.key + '">';
+      (field.options || []).forEach(function(option) {
+        html += '<option value="' + option + '"' + (String(value) === option ? ' selected' : '') + '>' + option + '</option>';
+      });
+      return html + '</select>';
+    }
+    if (field.type === 'reference') {
+      var ref = '<select class="form-control" id="cfg-' + field.key + '">';
+      if (field.allowBlank) ref += '<option value="">Todos / não especificado</option>';
+      var rows = this.data[field.source] || [];
+      rows.forEach(function(item) {
+        ref += '<option value="' + item.Id + '"' + (String(value) === String(item.Id) ? ' selected' : '') +
+          '>' + (item.Nome || item.Id) + '</option>';
+      });
+      return ref + '</select>';
+    }
+    var type = field.type || 'text';
+    return '<input class="form-control" id="cfg-' + field.key + '" type="' + type + '" value="' + safeValue + '"' +
+      (field.step ? ' step="' + field.step + '"' : '') + (field.required ? ' required' : '') + '>';
+  },
+
+  save: function(id) {
+    var meta = this.metadata[this.active];
+    var payload = {};
+    var missing = [];
+    meta.fields.forEach(function(field) {
+      var element = document.getElementById('cfg-' + field.key);
+      var value = field.type === 'checkbox' ? !!element.checked : element.value.trim();
+      if (field.required && !value) missing.push(field.label);
+      payload[field.key] = value;
+    });
+    if (missing.length) {
+      Components.toast('Preencha: ' + missing.join(', '), 'warning');
+      return;
+    }
+
+    var self = this;
+    Components.showLoading('Salvando configuração...');
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.hideLoading();
+        Components.toast('Configuração salva com sucesso.', 'success');
+        App.reloadBootstrap();
+        self.load();
+      })
+      .withFailureHandler(function(error) {
+        Components.hideLoading();
+        Components.toast('Erro ao salvar: ' + error.message, 'error');
+      })
+      .salvarConfiguracao(this.active, payload, id);
+  },
+
+  remove: function(index) {
+    var row = (this.data[this.active] || [])[index];
+    if (!row) return;
+    var id = row.Id || row.Chave;
+    var self = this;
+    Components.confirm('Deseja desativar/remover este registro?', function() {
+      Components.showLoading('Atualizando configuração...');
+      google.script.run
+        .withSuccessHandler(function() {
+          Components.hideLoading();
+          Components.toast('Registro atualizado com sucesso.', 'success');
+          App.reloadBootstrap();
+          self.load();
+        })
+        .withFailureHandler(function(error) {
+          Components.hideLoading();
+          Components.toast('Erro: ' + error.message, 'error');
+        })
+        .excluirConfiguracao(self.active, id);
+    }, 'Confirmar alteração');
+  },
+
+  escape: function(value) {
+    var div = document.createElement('div');
+    div.textContent = value === undefined || value === null ? '' : String(value);
+    return div.innerHTML;
+  }
+};
+</script>

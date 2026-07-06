@@ -1,0 +1,550 @@
+<script>
+Pages.atendimentos = {
+  state: {
+    currentPage: 1,
+    totalPages: 1,
+    totalRegistros: 0,
+    sortField: 'id',
+    sortDir: 'desc',
+    allData: [],
+    filteredData: [],
+    perPage: 50,
+    termoBusca: ''
+  },
+
+  render: function() {
+    var self = this;
+    self.state.currentPage = 1;
+    self.state.termoBusca = '';
+
+    var container = document.getElementById('content-area') || document.querySelector('.content-area');
+    if (!container) return;
+
+    var html = '';
+
+    // Cabeçalho da página
+    html += '<div class="page-header">';
+    html += '  <h1 class="page-title">Atendimentos <span id="contagem-badge" class="badge" style="font-size:14px;vertical-align:middle;margin-left:8px;">0</span></h1>';
+    html += '</div>';
+
+    // Barra de busca
+    html += '<div class="filters-bar">';
+    html += '  <div class="filter-group" style="flex:1;">';
+    html += '    <div class="search-box">';
+    html += '      <input type="text" id="busca-atendimentos" class="form-control" placeholder="🔍 Buscar por RA, cliente, produto, responsável...">';
+    html += '    </div>';
+    html += '  </div>';
+    html += '  <div class="filter-group">';
+    html += '    <button type="button" id="btn-novo-atendimento" class="btn btn-primary">➕ Novo Atendimento</button>';
+    html += '    <button type="button" id="btn-exportar-atendimentos" class="btn btn-secondary">📊 Exportar</button>';
+    html += '    <button type="button" id="btn-recarregar" class="btn btn-secondary btn-icon" title="Recarregar">🔄</button>';
+    html += '  </div>';
+    html += '</div>';
+
+    // Área da tabela
+    html += '<div class="card">';
+    html += '  <div id="tabela-atendimentos">';
+    html += Components.emptyState('📋', 'Carregando atendimentos...');
+    html += '  </div>';
+    html += '</div>';
+
+    // Área de paginação
+    html += '<div id="paginacao-atendimentos"></div>';
+
+    container.innerHTML = html;
+
+    // Vincular eventos
+    self._bindEvents();
+
+    // Carregar dados
+    self._carregarDados();
+  },
+
+  _bindEvents: function() {
+    var self = this;
+
+    // Busca em tempo real
+    var campoBusca = document.getElementById('busca-atendimentos');
+    if (campoBusca) {
+      var debounceTimer = null;
+      campoBusca.addEventListener('keyup', function() {
+        clearTimeout(debounceTimer);
+        var termo = this.value;
+        debounceTimer = setTimeout(function() {
+          self.state.termoBusca = termo;
+          self.state.currentPage = 1;
+          self._filtrarLocal();
+          self._renderTabela();
+        }, 300);
+      });
+    }
+
+    // Botão Novo Atendimento
+    var btnNovo = document.getElementById('btn-novo-atendimento');
+    if (btnNovo) {
+      btnNovo.addEventListener('click', function() {
+        App.navigateTo('novoAtendimento');
+      });
+    }
+
+    // Botão Recarregar
+    var btnRecarregar = document.getElementById('btn-recarregar');
+    if (btnRecarregar) {
+      btnRecarregar.addEventListener('click', function() {
+        self._carregarDados();
+      });
+    }
+
+    var btnExportar = document.getElementById('btn-exportar-atendimentos');
+    if (btnExportar) {
+      btnExportar.addEventListener('click', function() {
+        self._exportar();
+      });
+    }
+  },
+
+  _carregarDados: function() {
+    var self = this;
+    Components.showLoading('Carregando atendimentos...');
+
+    var filtros = App.getFilters ? App.getFilters() : (App.filters || {});
+    var ordenacao = { campo: self.state.sortField, direcao: self.state.sortDir };
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (result) {
+          self.state.allData = result.dados || [];
+          self.state.totalRegistros = result.total || self.state.allData.length;
+          self.state.totalPages = result.totalPaginas || Math.ceil(self.state.totalRegistros / self.state.perPage);
+
+          // Atualizar badge de contagem
+          var badge = document.getElementById('contagem-badge');
+          if (badge) badge.textContent = App.formatNumber ? App.formatNumber(self.state.totalRegistros) : self.state.totalRegistros;
+
+          self._filtrarLocal();
+          self._renderTabela();
+        } else {
+          self.state.allData = [];
+          self._renderTabelaVazia();
+        }
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao carregar atendimentos: ' + err.message, 'danger');
+        self._renderTabelaVazia();
+      })
+      .getAtendimentos(filtros, self.state.currentPage, ordenacao);
+  },
+
+  _filtrarLocal: function() {
+    var self = this;
+    var termo = (self.state.termoBusca || '').toLowerCase().trim();
+
+    if (!termo) {
+      self.state.filteredData = self.state.allData.slice();
+    } else {
+      self.state.filteredData = self.state.allData.filter(function(item) {
+        var campos = [
+          item.id,
+          item.numeroRA,
+          item.cliente,
+          item.produto,
+          item.categoria,
+          item.responsavel,
+          item.status,
+          item.prioridade,
+          item.canal
+        ];
+        return campos.some(function(campo) {
+          return campo && String(campo).toLowerCase().indexOf(termo) !== -1;
+        });
+      });
+    }
+
+    // Ordenar localmente
+    self._ordenarLocal();
+
+    // Recalcular paginação
+    self.state.totalPages = Math.ceil(self.state.filteredData.length / self.state.perPage) || 1;
+    if (self.state.currentPage > self.state.totalPages) {
+      self.state.currentPage = 1;
+    }
+
+    // Atualizar badge
+    var badge = document.getElementById('contagem-badge');
+    if (badge) {
+      var total = App.formatNumber ? App.formatNumber(self.state.filteredData.length) : self.state.filteredData.length;
+      badge.textContent = total;
+    }
+  },
+
+  _ordenarLocal: function() {
+    var self = this;
+    var campo = self.state.sortField;
+    var dir = self.state.sortDir === 'asc' ? 1 : -1;
+
+    self.state.filteredData.sort(function(a, b) {
+      var valA = a[campo];
+      var valB = b[campo];
+
+      if (valA === null || valA === undefined) valA = '';
+      if (valB === null || valB === undefined) valB = '';
+
+      // Tentar comparar como número
+      var numA = Number(valA);
+      var numB = Number(valB);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return (numA - numB) * dir;
+      }
+
+      // Comparar como data se campo contém "data"
+      if (String(campo).toLowerCase().indexOf('data') !== -1) {
+        var dateA = new Date(valA);
+        var dateB = new Date(valB);
+        if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
+          return (dateA.getTime() - dateB.getTime()) * dir;
+        }
+      }
+
+      // Comparar como string
+      return String(valA).localeCompare(String(valB), 'pt-BR') * dir;
+    });
+  },
+
+  _renderTabela: function() {
+    var self = this;
+    var containerTabela = document.getElementById('tabela-atendimentos');
+    var containerPaginacao = document.getElementById('paginacao-atendimentos');
+    if (!containerTabela) return;
+
+    var dados = self.state.filteredData;
+    if (dados.length === 0) {
+      self._renderTabelaVazia();
+      return;
+    }
+
+    // Paginar
+    var inicio = (self.state.currentPage - 1) * self.state.perPage;
+    var fim = inicio + self.state.perPage;
+    var paginados = dados.slice(inicio, fim);
+
+    // Definir cabeçalhos com suporte a ordenação
+    var headers = [
+      { label: 'ID', field: 'id', sortable: true },
+      { label: 'Número RA', field: 'numeroRA', sortable: true },
+      { label: 'Cliente', field: 'cliente', sortable: true },
+      { label: 'Produto', field: 'produto', sortable: true },
+      { label: 'Status', field: 'status', sortable: true },
+      { label: 'Prioridade', field: 'prioridade', sortable: true },
+      { label: 'SLA', field: 'slaStatus', sortable: true },
+      { label: 'Responsável', field: 'responsavel', sortable: true },
+      { label: 'Data Abertura', field: 'dataAbertura', sortable: true },
+      { label: 'Ações', field: null, sortable: false }
+    ];
+
+    // Construir linhas
+    var rows = paginados.map(function(item) {
+      var statusHtml = Components.statusBadge(item.status, item.statusCor || null);
+      var prioridadeHtml = self._prioridadeBadge(item.prioridade);
+      var slaHtml = Components.slaBadge(item.slaStatus || item.sla || 'no-prazo');
+      var dataFormatada = self._formatarData(item.dataAbertura);
+
+      return {
+        cells: [
+          item.id,
+          self._escape(item.numeroRA || ''),
+          self._escape(item.cliente || ''),
+          self._escape(item.produto || ''),
+          statusHtml,
+          prioridadeHtml,
+          slaHtml,
+          self._escape(item.responsavel || ''),
+          dataFormatada
+        ],
+        id: item.id,
+        raw: item
+      };
+    });
+
+    // Ações por linha
+    var actions = [
+      {
+        icon: '👁',
+        title: 'Visualizar',
+        onClick: function(row) {
+          self._visualizar(row.id);
+        }
+      },
+      {
+        icon: '✏️',
+        title: 'Editar',
+        onClick: function(row) {
+          App.navigateTo('novoAtendimento', row.id);
+        }
+      },
+      {
+        icon: '🗑',
+        title: 'Excluir',
+        onClick: function(row) {
+          Components.confirm('Tem certeza que deseja excluir o atendimento #' + row.id + '? Esta ação não poderá ser desfeita.', function() {
+            self._excluir(row.id);
+          });
+        }
+      },
+      {
+        icon: '📋',
+        title: 'Timeline',
+        onClick: function(row) {
+          self._mostrarTimeline(row.id);
+        }
+      }
+    ];
+
+    containerTabela.innerHTML = Components.dataTable({
+      headers: headers,
+      rows: rows,
+      actions: actions,
+      onSort: function(field) {
+        if (self.state.sortField === field) {
+          self.state.sortDir = self.state.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          self.state.sortField = field;
+          self.state.sortDir = 'asc';
+        }
+        self._filtrarLocal();
+        self._renderTabela();
+      },
+      sortField: self.state.sortField,
+      sortDir: self.state.sortDir
+    });
+
+    // Renderizar paginação
+    if (containerPaginacao) {
+      if (self.state.totalPages > 1) {
+        containerPaginacao.innerHTML = Components.pagination(self.state.currentPage, self.state.totalPages, function(pagina) {
+          self.state.currentPage = pagina;
+          self._renderTabela();
+          // Scroll para o topo da tabela
+          var tabelaEl = document.getElementById('tabela-atendimentos');
+          if (tabelaEl) tabelaEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      } else {
+        containerPaginacao.innerHTML = '';
+      }
+    }
+  },
+
+  _renderTabelaVazia: function() {
+    var containerTabela = document.getElementById('tabela-atendimentos');
+    var containerPaginacao = document.getElementById('paginacao-atendimentos');
+
+    if (containerTabela) {
+      containerTabela.innerHTML = Components.emptyState('📋', 'Nenhum atendimento encontrado.');
+    }
+    if (containerPaginacao) {
+      containerPaginacao.innerHTML = '';
+    }
+
+    var badge = document.getElementById('contagem-badge');
+    if (badge) badge.textContent = '0';
+  },
+
+  _exportar: function() {
+    var dados = this.state.filteredData || [];
+    if (!dados.length) {
+      Components.toast('Não há atendimentos para exportar.', 'warning');
+      return;
+    }
+    if (!window.XLSX) {
+      Components.toast('Biblioteca de exportação indisponível.', 'error');
+      return;
+    }
+    var linhas = dados.map(function(item) {
+      return {
+        'ID': item.id,
+        'Número RA': item.numeroRA,
+        'Cliente': item.cliente,
+        'CPF': item.cpf,
+        'Produto': item.produto,
+        'Categoria': item.categoria,
+        'Canal': item.canal,
+        'Status': item.status,
+        'Prioridade': item.prioridade,
+        'Responsável': item.responsavel,
+        'Data de abertura': item.dataAbertura,
+        'Data prevista': item.dataPrevista,
+        'SLA': item.slaStatus
+      };
+    });
+    var sheet = XLSX.utils.json_to_sheet(linhas);
+    var workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Atendimentos');
+    XLSX.writeFile(workbook, 'atendimentos_porto_ra_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    Components.toast('Atendimentos exportados com sucesso.', 'success');
+  },
+
+  _visualizar: function(id) {
+    var self = this;
+    Components.showLoading('Carregando detalhes...');
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (result && result.atendimento) {
+          var atd = result.atendimento;
+          var timeline = result.timeline || [];
+
+          var body = '';
+          body += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
+          body += self._detalheItem('Número RA', atd.numeroRA);
+          body += self._detalheItem('Cliente', atd.cliente);
+          body += self._detalheItem('CPF', atd.cpf);
+          body += self._detalheItem('Produto', atd.produto);
+          body += self._detalheItem('Categoria', atd.categoria);
+          body += self._detalheItem('Canal', atd.canal);
+          body += self._detalheItem('Responsável', atd.responsavel);
+          body += self._detalheItem('Prioridade', atd.prioridade);
+          body += self._detalheItem('Status', atd.status);
+          body += self._detalheItem('SLA (horas)', atd.slaHoras);
+          body += self._detalheItem('Data Abertura', self._formatarData(atd.dataAbertura));
+          body += self._detalheItem('Data Prevista', self._formatarData(atd.dataPrevista));
+          if (atd.motivoPendencia) {
+            body += self._detalheItem('Motivo Pendência', atd.motivoPendencia);
+          }
+          body += '</div>';
+
+          if (atd.descricao) {
+            body += '<div style="margin-bottom:12px;"><strong style="display:block;margin-bottom:4px;color:var(--text-secondary);font-size:12px;text-transform:uppercase;">Descrição</strong>';
+            body += '<p style="margin:0;white-space:pre-wrap;">' + self._escape(atd.descricao) + '</p></div>';
+          }
+          if (atd.observacoes) {
+            body += '<div style="margin-bottom:12px;"><strong style="display:block;margin-bottom:4px;color:var(--text-secondary);font-size:12px;text-transform:uppercase;">Observações</strong>';
+            body += '<p style="margin:0;white-space:pre-wrap;">' + self._escape(atd.observacoes) + '</p></div>';
+          }
+
+          if (timeline.length > 0) {
+            body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">';
+            body += '<strong style="display:block;margin-bottom:12px;font-size:14px;">Histórico</strong>';
+            body += Components.timeline(timeline);
+            body += '</div>';
+          }
+
+          Components.modal({
+            title: 'Atendimento #' + id,
+            body: body,
+            confirmText: '✏️ Editar',
+            cancelText: 'Fechar',
+            type: 'default',
+            onConfirm: function() {
+              App.navigateTo('novoAtendimento', id);
+            }
+          });
+        } else {
+          Components.toast('Atendimento não encontrado.', 'danger');
+        }
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao carregar detalhes: ' + err.message, 'danger');
+      })
+      .getAtendimento(id);
+  },
+
+  _excluir: function(id) {
+    var self = this;
+    Components.showLoading('Excluindo atendimento...');
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (result && result.success) {
+          Components.toast('Atendimento #' + id + ' excluído com sucesso.', 'success');
+          // Remover do array local
+          self.state.allData = self.state.allData.filter(function(item) {
+            return item.id !== id;
+          });
+          self.state.totalRegistros = self.state.allData.length;
+          self._filtrarLocal();
+          self._renderTabela();
+        } else {
+          Components.toast(result.message || 'Erro ao excluir atendimento.', 'danger');
+        }
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao excluir: ' + err.message, 'danger');
+      })
+      .excluirAtendimento(id);
+  },
+
+  _mostrarTimeline: function(id) {
+    Components.showLoading('Carregando histórico...');
+
+    google.script.run
+      .withSuccessHandler(function(timeline) {
+        Components.hideLoading();
+        var body = '';
+        if (timeline && timeline.length > 0) {
+          body = Components.timeline(timeline);
+        } else {
+          body = Components.emptyState('📋', 'Nenhum registro no histórico deste atendimento.');
+        }
+
+        Components.modal({
+          title: 'Histórico do Atendimento #' + id,
+          body: body,
+          confirmText: null,
+          cancelText: 'Fechar',
+          type: 'default',
+          onConfirm: null
+        });
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao carregar histórico: ' + err.message, 'danger');
+      })
+      .getTimeline(id);
+  },
+
+  _prioridadeBadge: function(prioridade) {
+    if (!prioridade) return '';
+    var classe = 'badge';
+    var p = prioridade.toLowerCase();
+    if (p === 'alta' || p === 'urgente' || p === 'crítica') {
+      classe += ' badge-danger';
+    } else if (p === 'média' || p === 'media') {
+      classe += ' badge-warning';
+    } else {
+      classe += ' badge-success';
+    }
+    return '<span class="' + classe + '">' + this._escape(prioridade) + '</span>';
+  },
+
+  _detalheItem: function(label, valor) {
+    return '<div><strong style="display:block;color:var(--text-secondary);font-size:12px;text-transform:uppercase;margin-bottom:2px;">' + label + '</strong><span>' + this._escape(valor || '—') + '</span></div>';
+  },
+
+  _formatarData: function(dateValue) {
+    if (!dateValue) return '—';
+    try {
+      var d = new Date(dateValue);
+      if (isNaN(d.getTime())) return dateValue;
+      var dia = ('0' + d.getDate()).slice(-2);
+      var mes = ('0' + (d.getMonth() + 1)).slice(-2);
+      var ano = d.getFullYear();
+      return dia + '/' + mes + '/' + ano;
+    } catch (e) {
+      return dateValue;
+    }
+  },
+
+  _escape: function(str) {
+    if (str === null || str === undefined) return '';
+    if (typeof str !== 'string') str = String(str);
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+};
+</script>

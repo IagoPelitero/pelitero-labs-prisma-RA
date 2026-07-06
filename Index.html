@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#002D72">
+  <title>PORTO RA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+  <?!= include('Styles') ?>
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar" id="sidebar" aria-label="Navegação principal">
+      <div class="sidebar-header">
+        <div class="sidebar-logo" aria-label="Porto RA">
+          <div class="sidebar-logo-abbr">P.</div>
+          <span class="sidebar-logo-text">PORTO RA</span>
+        </div>
+        <button class="sidebar-toggle" type="button" onclick="App.toggleSidebar()" aria-label="Recolher menu">
+          <span class="material-icons">menu_open</span>
+        </button>
+      </div>
+
+      <nav class="sidebar-menu">
+        <button class="sidebar-item active" type="button" data-page="dashboard" data-tooltip="Dashboard">
+          <span class="material-icons">dashboard</span><span class="sidebar-label">Dashboard</span>
+        </button>
+        <button class="sidebar-item" type="button" data-page="novoAtendimento" data-tooltip="Novo Atendimento">
+          <span class="material-icons">note_add</span><span class="sidebar-label">Novo Atendimento</span>
+        </button>
+        <button class="sidebar-item" type="button" data-page="atendimentos" data-tooltip="Atendimentos">
+          <span class="material-icons">assignment</span><span class="sidebar-label">Atendimentos</span>
+        </button>
+        <button class="sidebar-item" type="button" data-page="pesquisa" data-tooltip="Pesquisa">
+          <span class="material-icons">manage_search</span><span class="sidebar-label">Pesquisa</span>
+        </button>
+        <button class="sidebar-item" type="button" data-page="indicadores" data-tooltip="Indicadores">
+          <span class="material-icons">insights</span><span class="sidebar-label">Indicadores</span>
+        </button>
+        <button class="sidebar-item" type="button" data-page="relatorios" data-tooltip="Relatórios">
+          <span class="material-icons">summarize</span><span class="sidebar-label">Relatórios</span>
+        </button>
+        <button class="sidebar-item" type="button" data-page="configuracoes" data-tooltip="Configurações" data-supervisor-only>
+          <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-brand-row">
+          <span class="brand-porto">Porto.</span>
+          <span class="brand-ra">RECLAME<br><strong>AQUI</strong></span>
+        </div>
+        <div class="sidebar-version">PORTO RA · v2.0</div>
+      </div>
+    </aside>
+
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="App.closeMobileSidebar()"></div>
+
+    <section class="main-area">
+      <header class="header">
+        <div class="header-left">
+          <button class="btn-refresh mobile-menu-trigger" type="button" onclick="App.toggleSidebar()" aria-label="Abrir menu">
+            <span class="material-icons">menu</span>
+          </button>
+          <div class="porto-wordmark" aria-label="Logo Porto">Porto.</div>
+          <div class="ra-wordmark" aria-label="Logo Reclame Aqui">RECLAME <strong>AQUI</strong></div>
+          <span class="header-title">PORTO RA</span>
+        </div>
+        <div class="header-right">
+          <div class="header-datetime">
+            <span class="material-icons">calendar_today</span>
+            <span id="header-date"></span>
+            <span>·</span>
+            <span id="header-time"></span>
+          </div>
+          <div class="header-user" title="Usuário conectado">
+            <span class="material-icons">account_circle</span>
+            <span><strong id="current-user-name">Usuário</strong><small id="current-user-profile">Analista</small></span>
+          </div>
+          <button class="btn-refresh" type="button" onclick="App.reloadBootstrap(function(){App.refreshCurrentPage();})" title="Atualizar">
+            <span class="material-icons">refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="filters-bar global-filters" id="global-filters" aria-label="Filtros globais">
+        <div class="filter-group filter-period">
+          <label>Período</label>
+          <input class="filter-control" type="date" id="filter-data-inicio" title="Data inicial">
+          <span class="filter-separator">a</span>
+          <input class="filter-control" type="date" id="filter-data-fim" title="Data final">
+        </div>
+        <div class="filter-group"><label>Analista</label><select class="filter-control" id="filter-analista"></select></div>
+        <div class="filter-group"><label>Produto</label><select class="filter-control" id="filter-produto"></select></div>
+        <div class="filter-group"><label>Categoria</label><select class="filter-control" id="filter-categoria"></select></div>
+        <div class="filter-group"><label>Status</label><select class="filter-control" id="filter-status"></select></div>
+        <div class="filter-group"><label>Prioridade</label><select class="filter-control" id="filter-prioridade"></select></div>
+        <div class="filter-group"><label>Canal</label><select class="filter-control" id="filter-canal"></select></div>
+        <div class="filter-group"><label>Nº RA</label><input class="filter-control filter-text" id="filter-ra" placeholder="Número"></div>
+        <div class="filter-group"><label>Cliente</label><input class="filter-control filter-text" id="filter-cliente" placeholder="Nome"></div>
+        <div class="filter-group"><label>CPF</label><input class="filter-control filter-text" id="filter-cpf" placeholder="CPF" oninput="App.maskCPF(this)"></div>
+        <div class="filters-actions">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="App.clearFilters()">
+            <span class="material-icons">filter_alt_off</span> Limpar
+          </button>
+        </div>
+      </section>
+
+      <main id="app" class="content-area" role="main"></main>
+    </section>
+  </div>
+
+  <div id="global-loading" class="loading-overlay global-loading" style="display:none">
+    <div class="loading-content">
+      <div class="spinner"></div>
+      <p id="loading-message">Processando...</p>
+    </div>
+  </div>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <div id="modal-container"></div>
+
+  <?!= include('Scripts') ?>
+  <?!= include('Components') ?>
+  <?!= include('Dashboard') ?>
+  <?!= include('Atendimentos') ?>
+  <?!= include('NovoAtendimento') ?>
+  <?!= include('Pesquisa') ?>
+  <?!= include('Indicadores') ?>
+  <?!= include('Relatorios') ?>
+  <?!= include('Configuracoes') ?>
+</body>
+</html>

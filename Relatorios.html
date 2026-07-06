@@ -1,0 +1,632 @@
+<script>
+Pages.relatorios = {
+  _reportData: [],
+  _sorted: { field: null, dir: 'asc' },
+
+  render: function () {
+    var dd = App.dropdownData || {};
+    var produtos = (dd.produtos || []);
+    var categorias = (dd.categorias || []);
+    var status = (dd.status || []);
+    var prioridades = (dd.prioridades || []);
+    var canais = (dd.canais || []);
+    var responsaveis = (dd.responsaveis || []);
+
+    var html = '';
+
+    // ── Page Header ──
+    html += '<div class="page-header">';
+    html += '  <div>';
+    html += '    <h1 class="page-title">Relatórios</h1>';
+    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Gere relatórios detalhados, analise indicadores e exporte dados dos atendimentos.</p>';
+    html += '  </div>';
+    html += '</div>';
+
+    // ── Filter Card ──
+    html += '<div class="card" style="margin-bottom:24px;">';
+    html += '  <div class="card-header" style="padding:16px 20px;border-bottom:1px solid var(--border-color);">';
+    html += '    <h3 style="margin:0;font-size:15px;font-weight:600;color:var(--text-primary);">🔍 Filtros do Relatório</h3>';
+    html += '  </div>';
+    html += '  <div style="padding:20px;">';
+
+    // Row 1: Datas
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Período Início</label>';
+    html += '      <input type="date" id="rel-data-inicio" class="form-control" />';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Período Fim</label>';
+    html += '      <input type="date" id="rel-data-fim" class="form-control" />';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Produto</label>';
+    html += '      <select id="rel-produto" class="form-control"><option value="">Todos</option>';
+    for (var i = 0; i < produtos.length; i++) {
+      html += '<option value="' + produtos[i] + '">' + produtos[i] + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Categoria</label>';
+    html += '      <select id="rel-categoria" class="form-control"><option value="">Todas</option>';
+    for (var i = 0; i < categorias.length; i++) {
+      html += '<option value="' + categorias[i] + '">' + categorias[i] + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Row 2
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Analista</label>';
+    html += '      <select id="rel-analista" class="form-control"><option value="">Todos</option>';
+    for (var i = 0; i < responsaveis.length; i++) {
+      html += '<option value="' + responsaveis[i] + '">' + responsaveis[i] + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Status</label>';
+    html += '      <select id="rel-status" class="form-control"><option value="">Todos</option>';
+    for (var i = 0; i < status.length; i++) {
+      html += '<option value="' + status[i] + '">' + status[i] + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Canal</label>';
+    html += '      <select id="rel-canal" class="form-control"><option value="">Todos</option>';
+    for (var i = 0; i < canais.length; i++) {
+      html += '<option value="' + canais[i] + '">' + canais[i] + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Prioridade</label>';
+    html += '      <select id="rel-prioridade" class="form-control"><option value="">Todas</option>';
+    for (var i = 0; i < prioridades.length; i++) {
+      html += '<option value="' + prioridades[i] + '">' + prioridades[i] + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    html += '  <div class="form-actions" style="margin-top:12px;">';
+    html += '    <button class="btn btn-primary" onclick="Pages.relatorios.gerarRelatorio()">📊 Gerar Relatório</button>';
+    html += '    <button class="btn btn-secondary" onclick="Pages.relatorios.limparFiltros()" style="margin-left:8px;">🗑️ Limpar Filtros</button>';
+    html += '  </div>';
+    html += '  </div>';
+    html += '</div>';
+
+    // ── Results Section (hidden initially) ──
+    html += '<div id="rel-resultados" style="display:none;">';
+
+    // Summary KPI Cards
+    html += '  <div class="grid-4" id="rel-kpis" style="margin-bottom:24px;"></div>';
+
+    // Export Buttons
+    html += '  <div style="display:flex;gap:12px;margin-bottom:24px;">';
+    html += '    <button class="btn btn-success" onclick="Pages.relatorios.exportarExcel()">📊 Exportar Excel</button>';
+    html += '    <button class="btn btn-danger" onclick="Pages.relatorios.exportarPDF()">📄 Exportar PDF</button>';
+    html += '  </div>';
+
+    // Data Table
+    html += '  <div class="card" style="margin-bottom:24px;">';
+    html += '    <div class="card-header" style="padding:16px 20px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">';
+    html += '      <h3 style="margin:0;font-size:15px;font-weight:600;color:var(--text-primary);">📋 Dados do Relatório</h3>';
+    html += '      <span id="rel-total-registros" style="color:var(--text-secondary);font-size:13px;"></span>';
+    html += '    </div>';
+    html += '    <div id="rel-tabela" class="table-responsive"></div>';
+    html += '  </div>';
+
+    // Productivity Panel
+    html += '  <div class="card">';
+    html += '    <div class="card-header" style="padding:16px 20px;border-bottom:1px solid var(--border-color);">';
+    html += '      <h3 style="margin:0;font-size:15px;font-weight:600;color:var(--text-primary);">👥 Painel de Produtividade por Analista</h3>';
+    html += '    </div>';
+    html += '    <div id="rel-produtividade" class="table-responsive"></div>';
+    html += '  </div>';
+
+    html += '</div>'; // close rel-resultados
+
+    document.getElementById('app').innerHTML = html;
+
+    var globalFilters = App.getFilters ? App.getFilters() : {};
+    var globalToLocal = {
+      dataInicio: 'rel-data-inicio',
+      dataFim: 'rel-data-fim',
+      produto: 'rel-produto',
+      categoria: 'rel-categoria',
+      analista: 'rel-analista',
+      status: 'rel-status',
+      canal: 'rel-canal',
+      prioridade: 'rel-prioridade'
+    };
+    var hasGlobalFilter = false;
+    Object.keys(globalToLocal).forEach(function(key) {
+      if (!globalFilters[key]) return;
+      var field = document.getElementById(globalToLocal[key]);
+      if (field) field.value = globalFilters[key];
+      hasGlobalFilter = true;
+    });
+    if (globalFilters.numeroRA || globalFilters.cliente || globalFilters.cpf) hasGlobalFilter = true;
+    if (hasGlobalFilter) Pages.relatorios.gerarRelatorio();
+  },
+
+  limparFiltros: function () {
+    document.getElementById('rel-data-inicio').value = '';
+    document.getElementById('rel-data-fim').value = '';
+    document.getElementById('rel-produto').value = '';
+    document.getElementById('rel-categoria').value = '';
+    document.getElementById('rel-analista').value = '';
+    document.getElementById('rel-status').value = '';
+    document.getElementById('rel-canal').value = '';
+    document.getElementById('rel-prioridade').value = '';
+  },
+
+  gerarRelatorio: function () {
+    var filtros = Object.assign({}, App.getFilters ? App.getFilters() : {}, {
+      dataInicio: document.getElementById('rel-data-inicio').value || '',
+      dataFim: document.getElementById('rel-data-fim').value || '',
+      produto: document.getElementById('rel-produto').value || '',
+      categoria: document.getElementById('rel-categoria').value || '',
+      analista: document.getElementById('rel-analista').value || '',
+      status: document.getElementById('rel-status').value || '',
+      canal: document.getElementById('rel-canal').value || '',
+      prioridade: document.getElementById('rel-prioridade').value || ''
+    });
+
+    Components.showLoading('Gerando relatório, aguarde...');
+
+    google.script.run
+      .withSuccessHandler(function (dados) {
+        Components.hideLoading();
+        if (!dados || dados.length === 0) {
+          Components.toast('Nenhum registro encontrado para os filtros selecionados.', 'warning');
+          document.getElementById('rel-resultados').style.display = 'none';
+          return;
+        }
+        Pages.relatorios._reportData = dados;
+        Pages.relatorios._sorted = { field: null, dir: 'asc' };
+        document.getElementById('rel-resultados').style.display = 'block';
+        Pages.relatorios.renderKPIs(dados);
+        Pages.relatorios.renderTabela(dados);
+        Pages.relatorios.renderProdutividade(dados);
+        Components.toast('Relatório gerado com sucesso! ' + dados.length + ' registros encontrados.', 'success');
+      })
+      .withFailureHandler(function (err) {
+        Components.hideLoading();
+        Components.toast('Erro ao gerar relatório: ' + err.message, 'error');
+      })
+      .getRelatorio(filtros);
+  },
+
+  renderKPIs: function (dados) {
+    var total = dados.length;
+    var finalizados = 0;
+    var pendentes = 0;
+    var slaNoPrazo = 0;
+    var totalTempoResolucao = 0;
+    var countTempo = 0;
+
+    for (var i = 0; i < dados.length; i++) {
+      var d = dados[i];
+      var st = (d.status || '').toLowerCase();
+      if (['resolvido', 'finalizado', 'cancelado', 'improcedente', 'concluído', 'concluido', 'encerrado'].indexOf(st) !== -1) {
+        finalizados++;
+      }
+      if (st === 'pendente' || st.indexOf('aguardando') === 0) {
+        pendentes++;
+      }
+      var sla = (d.slaStatus || '').toLowerCase();
+      if (sla && ['sla vencido', 'vencido', 'atrasado', 'fora do prazo'].indexOf(sla) === -1) {
+        slaNoPrazo++;
+      }
+      if (d.tempoResolucao && !isNaN(parseFloat(d.tempoResolucao))) {
+        totalTempoResolucao += parseFloat(d.tempoResolucao);
+        countTempo++;
+      }
+    }
+
+    var percSla = total > 0 ? ((slaNoPrazo / total) * 100).toFixed(1) : '0.0';
+    var tempoMedio = countTempo > 0 ? (totalTempoResolucao / countTempo).toFixed(1) : '0.0';
+
+    var kpisHtml = '';
+    kpisHtml += Components.kpiCard('📊', App.formatNumber(total), 'Total de Atendimentos', 'var(--primary-color)', '');
+    kpisHtml += Components.kpiCard('✅', App.formatNumber(finalizados), 'Finalizados', 'var(--success-color,#10b981)', '');
+    kpisHtml += Components.kpiCard('⏳', App.formatNumber(pendentes), 'Pendentes', 'var(--warning-color,#f59e0b)', '');
+    kpisHtml += Components.kpiCard('🎯', percSla + '%', 'SLA no Prazo', 'var(--info-color,#3b82f6)', '');
+    kpisHtml += Components.kpiCard('⏱️', tempoMedio + 'h', 'Tempo Médio Resolução', 'var(--secondary-color,#8b5cf6)', '');
+
+    document.getElementById('rel-kpis').innerHTML = kpisHtml;
+  },
+
+  renderTabela: function (dados) {
+    var self = this;
+    var headers = [
+      { key: 'id', label: 'ID' },
+      { key: 'numeroRA', label: 'Nº RA' },
+      { key: 'cliente', label: 'Cliente' },
+      { key: 'produto', label: 'Produto' },
+      { key: 'categoria', label: 'Categoria' },
+      { key: 'status', label: 'Status' },
+      { key: 'prioridade', label: 'Prioridade' },
+      { key: 'canal', label: 'Canal' },
+      { key: 'responsavel', label: 'Responsável' },
+      { key: 'dataAbertura', label: 'Data Abertura' },
+      { key: 'dataConclusao', label: 'Data Conclusão' },
+      { key: 'slaStatus', label: 'SLA Status' },
+      { key: 'tempoResolucao', label: 'Tempo Resolução' }
+    ];
+
+    var sortedData = dados.slice();
+    if (self._sorted.field) {
+      var f = self._sorted.field;
+      var dir = self._sorted.dir === 'asc' ? 1 : -1;
+      sortedData.sort(function (a, b) {
+        var va = a[f] || '';
+        var vb = b[f] || '';
+        if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+        return String(va).localeCompare(String(vb)) * dir;
+      });
+    }
+
+    var rows = [];
+    for (var i = 0; i < sortedData.length; i++) {
+      var d = sortedData[i];
+      var statusCell = d.status ? Components.statusBadge(d.status, d.statusCor || '') : '-';
+      var slaCell = d.slaStatus ? Components.slaBadge(d.slaStatus) : '-';
+      var tempoCell = d.tempoResolucao ? d.tempoResolucao + 'h' : '-';
+      var dataAbertura = d.dataAbertura ? new Date(d.dataAbertura).toLocaleDateString('pt-BR') : '-';
+      var dataConclusao = d.dataConclusao ? new Date(d.dataConclusao).toLocaleDateString('pt-BR') : '-';
+
+      rows.push([
+        d.id || '-',
+        d.numeroRA || '-',
+        d.cliente || '-',
+        d.produto || '-',
+        d.categoria || '-',
+        statusCell,
+        d.prioridade || '-',
+        d.canal || '-',
+        d.responsavel || '-',
+        dataAbertura,
+        dataConclusao,
+        slaCell,
+        tempoCell
+      ]);
+    }
+
+    var tableHtml = Components.dataTable({
+      headers: headers,
+      rows: rows,
+      actions: null,
+      onSort: function (field) {
+        if (self._sorted.field === field) {
+          self._sorted.dir = self._sorted.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          self._sorted.field = field;
+          self._sorted.dir = 'asc';
+        }
+        self.renderTabela(self._reportData);
+      },
+      sortField: self._sorted.field,
+      sortDir: self._sorted.dir
+    });
+
+    document.getElementById('rel-tabela').innerHTML = tableHtml;
+    document.getElementById('rel-total-registros').textContent = dados.length + ' registro(s) encontrado(s)';
+  },
+
+  renderProdutividade: function (dados) {
+    var analistas = {};
+
+    for (var i = 0; i < dados.length; i++) {
+      var d = dados[i];
+      var resp = d.responsavel || 'Não Atribuído';
+      if (!analistas[resp]) {
+        analistas[resp] = {
+          nome: resp,
+          emAndamento: 0,
+          finalizados: 0,
+          slaVencido: 0,
+          tempoTotal: 0,
+          tempoCount: 0
+        };
+      }
+      var st = (d.status || '').toLowerCase();
+      if (['resolvido', 'finalizado', 'cancelado', 'improcedente', 'concluído', 'concluido', 'encerrado'].indexOf(st) !== -1) {
+        analistas[resp].finalizados++;
+      } else if (st !== '' && st !== 'cancelado') {
+        analistas[resp].emAndamento++;
+      }
+      var sla = (d.slaStatus || '').toLowerCase();
+      if (sla === 'sla vencido' || sla === 'vencido' || sla === 'atrasado' || sla === 'fora do prazo') {
+        analistas[resp].slaVencido++;
+      }
+      if (d.tempoResolucao && !isNaN(parseFloat(d.tempoResolucao))) {
+        analistas[resp].tempoTotal += parseFloat(d.tempoResolucao);
+        analistas[resp].tempoCount++;
+      }
+    }
+
+    var listaAnalistas = [];
+    for (var key in analistas) {
+      if (analistas.hasOwnProperty(key)) {
+        listaAnalistas.push(analistas[key]);
+      }
+    }
+
+    // Sort by finalizados desc for ranking
+    listaAnalistas.sort(function (a, b) {
+      return b.finalizados - a.finalizados;
+    });
+
+    var headers = [
+      { key: 'ranking', label: '#' },
+      { key: 'nome', label: 'Analista' },
+      { key: 'emAndamento', label: 'Em Andamento' },
+      { key: 'finalizados', label: 'Finalizados' },
+      { key: 'slaVencido', label: 'SLA Vencido' },
+      { key: 'tempoMedio', label: 'Tempo Médio' },
+      { key: 'ranking_label', label: 'Ranking' }
+    ];
+
+    var rows = [];
+    var medalhas = ['🥇', '🥈', '🥉'];
+    for (var i = 0; i < listaAnalistas.length; i++) {
+      var a = listaAnalistas[i];
+      var tempoMedio = a.tempoCount > 0 ? (a.tempoTotal / a.tempoCount).toFixed(1) + 'h' : '-';
+      var medalha = i < 3 ? medalhas[i] : (i + 1) + 'º';
+      var slaVencidoBadge = a.slaVencido > 0
+        ? '<span class="badge badge-danger">' + a.slaVencido + '</span>'
+        : '<span class="badge badge-success">0</span>';
+
+      rows.push([
+        medalha,
+        '<strong>' + a.nome + '</strong>',
+        App.formatNumber(a.emAndamento),
+        '<strong>' + App.formatNumber(a.finalizados) + '</strong>',
+        slaVencidoBadge,
+        tempoMedio,
+        medalha
+      ]);
+    }
+
+    if (rows.length === 0) {
+      document.getElementById('rel-produtividade').innerHTML = Components.emptyState('👥', 'Nenhum dado de produtividade disponível.');
+      return;
+    }
+
+    document.getElementById('rel-produtividade').innerHTML = Components.dataTable({
+      headers: headers,
+      rows: rows,
+      actions: null,
+      onSort: null,
+      sortField: null,
+      sortDir: null
+    });
+  },
+
+  exportarExcel: function () {
+    var dados = this._reportData;
+    if (!dados || dados.length === 0) {
+      Components.toast('Nenhum dado para exportar.', 'warning');
+      return;
+    }
+
+    var bom = '\uFEFF';
+    var sep = ';';
+
+    var cabecalhos = [
+      'ID', 'Nº RA', 'Cliente', 'CPF/CNPJ', 'Produto', 'Categoria',
+      'Status', 'Prioridade', 'Canal', 'Responsável', 'Data Abertura',
+      'Data Conclusão', 'SLA Status', 'Tempo Resolução (h)', 'Motivo Pendência',
+      'Descrição', 'Observações'
+    ];
+
+    var linhas = [cabecalhos.join(sep)];
+
+    for (var i = 0; i < dados.length; i++) {
+      var d = dados[i];
+      var dataAbertura = d.dataAbertura ? new Date(d.dataAbertura).toLocaleDateString('pt-BR') : '';
+      var dataConclusao = d.dataConclusao ? new Date(d.dataConclusao).toLocaleDateString('pt-BR') : '';
+
+      var campos = [
+        d.id || '',
+        d.numeroRA || '',
+        (d.cliente || '').replace(/;/g, ','),
+        d.cpfCnpj || '',
+        d.produto || '',
+        d.categoria || '',
+        d.status || '',
+        d.prioridade || '',
+        d.canal || '',
+        d.responsavel || '',
+        dataAbertura,
+        dataConclusao,
+        d.slaStatus || '',
+        d.tempoResolucao || '',
+        d.motivoPendencia || '',
+        (d.descricao || '').replace(/;/g, ',').replace(/\n/g, ' '),
+        (d.observacoes || '').replace(/;/g, ',').replace(/\n/g, ' ')
+      ];
+
+      linhas.push(campos.join(sep));
+    }
+
+    if (window.XLSX) {
+      var matriz = linhas.map(function(linha) { return linha.split(sep); });
+      var planilha = XLSX.utils.aoa_to_sheet(matriz);
+      planilha['!cols'] = cabecalhos.map(function(cabecalho) {
+        return { wch: Math.max(12, Math.min(35, cabecalho.length + 4)) };
+      });
+      var pasta = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(pasta, planilha, 'Atendimentos');
+      XLSX.writeFile(pasta, 'relatorio_porto_ra_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+      Components.toast('Arquivo Excel exportado com sucesso!', 'success');
+      return;
+    }
+
+    var csvContent = bom + linhas.join('\n');
+    var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.setAttribute('href', url);
+    var nomeArquivo = 'relatorio_porto_ra_' + new Date().toISOString().slice(0, 10) + '.csv';
+    link.setAttribute('download', nomeArquivo);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    Components.toast('Arquivo Excel (CSV) exportado com sucesso!', 'success');
+  },
+
+  exportarPDF: function () {
+    var dados = this._reportData;
+    if (!dados || dados.length === 0) {
+      Components.toast('Nenhum dado para exportar.', 'warning');
+      return;
+    }
+
+    try {
+      var jsPDF = window.jspdf.jsPDF;
+      var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+      // Header Porto
+      doc.setFillColor(0, 55, 125);
+      doc.rect(0, 0, 297, 28, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.setFont(undefined, 'bold');
+      doc.text('Porto Seguro - Relatório de Atendimentos RA', 14, 14);
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.text('Gerado em: ' + new Date().toLocaleString('pt-BR'), 14, 22);
+
+      // Summary section
+      var total = dados.length;
+      var finalizados = 0;
+      var pendentes = 0;
+      var slaNoPrazo = 0;
+      var totalTempo = 0;
+      var countTempo = 0;
+
+      for (var i = 0; i < dados.length; i++) {
+        var d = dados[i];
+        var st = (d.status || '').toLowerCase();
+        if (['resolvido', 'finalizado', 'cancelado', 'improcedente', 'concluído', 'concluido', 'encerrado'].indexOf(st) !== -1) finalizados++;
+        if (st === 'pendente' || st.indexOf('aguardando') === 0) pendentes++;
+        var sla = (d.slaStatus || '').toLowerCase();
+        if (sla && ['sla vencido', 'vencido', 'atrasado', 'fora do prazo'].indexOf(sla) === -1) slaNoPrazo++;
+        if (d.tempoResolucao && !isNaN(parseFloat(d.tempoResolucao))) {
+          totalTempo += parseFloat(d.tempoResolucao);
+          countTempo++;
+        }
+      }
+
+      var percSla = total > 0 ? ((slaNoPrazo / total) * 100).toFixed(1) : '0.0';
+      var tempoMedio = countTempo > 0 ? (totalTempo / countTempo).toFixed(1) : '0.0';
+
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.text('Resumo do Relatório', 14, 38);
+
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.text('Total de Atendimentos: ' + total, 14, 45);
+      doc.text('Finalizados: ' + finalizados, 80, 45);
+      doc.text('Pendentes: ' + pendentes, 140, 45);
+      doc.text('SLA no Prazo: ' + percSla + '%', 200, 45);
+      doc.text('Tempo Médio: ' + tempoMedio + 'h', 260, 45);
+
+      // Filtros aplicados
+      var filtroTexto = 'Filtros: ';
+      var periodoInicio = document.getElementById('rel-data-inicio').value;
+      var periodoFim = document.getElementById('rel-data-fim').value;
+      if (periodoInicio || periodoFim) {
+        filtroTexto += 'Período: ' + (periodoInicio || '...') + ' a ' + (periodoFim || '...') + ' | ';
+      }
+      var produtoSel = document.getElementById('rel-produto').value;
+      if (produtoSel) filtroTexto += 'Produto: ' + produtoSel + ' | ';
+      var statusSel = document.getElementById('rel-status').value;
+      if (statusSel) filtroTexto += 'Status: ' + statusSel + ' | ';
+      if (filtroTexto === 'Filtros: ') filtroTexto += 'Nenhum filtro aplicado';
+
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(filtroTexto, 14, 52);
+
+      // Table
+      var cabecalhos = ['ID', 'Nº RA', 'Cliente', 'Produto', 'Categoria', 'Status', 'Prioridade', 'Canal', 'Responsável', 'Dt Abertura', 'Dt Conclusão', 'SLA', 'Tempo'];
+
+      var linhasTabela = [];
+      for (var i = 0; i < dados.length; i++) {
+        var d = dados[i];
+        var dataAbertura = d.dataAbertura ? new Date(d.dataAbertura).toLocaleDateString('pt-BR') : '-';
+        var dataConclusao = d.dataConclusao ? new Date(d.dataConclusao).toLocaleDateString('pt-BR') : '-';
+
+        linhasTabela.push([
+          String(d.id || ''),
+          String(d.numeroRA || ''),
+          String(d.cliente || '').substring(0, 25),
+          String(d.produto || ''),
+          String(d.categoria || ''),
+          String(d.status || ''),
+          String(d.prioridade || ''),
+          String(d.canal || ''),
+          String(d.responsavel || ''),
+          dataAbertura,
+          dataConclusao,
+          String(d.slaStatus || ''),
+          d.tempoResolucao ? d.tempoResolucao + 'h' : '-'
+        ]);
+      }
+
+      doc.autoTable({
+        head: [cabecalhos],
+        body: linhasTabela,
+        startY: 58,
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          overflow: 'linebreak',
+          lineWidth: 0.1
+        },
+        headStyles: {
+          fillColor: [0, 55, 125],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 7
+        },
+        alternateRowStyles: {
+          fillColor: [245, 247, 250]
+        },
+        margin: { top: 10, left: 14, right: 14 },
+        tableWidth: 'auto'
+      });
+
+      // Footer
+      var pageCount = doc.internal.getNumberOfPages();
+      for (var p = 1; p <= pageCount; p++) {
+        doc.setPage(p);
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Porto Seguro - Sistema RA | Página ' + p + ' de ' + pageCount, 14, doc.internal.pageSize.height - 8);
+      }
+
+      var nomeArquivo = 'relatorio_porto_ra_' + new Date().toISOString().slice(0, 10) + '.pdf';
+      doc.save(nomeArquivo);
+
+      Components.toast('PDF exportado com sucesso!', 'success');
+    } catch (e) {
+      Components.toast('Erro ao exportar PDF. Verifique se a biblioteca jsPDF está carregada. Detalhes: ' + e.message, 'error');
+      console.error('Erro PDF:', e);
+    }
+  }
+};
+</script>

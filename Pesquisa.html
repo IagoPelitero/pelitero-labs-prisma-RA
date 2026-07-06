@@ -1,0 +1,339 @@
+<script>
+Pages.pesquisa = {
+  resultados: [],
+  ordenacao: { campo: 'dataAbertura', direcao: 'desc' },
+
+  render: function(container) {
+    var html = '';
+    var dd = App.dropdownData || {};
+
+    // Page header
+    html += '<div class="page-header">';
+    html += '  <div>';
+    html += '    <h1 class="page-title">Pesquisa Avançada</h1>';
+    html += '  </div>';
+    html += '</div>';
+
+    // Search form card
+    html += '<div class="card" id="pesquisa-form-card">';
+    html += '  <form id="pesquisa-form" onsubmit="Pages.pesquisa.executarPesquisa(event)">';
+
+    // Row 1: Número RA, CPF, Cliente
+    html += '    <div class="form-row">';
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-numero-ra">Número RA</label>';
+    html += '        <input type="text" id="pesq-numero-ra" class="form-control" placeholder="Digite o número do RA">';
+    html += '      </div>';
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-cpf">CPF</label>';
+    html += '        <input type="text" id="pesq-cpf" class="form-control" placeholder="000.000.000-00" maxlength="14" oninput="App.maskCPF(this)">';
+    html += '      </div>';
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-cliente">Cliente</label>';
+    html += '        <input type="text" id="pesq-cliente" class="form-control" placeholder="Nome do cliente">';
+    html += '      </div>';
+    html += '    </div>';
+
+    // Row 2: Produto, Categoria, Status, Responsável
+    html += '    <div class="form-row">';
+
+    // Produto select
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-produto">Produto</label>';
+    html += '        <select id="pesq-produto" class="form-control">';
+    html += '          <option value="">Todos os produtos</option>';
+    if (dd.produtos && dd.produtos.length > 0) {
+      for (var p = 0; p < dd.produtos.length; p++) {
+        html += '          <option value="' + dd.produtos[p] + '">' + dd.produtos[p] + '</option>';
+      }
+    }
+    html += '        </select>';
+    html += '      </div>';
+
+    // Categoria select
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-categoria">Categoria</label>';
+    html += '        <select id="pesq-categoria" class="form-control">';
+    html += '          <option value="">Todas as categorias</option>';
+    if (dd.categorias && dd.categorias.length > 0) {
+      for (var c = 0; c < dd.categorias.length; c++) {
+        html += '          <option value="' + dd.categorias[c] + '">' + dd.categorias[c] + '</option>';
+      }
+    }
+    html += '        </select>';
+    html += '      </div>';
+
+    // Status select
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-status">Status</label>';
+    html += '        <select id="pesq-status" class="form-control">';
+    html += '          <option value="">Todos os status</option>';
+    if (dd.status && dd.status.length > 0) {
+      for (var s = 0; s < dd.status.length; s++) {
+        html += '          <option value="' + dd.status[s] + '">' + dd.status[s] + '</option>';
+      }
+    }
+    html += '        </select>';
+    html += '      </div>';
+
+    // Responsável select
+    html += '      <div class="form-group">';
+    html += '        <label class="form-label" for="pesq-responsavel">Responsável</label>';
+    html += '        <select id="pesq-responsavel" class="form-control">';
+    html += '          <option value="">Todos os responsáveis</option>';
+    if (dd.responsaveis && dd.responsaveis.length > 0) {
+      for (var r = 0; r < dd.responsaveis.length; r++) {
+        html += '          <option value="' + dd.responsaveis[r] + '">' + dd.responsaveis[r] + '</option>';
+      }
+    }
+    html += '        </select>';
+    html += '      </div>';
+
+    html += '    </div>';
+
+    // Buttons
+    html += '    <div class="form-actions">';
+    html += '      <button type="submit" class="btn btn-primary">';
+    html += '        <span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 4px;">search</span>';
+    html += '        Pesquisar';
+    html += '      </button>';
+    html += '      <button type="button" class="btn btn-secondary" onclick="Pages.pesquisa.limparFormulario()">';
+    html += '        <span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 4px;">clear_all</span>';
+    html += '        Limpar';
+    html += '      </button>';
+    html += '    </div>';
+
+    html += '  </form>';
+    html += '</div>';
+
+    // Results container
+    html += '<div class="card" id="pesquisa-resultados" style="margin-top: 24px;">';
+    html += '  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">';
+    html += '    <span class="material-icons" style="color: var(--text-secondary, #6c757d);">list_alt</span>';
+    html += '    <h2 style="margin: 0; font-size: 1.15rem; font-weight: 600;">Resultados</h2>';
+    html += '    <span id="pesquisa-contador" style="color: var(--text-secondary, #6c757d); font-size: 0.875rem;"></span>';
+    html += '  </div>';
+    html += '  <div id="pesquisa-tabela">';
+    html += Components.emptyState('search', 'Utilize os campos acima para pesquisar atendimentos.');
+    html += '  </div>';
+    html += '</div>';
+
+    container.innerHTML = html;
+  },
+
+  montarTermo: function() {
+    var termo = {};
+
+    var numeroRA = document.getElementById('pesq-numero-ra');
+    if (numeroRA && numeroRA.value.trim()) {
+      termo.numeroRA = numeroRA.value.trim();
+    }
+
+    var cpf = document.getElementById('pesq-cpf');
+    if (cpf && cpf.value.trim()) {
+      termo.cpf = cpf.value.trim();
+    }
+
+    var cliente = document.getElementById('pesq-cliente');
+    if (cliente && cliente.value.trim()) {
+      termo.cliente = cliente.value.trim();
+    }
+
+    var produto = document.getElementById('pesq-produto');
+    if (produto && produto.value) {
+      termo.produto = produto.value;
+    }
+
+    var categoria = document.getElementById('pesq-categoria');
+    if (categoria && categoria.value) {
+      termo.categoria = categoria.value;
+    }
+
+    var status = document.getElementById('pesq-status');
+    if (status && status.value) {
+      termo.status = status.value;
+    }
+
+    var responsavel = document.getElementById('pesq-responsavel');
+    if (responsavel && responsavel.value) {
+      termo.responsavel = responsavel.value;
+    }
+
+    return termo;
+  },
+
+  executarPesquisa: function(event) {
+    if (event) event.preventDefault();
+
+    var termo = Pages.pesquisa.montarTermo();
+
+    var temCampoPreenchido = Object.keys(termo).length > 0;
+    if (!temCampoPreenchido) {
+      Components.toast('Preencha ao menos um campo para pesquisar.', 'warning', 3000);
+      return;
+    }
+
+    Components.showLoading('Pesquisando atendimentos...');
+
+    google.script.run
+      .withSuccessHandler(function(resultados) {
+        Components.hideLoading();
+        Pages.pesquisa.resultados = resultados || [];
+        Pages.pesquisa.renderizarResultados(Pages.pesquisa.resultados);
+      })
+      .withFailureHandler(function(erro) {
+        Components.hideLoading();
+        Components.toast('Erro ao pesquisar: ' + erro.message, 'error', 5000);
+
+        var tabela = document.getElementById('pesquisa-tabela');
+        if (tabela) {
+          tabela.innerHTML = Components.emptyState('error_outline', 'Ocorreu um erro na pesquisa. Tente novamente.');
+        }
+      })
+      .pesquisarAtendimentos(termo);
+  },
+
+  renderizarResultados: function(resultados) {
+    var tabela = document.getElementById('pesquisa-tabela');
+    var contador = document.getElementById('pesquisa-contador');
+
+    if (!tabela) return;
+
+    if (contador) {
+      contador.textContent = resultados.length > 0
+        ? '(' + App.formatNumber(resultados.length) + ' resultado' + (resultados.length !== 1 ? 's' : '') + ' encontrado' + (resultados.length !== 1 ? 's' : '') + ')'
+        : '';
+    }
+
+    if (!resultados || resultados.length === 0) {
+      tabela.innerHTML = Components.emptyState('search_off', 'Nenhum atendimento encontrado para os critérios informados.');
+      return;
+    }
+
+    var headers = [
+      { label: 'ID', field: 'id', sortable: true },
+      { label: 'Número RA', field: 'numeroRA', sortable: true },
+      { label: 'Cliente', field: 'cliente', sortable: true },
+      { label: 'Produto', field: 'produto', sortable: true },
+      { label: 'Status', field: 'status', sortable: true },
+      { label: 'Prioridade', field: 'prioridade', sortable: true },
+      { label: 'SLA', field: 'slaStatus', sortable: true },
+      { label: 'Responsável', field: 'responsavel', sortable: true },
+      { label: 'Data Abertura', field: 'dataAbertura', sortable: true }
+    ];
+
+    var rows = [];
+    for (var i = 0; i < resultados.length; i++) {
+      var item = resultados[i];
+
+      var corStatus = Pages.pesquisa.obterCorStatus(item.status);
+      var corPrioridade = Pages.pesquisa.obterCorPrioridade(item.prioridade);
+
+      rows.push({
+        id: item.id || '',
+        numeroRA: item.numeroRA || '',
+        cliente: item.cliente || '',
+        produto: item.produto || '',
+        status: Components.statusBadge(item.status || 'Indefinido', corStatus),
+        prioridade: Components.statusBadge(item.prioridade || 'Normal', corPrioridade),
+        slaStatus: Components.slaBadge(item.slaStatus || 'no_prazo'),
+        responsavel: item.responsavel || 'Não atribuído',
+        dataAbertura: item.dataAbertura ? App.timeAgo(item.dataAbertura) : '-'
+      });
+    }
+
+    var actions = [
+      {
+        icon: 'visibility',
+        label: 'Visualizar',
+        onClick: function(row) {
+          App.navigateTo('editar', { id: row.id });
+        }
+      }
+    ];
+
+    tabela.innerHTML = Components.dataTable({
+      headers: headers,
+      rows: rows,
+      actions: actions,
+      onSort: function(campo, direcao) {
+        Pages.pesquisa.ordenacao.campo = campo;
+        Pages.pesquisa.ordenacao.direcao = direcao;
+        Pages.pesquisa.ordenarResultados(campo, direcao);
+      },
+      sortField: Pages.pesquisa.ordenacao.campo,
+      sortDir: Pages.pesquisa.ordenacao.direcao
+    });
+  },
+
+  ordenarResultados: function(campo, direcao) {
+    var resultados = Pages.pesquisa.resultados.slice();
+
+    resultados.sort(function(a, b) {
+      var valA = a[campo] || '';
+      var valB = b[campo] || '';
+
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+
+      var comparacao = 0;
+      if (valA < valB) comparacao = -1;
+      if (valA > valB) comparacao = 1;
+
+      return direcao === 'asc' ? comparacao : -comparacao;
+    });
+
+    Pages.pesquisa.resultados = resultados;
+    Pages.pesquisa.renderizarResultados(resultados);
+  },
+
+  limparFormulario: function() {
+    var campos = ['pesq-numero-ra', 'pesq-cpf', 'pesq-cliente'];
+    for (var i = 0; i < campos.length; i++) {
+      var campo = document.getElementById(campos[i]);
+      if (campo) campo.value = '';
+    }
+
+    var selects = ['pesq-produto', 'pesq-categoria', 'pesq-status', 'pesq-responsavel'];
+    for (var j = 0; j < selects.length; j++) {
+      var select = document.getElementById(selects[j]);
+      if (select) select.selectedIndex = 0;
+    }
+
+    Pages.pesquisa.resultados = [];
+
+    var tabela = document.getElementById('pesquisa-tabela');
+    if (tabela) {
+      tabela.innerHTML = Components.emptyState('search', 'Utilize os campos acima para pesquisar atendimentos.');
+    }
+
+    var contador = document.getElementById('pesquisa-contador');
+    if (contador) contador.textContent = '';
+
+    Components.toast('Formulário limpo.', 'info', 2000);
+  },
+
+  obterCorStatus: function(status) {
+    var cores = {
+      'Aberto': '#00A3E0',
+      'Em Andamento': '#FF9800',
+      'Pendente': '#FFC107',
+      'Finalizado': '#43A047',
+      'Cancelado': '#9E9E9E',
+      'Reaberto': '#E53935'
+    };
+    return cores[status] || '#6c757d';
+  },
+
+  obterCorPrioridade: function(prioridade) {
+    var cores = {
+      'Crítica': '#D32F2F',
+      'Alta': '#E53935',
+      'Média': '#FF9800',
+      'Normal': '#2196F3',
+      'Baixa': '#43A047'
+    };
+    return cores[prioridade] || '#6c757d';
+  }
+};
+</script>

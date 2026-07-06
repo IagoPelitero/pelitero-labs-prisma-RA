@@ -1,0 +1,187 @@
+<script>
+Pages.dashboard = {
+  render: function(container) {
+    var html = '';
+
+    // Page header
+    html += '<div class="page-header">';
+    html += '  <div>';
+    html += '    <h1 class="page-title">Dashboard</h1>';
+    html += '    <p style="color: var(--text-secondary, #6c757d); margin: 4px 0 0 0;">Visão geral dos atendimentos</p>';
+    html += '  </div>';
+    html += '</div>';
+
+    // KPI cards container
+    html += '<div class="grid-4" id="dashboard-kpis">';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
+    html += '</div>';
+
+    // Alerts panel
+    html += '<div class="card" id="dashboard-alertas" style="margin-top: 24px;">';
+    html += '  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">';
+    html += '    <span class="material-icons" style="color: #FF9800;">warning</span>';
+    html += '    <h2 style="margin: 0; font-size: 1.15rem; font-weight: 600;">⚠️ Alertas</h2>';
+    html += '  </div>';
+    html += '  <div id="alertas-lista">';
+    html += '    <div style="text-align: center; padding: 32px; color: var(--text-secondary, #6c757d);">';
+    html += '      <span class="material-icons" style="font-size: 2rem; opacity: 0.5;">sync</span>';
+    html += '      <p>Carregando alertas...</p>';
+    html += '    </div>';
+    html += '  </div>';
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    // Load dashboard data
+    Pages.dashboard.carregarDados();
+  },
+
+  carregarDados: function() {
+    Components.showLoading('Carregando dados do dashboard...');
+
+    var filtros = App.getFilters();
+
+    google.script.run
+      .withSuccessHandler(function(data) {
+        Components.hideLoading();
+        Pages.dashboard.renderizarKPIs(data.cards);
+        Pages.dashboard.renderizarAlertas(data.alertas);
+      })
+      .withFailureHandler(function(erro) {
+        Components.hideLoading();
+        Components.toast('Erro ao carregar o dashboard: ' + erro.message, 'error', 5000);
+
+        var kpiContainer = document.getElementById('dashboard-kpis');
+        if (kpiContainer) {
+          kpiContainer.innerHTML = Components.emptyState('error_outline', 'Não foi possível carregar os indicadores. Tente novamente.');
+        }
+
+        var alertasLista = document.getElementById('alertas-lista');
+        if (alertasLista) {
+          alertasLista.innerHTML = Components.emptyState('error_outline', 'Não foi possível carregar os alertas.');
+        }
+      })
+      .getDashboardData(filtros);
+  },
+
+  renderizarKPIs: function(cards) {
+    var container = document.getElementById('dashboard-kpis');
+    if (!container) return;
+
+    var html = '';
+
+    // 1. Total de Atendimentos
+    html += Components.kpiCard(
+      'assignment',
+      App.formatNumber(cards.totalAtendimentos || 0),
+      'Total de Atendimentos',
+      '#0046C0',
+      cards.trendTotal || null
+    );
+
+    // 2. Recebidos Hoje
+    html += Components.kpiCard(
+      'today',
+      App.formatNumber(cards.recebidosHoje || 0),
+      'Recebidos Hoje',
+      '#00A3E0',
+      cards.trendRecebidosHoje || null
+    );
+
+    // 3. Em Andamento
+    html += Components.kpiCard(
+      'pending',
+      App.formatNumber(cards.emAndamento || 0),
+      'Em Andamento',
+      '#FF9800',
+      cards.trendEmAndamento || null
+    );
+
+    // 4. Pendentes
+    html += Components.kpiCard(
+      'hourglass_empty',
+      App.formatNumber(cards.pendentes || 0),
+      'Pendentes',
+      '#FFC107',
+      cards.trendPendentes || null
+    );
+
+    // 5. Finalizados
+    html += Components.kpiCard(
+      'check_circle',
+      App.formatNumber(cards.finalizados || 0),
+      'Finalizados',
+      '#43A047',
+      cards.trendFinalizados || null
+    );
+
+    // 6. SLA no Prazo
+    html += Components.kpiCard(
+      'timer',
+      App.formatNumber(cards.slaNoPrazo || 0),
+      'SLA no Prazo',
+      '#4CAF50',
+      cards.trendSlaNoPrazo || null
+    );
+
+    // 7. SLA Vencido
+    html += Components.kpiCard(
+      'timer_off',
+      App.formatNumber(cards.slaVencido || 0),
+      'SLA Vencido',
+      '#E53935',
+      cards.trendSlaVencido || null
+    );
+
+    // 8. Tempo Médio
+    html += Components.kpiCard(
+      'speed',
+      cards.tempoMedio || '0h',
+      'Tempo Médio',
+      '#9C27B0',
+      cards.trendTempoMedio || null
+    );
+
+    container.innerHTML = html;
+  },
+
+  renderizarAlertas: function(alertas) {
+    var lista = document.getElementById('alertas-lista');
+    if (!lista) return;
+
+    if (!alertas || alertas.length === 0) {
+      lista.innerHTML = Components.emptyState('check_circle', 'Nenhum alerta no momento. Tudo está em ordem!');
+      return;
+    }
+
+    var html = '';
+
+    for (var i = 0; i < alertas.length; i++) {
+      var alerta = alertas[i];
+      html += '<div onclick="Pages.dashboard.navegarAlerta(\'' + (alerta.atendimentoId || '') + '\')" style="cursor: pointer;">';
+      html += Components.alertCard(
+        alerta.tipo || 'warning',
+        alerta.mensagem || 'Alerta sem descrição',
+        alerta.atendimentoId || null,
+        alerta.prioridade || 'normal'
+      );
+      html += '</div>';
+    }
+
+    lista.innerHTML = html;
+  },
+
+  navegarAlerta: function(atendimentoId) {
+    if (atendimentoId) {
+      App.navigateTo('editar', { id: atendimentoId });
+    }
+  }
+};
+</script>

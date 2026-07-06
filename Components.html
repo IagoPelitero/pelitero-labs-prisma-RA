@@ -1,0 +1,667 @@
+<script>
+/* ============================================================
+   PORTO RA — Reusable UI Components
+   ============================================================ */
+
+const Components = {
+
+  /* ──────────────────────────────────────────────
+     Modal Dialog
+     options: {
+       title: string,
+       body: string (HTML),
+       onConfirm: function,
+       onCancel: function,
+       confirmText: string,
+       cancelText: string,
+       type: 'default' | 'danger' | 'warning' | 'success',
+       size: 'default' | 'lg' | 'xl',
+       icon: string (material icon name),
+       hideCancel: boolean
+     }
+  ────────────────────────────────────────────── */
+  modal: function(options) {
+    var opts = Object.assign({
+      title: 'Informação',
+      body: '',
+      onConfirm: null,
+      onCancel: null,
+      confirmText: 'Confirmar',
+      cancelText: 'Cancelar',
+      type: 'default',
+      size: 'default',
+      icon: 'info',
+      hideCancel: false
+    }, options);
+
+    var typeIcons = {
+      'default': 'info',
+      'danger': 'warning',
+      'warning': 'error_outline',
+      'success': 'check_circle'
+    };
+    var iconName = opts.icon || typeIcons[opts.type] || 'info';
+
+    var sizeClass = opts.size === 'lg' ? ' modal-lg' : (opts.size === 'xl' ? ' modal-xl' : '');
+    var headerClass = opts.type !== 'default' ? ' modal-' + opts.type : '';
+    var confirmBtnClass = opts.type === 'danger' ? 'btn btn-danger' : (opts.type === 'success' ? 'btn btn-success' : 'btn btn-primary');
+
+    var container = document.getElementById('modal-container');
+
+    var html = '<div class="modal-overlay" id="active-modal" onclick="Components._modalOverlayClick(event)">' +
+      '<div class="modal-content' + sizeClass + '">' +
+        '<div class="modal-header' + headerClass + '">' +
+          '<h2><span class="material-icons">' + iconName + '</span>' + opts.title + '</h2>' +
+          '<button class="modal-close" onclick="Components.closeModal()" title="Fechar">' +
+            '<span class="material-icons">close</span>' +
+          '</button>' +
+        '</div>' +
+        '<div class="modal-body">' + opts.body + '</div>' +
+        '<div class="modal-footer">' +
+          (!opts.hideCancel ? '<button class="btn btn-secondary" onclick="Components._modalCancel()">' + opts.cancelText + '</button>' : '') +
+          (opts.confirmText ? '<button class="' + confirmBtnClass + '" onclick="Components._modalConfirm()">' + opts.confirmText + '</button>' : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    container.innerHTML = html;
+
+    this._modalOnConfirm = opts.onConfirm;
+    this._modalOnCancel = opts.onCancel;
+
+    // Trap focus
+    document.body.style.overflow = 'hidden';
+
+    return container;
+  },
+
+  _modalOnConfirm: null,
+  _modalOnCancel: null,
+
+  _modalConfirm: function() {
+    var cb = this._modalOnConfirm;
+    this.closeModal();
+    if (typeof cb === 'function') cb();
+  },
+
+  _modalCancel: function() {
+    var cb = this._modalOnCancel;
+    this.closeModal();
+    if (typeof cb === 'function') cb();
+  },
+
+  _modalOverlayClick: function(e) {
+    if (e.target.id === 'active-modal') {
+      this.closeModal();
+    }
+  },
+
+  closeModal: function() {
+    var container = document.getElementById('modal-container');
+    var overlay = document.getElementById('active-modal');
+    if (overlay) {
+      overlay.style.animation = 'fadeIn 0.2s ease reverse';
+      setTimeout(function() {
+        container.innerHTML = '';
+        document.body.style.overflow = '';
+      }, 180);
+    }
+  },
+
+  /* ──────────────────────────────────────────────
+     Confirmation Dialog (shorthand)
+  ────────────────────────────────────────────── */
+  confirm: function(message, onConfirm, title) {
+    this.modal({
+      title: title || 'Confirmar ação',
+      body: '<p style="font-size:14px;line-height:1.6;color:var(--text-primary)">' + message + '</p>',
+      onConfirm: onConfirm,
+      type: 'warning',
+      icon: 'help_outline',
+      confirmText: 'Sim, confirmar',
+      cancelText: 'Cancelar'
+    });
+  },
+
+  /* ──────────────────────────────────────────────
+     Toast Notification
+     type: 'success' | 'error' | 'warning' | 'info'
+  ────────────────────────────────────────────── */
+  _toastCounter: 0,
+
+  toast: function(message, type, duration) {
+    type = type || 'info';
+    if (type === 'danger') type = 'error';
+    duration = duration || 4500;
+
+    var icons = {
+      success: 'check_circle',
+      error: 'error',
+      warning: 'warning',
+      info: 'info'
+    };
+
+    var container = document.getElementById('toast-container');
+    var id = 'toast-' + (++this._toastCounter);
+
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.id = id;
+    toast.innerHTML =
+      '<div class="toast-icon"><span class="material-icons">' + icons[type] + '</span></div>' +
+      '<div class="toast-body"><span class="toast-message">' + message + '</span></div>' +
+      '<button class="toast-dismiss" onclick="Components.dismissToast(\'' + id + '\')">' +
+        '<span class="material-icons" style="font-size:16px">close</span>' +
+      '</button>' +
+      '<div class="toast-progress" style="width:100%"></div>';
+
+    container.appendChild(toast);
+
+    // Animate progress bar
+    var progress = toast.querySelector('.toast-progress');
+    requestAnimationFrame(function() {
+      progress.style.transitionDuration = duration + 'ms';
+      progress.style.width = '0%';
+    });
+
+    // Auto dismiss
+    var timer = setTimeout(function() {
+      Components.dismissToast(id);
+    }, duration);
+
+    toast._timer = timer;
+
+    // Pause on hover
+    toast.addEventListener('mouseenter', function() {
+      clearTimeout(toast._timer);
+      progress.style.transitionDuration = '0ms';
+      progress.style.width = progress.offsetWidth / toast.offsetWidth * 100 + '%';
+    });
+
+    toast.addEventListener('mouseleave', function() {
+      var remaining = parseFloat(progress.style.width) / 100 * duration;
+      progress.style.transitionDuration = remaining + 'ms';
+      progress.style.width = '0%';
+      toast._timer = setTimeout(function() {
+        Components.dismissToast(id);
+      }, remaining);
+    });
+  },
+
+  dismissToast: function(id) {
+    var toast = document.getElementById(id);
+    if (!toast) return;
+    clearTimeout(toast._timer);
+    toast.classList.add('toast-exit');
+    setTimeout(function() {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
+  },
+
+  /* ──────────────────────────────────────────────
+     Loading Overlay
+  ────────────────────────────────────────────── */
+  showLoading: function(message) {
+    var el = document.getElementById('global-loading');
+    var msgEl = document.getElementById('loading-message');
+    if (msgEl) msgEl.textContent = message || 'Processando...';
+    if (el) el.style.display = 'flex';
+  },
+
+  hideLoading: function() {
+    var el = document.getElementById('global-loading');
+    if (el) el.style.display = 'none';
+  },
+
+  /* ──────────────────────────────────────────────
+     Status Badge
+  ────────────────────────────────────────────── */
+  statusBadge: function(status, cor) {
+    cor = cor || '#6B7280';
+    return '<span class="badge" style="background:' + cor + '">' + (status || '—') + '</span>';
+  },
+
+  /* ──────────────────────────────────────────────
+     SLA Badge
+     slaStatus: 'verde' | 'amarelo' | 'laranja' | 'vermelho'
+  ────────────────────────────────────────────── */
+  slaBadge: function(slaStatus) {
+    var colors = {
+      verde: '#43A047',
+      'dentro do prazo': '#43A047',
+      'no prazo': '#43A047',
+      amarelo: '#FDD835',
+      'vence hoje': '#FDD835',
+      laranja: '#FF9800',
+      'próximo do vencimento': '#FF9800',
+      'proximo do vencimento': '#FF9800',
+      vermelho: '#E53935',
+      'sla vencido': '#E53935',
+      vencido: '#E53935',
+      'fora do prazo': '#E53935'
+    };
+    var labels = {
+      verde: 'No prazo',
+      'dentro do prazo': 'No prazo',
+      'no prazo': 'No prazo',
+      amarelo: 'Vence hoje',
+      'vence hoje': 'Vence hoje',
+      laranja: 'Próximo',
+      'próximo do vencimento': 'Próximo',
+      'proximo do vencimento': 'Próximo',
+      vermelho: 'Vencido',
+      'sla vencido': 'Vencido',
+      vencido: 'Vencido',
+      'fora do prazo': 'Vencido'
+    };
+    var textColors = {
+      verde: '#fff',
+      'dentro do prazo': '#fff',
+      'no prazo': '#fff',
+      amarelo: '#333',
+      'vence hoje': '#333',
+      laranja: '#fff',
+      'próximo do vencimento': '#fff',
+      'proximo do vencimento': '#fff',
+      vermelho: '#fff',
+      'sla vencido': '#fff',
+      vencido: '#fff',
+      'fora do prazo': '#fff'
+    };
+
+    var key = (slaStatus || '').toLowerCase();
+    var bg = colors[key] || '#9E9E9E';
+    var label = labels[key] || slaStatus || '—';
+    var textColor = textColors[key] || '#fff';
+
+    return '<span class="badge badge-sla" style="background:' + bg + ';color:' + textColor + '">' + label + '</span>';
+  },
+
+  /* ──────────────────────────────────────────────
+     Timeline Component
+     entries: [{ tipo, descricao, usuario, dataHora, valorAntigo, valorNovo }]
+  ────────────────────────────────────────────── */
+  timeline: function(entries) {
+    if (!entries || entries.length === 0) {
+      return this.emptyState('timeline', 'Nenhum histórico encontrado');
+    }
+
+    var dotClasses = {
+      'Criação': 'dot-criacao',
+      'Atualização': 'dot-atualizacao',
+      'Resposta': 'dot-resposta',
+      'Escalação': 'dot-escalacao',
+      'Encerramento': 'dot-encerramento'
+    };
+
+    var html = '<div class="timeline">';
+
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var dotClass = dotClasses[e.tipo] || '';
+      var dateStr = e.dataHora ? new Date(e.dataHora).toLocaleString('pt-BR') : '';
+
+      html += '<div class="timeline-item">' +
+        '<div class="timeline-dot ' + dotClass + '"></div>' +
+        '<div class="timeline-card">' +
+          '<div class="timeline-header">' +
+            '<span class="timeline-type">' + (e.tipo || 'Evento') + '</span>' +
+            '<span class="timeline-date">' + dateStr + '</span>' +
+          '</div>' +
+          '<div class="timeline-desc">' + (e.descricao || '') + '</div>';
+
+      if (e.valorAntigo || e.valorNovo) {
+        html += '<div class="timeline-changes">' +
+          (e.valorAntigo ? '<del>' + e.valorAntigo + '</del> → ' : '') +
+          (e.valorNovo ? '<ins>' + e.valorNovo + '</ins>' : '') +
+        '</div>';
+      }
+
+      if (e.usuario) {
+        html += '<div class="timeline-user">' +
+          '<span class="material-icons">person</span>' + e.usuario +
+        '</div>';
+      }
+
+      html += '</div></div>';
+    }
+
+    html += '</div>';
+    return html;
+  },
+
+  /* ──────────────────────────────────────────────
+     Pagination Component
+  ────────────────────────────────────────────── */
+  pagination: function(currentPage, totalPages, onPageChangeFnName) {
+    if (totalPages <= 1) return '';
+
+    this._paginationCounter = (this._paginationCounter || 0) + 1;
+    var paginationId = 'pagination-' + this._paginationCounter;
+    this._paginationRegistry = this._paginationRegistry || {};
+    this._paginationRegistry[paginationId] = onPageChangeFnName;
+    var handler = function(page) {
+      return "Components._changePage('" + paginationId + "'," + page + ")";
+    };
+
+    var html = '<div class="pagination">';
+
+    // Previous button
+    html += '<button class="pagination-btn" ' +
+      (currentPage <= 1 ? 'disabled' : 'onclick="' + handler(currentPage - 1) + '"') +
+      '><span class="material-icons" style="font-size:18px">chevron_left</span></button>';
+
+    // Page numbers
+    var startPage = Math.max(1, currentPage - 2);
+    var endPage = Math.min(totalPages, currentPage + 2);
+
+    if (startPage > 1) {
+      html += '<button class="pagination-btn" onclick="' + handler(1) + '">1</button>';
+      if (startPage > 2) {
+        html += '<span class="pagination-info">...</span>';
+      }
+    }
+
+    for (var p = startPage; p <= endPage; p++) {
+      html += '<button class="pagination-btn' + (p === currentPage ? ' active' : '') + '" onclick="' + handler(p) + '">' + p + '</button>';
+    }
+
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) {
+        html += '<span class="pagination-info">...</span>';
+      }
+      html += '<button class="pagination-btn" onclick="' + handler(totalPages) + '">' + totalPages + '</button>';
+    }
+
+    // Next button
+    html += '<button class="pagination-btn" ' +
+      (currentPage >= totalPages ? 'disabled' : 'onclick="' + handler(currentPage + 1) + '"') +
+      '><span class="material-icons" style="font-size:18px">chevron_right</span></button>';
+
+    html += '</div>';
+    return html;
+  },
+
+  _paginationCounter: 0,
+  _paginationRegistry: {},
+
+  _changePage: function(id, page) {
+    var callback = this._paginationRegistry[id];
+    if (typeof callback === 'function') callback(page);
+    else if (typeof window[callback] === 'function') window[callback](page);
+  },
+
+  /* ──────────────────────────────────────────────
+     Empty State
+  ────────────────────────────────────────────── */
+  emptyState: function(icon, message, subtitle) {
+    return '<div class="empty-state">' +
+      '<span class="material-icons">' + (icon || 'inbox') + '</span>' +
+      '<div class="empty-state-title">' + (message || 'Nenhum dado encontrado') + '</div>' +
+      (subtitle ? '<div class="empty-state-message">' + subtitle + '</div>' : '') +
+    '</div>';
+  },
+
+  /* ──────────────────────────────────────────────
+     KPI Card
+  ────────────────────────────────────────────── */
+  kpiCard: function(icon, value, label, color, trend) {
+    color = color || '#0046C0';
+
+    var trendHtml = '';
+    if (trend) {
+      var trendClass = trend.direction === 'up' ? 'up' : 'down';
+      var trendIcon = trend.direction === 'up' ? 'trending_up' : 'trending_down';
+      trendHtml = '<div class="kpi-trend ' + trendClass + '">' +
+        '<span class="material-icons">' + trendIcon + '</span>' +
+        (trend.value || '') +
+      '</div>';
+    }
+
+    return '<div class="kpi-card" style="border-left-color:' + color + '">' +
+      '<div class="kpi-icon" style="background:' + color + '">' +
+        '<span class="material-icons">' + (icon || 'analytics') + '</span>' +
+      '</div>' +
+      '<div class="kpi-info">' +
+        '<div class="kpi-value">' + (value !== undefined && value !== null ? value : '—') + '</div>' +
+        '<div class="kpi-label">' + (label || '') + '</div>' +
+        trendHtml +
+      '</div>' +
+    '</div>';
+  },
+
+  /* ──────────────────────────────────────────────
+     Alert Card
+  ────────────────────────────────────────────── */
+  alertCard: function(tipo, mensagem, atendimentoId, prioridade) {
+    var severityMap = {
+      'SLA Vencido': 'critical',
+      'SLA Próximo': 'high',
+      'Reincidência': 'high',
+      'Sem Resposta': 'medium',
+      'Aguardando': 'low'
+    };
+
+    var colorMap = {
+      critical: '#E53935',
+      high: '#FF6B00',
+      medium: '#FDD835',
+      low: '#00A3E0'
+    };
+
+    var iconMap = {
+      critical: 'error',
+      high: 'warning',
+      medium: 'schedule',
+      low: 'info'
+    };
+
+    var severity = severityMap[tipo] || 'low';
+    var bgColor = colorMap[severity];
+    var iconName = iconMap[severity];
+
+    return '<div class="alert-card severity-' + severity + '">' +
+      '<div class="alert-icon" style="background:' + bgColor + '">' +
+        '<span class="material-icons">' + iconName + '</span>' +
+      '</div>' +
+      '<div class="alert-content">' +
+        '<div class="alert-type" style="color:' + bgColor + '">' + (tipo || 'Alerta') + '</div>' +
+        '<div class="alert-message">' + (mensagem || '') + '</div>' +
+        (atendimentoId ? '<div class="alert-meta">ID: ' + atendimentoId + (prioridade ? ' · Prioridade: ' + prioridade : '') + '</div>' : '') +
+      '</div>' +
+      '<span class="material-icons" style="color:var(--text-muted);font-size:18px">chevron_right</span>' +
+    '</div>';
+  },
+
+  /* ──────────────────────────────────────────────
+     Data Table (sortable)
+     options: {
+       headers: [{ key, label, sortable, width }],
+       rows: [{ col1: val, col2: val, ... }],
+       actions: function(row) => HTML string of action buttons,
+       onSort: function(field, dir),
+       sortField: string,
+       sortDir: 'asc' | 'desc',
+       onRowClick: function name as string (will receive row index),
+       emptyMessage: string,
+       emptyIcon: string
+     }
+  ────────────────────────────────────────────── */
+  dataTable: function(options) {
+    var opts = Object.assign({
+      headers: [],
+      rows: [],
+      actions: null,
+      onSort: null,
+      sortField: '',
+      sortDir: 'asc',
+      onRowClick: null,
+      emptyMessage: 'Nenhum registro encontrado',
+      emptyIcon: 'search_off'
+    }, options);
+
+    if (!opts.rows || opts.rows.length === 0) {
+      return '<div class="table-container">' +
+        '<table class="data-table"><thead><tr>' +
+        opts.headers.map(function(h) { return '<th>' + h.label + '</th>'; }).join('') +
+        (opts.actions ? '<th style="width:120px">Ações</th>' : '') +
+        '</tr></thead></table>' +
+        this.emptyState(opts.emptyIcon, opts.emptyMessage) +
+      '</div>';
+    }
+
+    this._tableCounter = (this._tableCounter || 0) + 1;
+    var tableId = 'table-' + this._tableCounter;
+    this._tableRegistry = this._tableRegistry || {};
+    this._tableRegistry[tableId] = {
+      rows: opts.rows,
+      actions: opts.actions,
+      onSort: opts.onSort
+    };
+
+    var html = '<div class="table-container"><table class="data-table"><thead><tr>';
+
+    // Headers
+    for (var h = 0; h < opts.headers.length; h++) {
+      var header = opts.headers[h];
+      var widthStyle = header.width ? ' style="width:' + header.width + '"' : '';
+      var sortable = header.sortable !== false;
+      var headerKey = header.key || header.field || String(h);
+      var isSorted = opts.sortField === headerKey;
+      var sortedClass = isSorted ? ' sorted' : '';
+
+      if (sortable && opts.onSort) {
+        var nextDir = (isSorted && opts.sortDir === 'asc') ? 'desc' : 'asc';
+        var sortIcon = isSorted ? (opts.sortDir === 'asc' ? 'arrow_upward' : 'arrow_downward') : 'unfold_more';
+        html += '<th class="' + sortedClass + '"' + widthStyle +
+          ' onclick="Components._sortTable(\'' + tableId + '\',\'' + headerKey + '\',\'' + nextDir + '\')">' +
+          header.label + '<span class="material-icons sort-icon">' + sortIcon + '</span></th>';
+      } else {
+        html += '<th' + widthStyle + '>' + header.label + '</th>';
+      }
+    }
+
+    if (opts.actions) {
+      html += '<th style="width:120px;text-align:center">Ações</th>';
+    }
+
+    html += '</tr></thead><tbody>';
+
+    // Rows
+    for (var r = 0; r < opts.rows.length; r++) {
+      var row = opts.rows[r];
+      var rowClick = opts.onRowClick ? ' class="row-clickable" onclick="' + opts.onRowClick + '(' + r + ')"' : '';
+
+      html += '<tr' + rowClick + '>';
+
+      for (var c = 0; c < opts.headers.length; c++) {
+        var key = opts.headers[c].key || opts.headers[c].field || String(c);
+        var cellVal = Array.isArray(row) && row[c] !== undefined
+          ? row[c]
+          : (row.cells && row.cells[c] !== undefined
+            ? row.cells[c]
+            : (row[key] !== undefined && row[key] !== null ? row[key] : ''));
+        html += '<td>' + cellVal + '</td>';
+      }
+
+      if (opts.actions) {
+        var actionsHtml = '';
+        if (Array.isArray(opts.actions)) {
+          for (var a = 0; a < opts.actions.length; a++) {
+            var action = opts.actions[a];
+            var actionIcon = /^[a-z_]+$/.test(action.icon || '')
+              ? '<span class="material-icons" style="font-size:18px">' + action.icon + '</span>'
+              : (action.icon || '•');
+            actionsHtml += '<button type="button" class="btn-action" title="' + (action.title || 'Ação') +
+              '" onclick="Components._runTableAction(\'' + tableId + '\',' + a + ',' + r + ',event)">' +
+              actionIcon + '</button>';
+          }
+        } else if (typeof opts.actions === 'function') {
+          actionsHtml = opts.actions(row, r);
+        }
+        html += '<td class="actions" style="text-align:center">' + actionsHtml + '</td>';
+      }
+
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+    return html;
+  },
+
+  _tableCounter: 0,
+  _tableRegistry: {},
+
+  _sortTable: function(id, field, direction) {
+    var config = this._tableRegistry[id];
+    if (config && typeof config.onSort === 'function') config.onSort(field, direction);
+  },
+
+  _runTableAction: function(id, actionIndex, rowIndex, event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    var config = this._tableRegistry[id];
+    if (!config || !Array.isArray(config.actions)) return;
+    var action = config.actions[actionIndex];
+    var row = config.rows[rowIndex];
+    if (action && typeof action.onClick === 'function') action.onClick(row);
+  },
+
+  /* ──────────────────────────────────────────────
+     Tabs Component
+     options: {
+       tabs: [{ id, label, icon, badge }],
+       activeTab: string,
+       onTabChange: function name as string
+     }
+  ────────────────────────────────────────────── */
+  tabs: function(options) {
+    var html = '<div class="tabs">';
+
+    for (var i = 0; i < options.tabs.length; i++) {
+      var tab = options.tabs[i];
+      var active = tab.id === options.activeTab ? ' active' : '';
+      var badgeHtml = tab.badge ? '<span class="tab-badge">' + tab.badge + '</span>' : '';
+      var iconHtml = tab.icon ? '<span class="material-icons">' + tab.icon + '</span>' : '';
+
+      html += '<div class="tab-item' + active + '" onclick="' + options.onTabChange + '(\'' + tab.id + '\')">' +
+        iconHtml + tab.label + badgeHtml +
+      '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  },
+
+  /* ──────────────────────────────────────────────
+     Search Box
+  ────────────────────────────────────────────── */
+  searchBox: function(placeholder, onInputFnName, value) {
+    return '<div class="search-box">' +
+      '<span class="material-icons">search</span>' +
+      '<input type="text" placeholder="' + (placeholder || 'Pesquisar...') + '" ' +
+        'oninput="' + onInputFnName + '(this.value)" ' +
+        (value ? 'value="' + value + '"' : '') +
+      '>' +
+    '</div>';
+  },
+
+  /* ──────────────────────────────────────────────
+     Card wrapper
+  ────────────────────────────────────────────── */
+  card: function(title, body, icon, headerRight) {
+    return '<div class="card animate-fade-in">' +
+      '<div class="card-header">' +
+        '<div class="card-title">' +
+          (icon ? '<span class="material-icons">' + icon + '</span>' : '') +
+          title +
+        '</div>' +
+        (headerRight || '') +
+      '</div>' +
+      '<div class="card-body">' + body + '</div>' +
+    '</div>';
+  }
+};
+</script>
