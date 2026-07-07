@@ -437,7 +437,7 @@ Pages.atendimentos = {
           body += self._detalheItem('Data Abertura', self._formatarData(atd.dataAbertura));
           body += self._detalheItem('Data Prevista', self._formatarData(atd.dataPrevista));
           if (atd.motivoPendencia) {
-            body += self._detalheItem('Motivo Pendência', atd.motivoPendencia);
+            body += self._detalheItem('Aguardando Retorno de', atd.motivoPendencia);
           }
           body += '</div>';
 

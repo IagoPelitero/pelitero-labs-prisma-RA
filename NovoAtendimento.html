@@ -9,11 +9,11 @@
    id, a tela carrega os dados desse atendimento; se vier vazio/nulo, a
    tela abre em branco para um cadastro novo.
 
-   Campos do formulário: Data, Protocolo, Nome, CPF, Status, "Pendente com"
-   (só visível quando Status = "Em análise") e Observações. O campo
-   "Responsável" só aparece para o perfil Supervisor (analista nunca
-   escolhe responsável — o sistema identifica automaticamente quem criou
-   o atendimento, em Services.gs/getActor_()).
+   Campos do formulário: Data, Protocolo, Nome, CPF, Produto, Canal, Status,
+   "Aguardando Retorno de" (só visível quando Status = "Pendente") e
+   Observações. O campo "Responsável" só aparece para o perfil Supervisor
+   (analista nunca escolhe responsável — o sistema identifica
+   automaticamente quem criou o atendimento, em Services.gs/getActor_()).
 
    Funções que começam com "_" são de uso interno da própria página.
    Fluxo resumido:
@@ -21,7 +21,8 @@
                                    servidor; depois chama _renderForm().
      _renderForm(container)      → desenha todos os campos do formulário.
      _bindEvents()                → liga os eventos dos campos (mudar
-                                   status mostra/esconde "Pendente com").
+                                   status mostra/esconde "Aguardando
+                                   Retorno de").
      _validarFormulario()         → confere se os campos obrigatórios
                                    foram preenchidos antes de salvar.
      _coletarDados()              → junta os valores dos campos da tela
@@ -123,7 +124,35 @@ Pages.novoAtendimento = {
     html += '    </div>';
     html += '  </div>';
 
-    // Linha 3: Status + Pendente com
+    // Linha 3: Produto + Canal
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-produto">Produto <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-produto" class="form-control" required>';
+    html += '        <option value="">Selecione</option>';
+    if (dd.produtos) {
+      dd.produtos.forEach(function(p) {
+        var sel = (atd.produto === p) ? ' selected' : '';
+        html += '        <option value="' + self._escape(p) + '"' + sel + '>' + self._escape(p) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label" for="campo-canal">Canal <span style="color:var(--danger)">*</span></label>';
+    html += '      <select id="campo-canal" class="form-control" required>';
+    html += '        <option value="">Selecione</option>';
+    if (dd.canais) {
+      dd.canais.forEach(function(c) {
+        var sel = (atd.canal === c) ? ' selected' : '';
+        html += '        <option value="' + self._escape(c) + '"' + sel + '>' + self._escape(c) + '</option>';
+      });
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+
+    // Linha 4: Status + Aguardando Retorno de
     html += '  <div class="form-row">';
     html += '    <div class="form-group">';
     html += '      <label class="form-label" for="campo-status">Status <span style="color:var(--danger)">*</span></label>';
@@ -136,8 +165,8 @@ Pages.novoAtendimento = {
     }
     html += '      </select>';
     html += '    </div>';
-    html += '    <div class="form-group" id="grupo-motivo-pendencia" style="' + (self._isStatusEmAnalise(statusAtual) ? '' : 'display:none;') + '">';
-    html += '      <label class="form-label" for="campo-motivo-pendencia">Pendente com <span style="color:var(--danger)">*</span></label>';
+    html += '    <div class="form-group" id="grupo-motivo-pendencia" style="' + (self._isStatusPendente(statusAtual) ? '' : 'display:none;') + '">';
+    html += '      <label class="form-label" for="campo-motivo-pendencia">Aguardando Retorno de <span style="color:var(--danger)">*</span></label>';
     html += '      <select id="campo-motivo-pendencia" class="form-control">';
     html += '        <option value="">Selecione</option>';
     if (dd.motivosPendencia) {
@@ -247,13 +276,13 @@ Pages.novoAtendimento = {
       });
     }
 
-    // Status muda → mostrar/esconder "Pendente com" (só aparece em "Em análise")
+    // Status muda → mostrar/esconder "Aguardando Retorno de" (só aparece em "Pendente")
     var campoStatus = document.getElementById('campo-status');
     if (campoStatus) {
       campoStatus.addEventListener('change', function() {
         var grupoMotivo = document.getElementById('grupo-motivo-pendencia');
         if (grupoMotivo) {
-          if (self._isStatusEmAnalise(this.value)) {
+          if (self._isStatusPendente(this.value)) {
             grupoMotivo.style.display = '';
           } else {
             grupoMotivo.style.display = 'none';
@@ -405,10 +434,9 @@ Pages.novoAtendimento = {
     return allowed.indexOf(profile) !== -1;
   },
 
-  _isStatusEmAnalise: function(status) {
+  _isStatusPendente: function(status) {
     if (!status) return false;
-    var normalized = status.toLowerCase();
-    return normalized.indexOf('análise') !== -1 || normalized.indexOf('analise') !== -1;
+    return status.toLowerCase().indexOf('pendente') !== -1;
   },
 
   _validarFormulario: function() {
@@ -417,17 +445,21 @@ Pages.novoAtendimento = {
     var dataAbertura = document.getElementById('campo-data-abertura');
     var ra = document.getElementById('campo-ra');
     var cliente = document.getElementById('campo-cliente');
+    var produto = document.getElementById('campo-produto');
+    var canal = document.getElementById('campo-canal');
     var status = document.getElementById('campo-status');
     var motivoPendencia = document.getElementById('campo-motivo-pendencia');
 
     if (!dataAbertura || !dataAbertura.value) erros.push('Data é obrigatória.');
     if (!ra || !ra.value.trim()) erros.push('Protocolo é obrigatório.');
     if (!cliente || !cliente.value.trim()) erros.push('Nome é obrigatório.');
+    if (!produto || !produto.value) erros.push('Produto é obrigatório.');
+    if (!canal || !canal.value) erros.push('Canal é obrigatório.');
     if (!status || !status.value) erros.push('Status é obrigatório.');
 
-    if (status && this._isStatusEmAnalise(status.value)) {
+    if (status && this._isStatusPendente(status.value)) {
       if (!motivoPendencia || !motivoPendencia.value) {
-        erros.push('"Pendente com" é obrigatório quando o Status é "Em análise".');
+        erros.push('"Aguardando Retorno de" é obrigatório quando o Status é "Pendente".');
       }
     }
 
@@ -450,6 +482,8 @@ Pages.novoAtendimento = {
       numeroRA: (document.getElementById('campo-ra').value || '').trim(),
       cliente: (document.getElementById('campo-cliente').value || '').trim(),
       cpf: (document.getElementById('campo-cpf').value || '').trim(),
+      produto: document.getElementById('campo-produto').value || '',
+      canal: document.getElementById('campo-canal').value || '',
       status: document.getElementById('campo-status').value || '',
       observacoes: (document.getElementById('campo-observacoes').value || '').trim(),
       dataAbertura: document.getElementById('campo-data-abertura').value || '',
@@ -647,7 +681,7 @@ Pages.novoAtendimento = {
       campoData.value = new Date().toISOString().split('T')[0];
     }
 
-    // Esconder "Pendente com"
+    // Esconder "Aguardando Retorno de"
     var grupoMotivo = document.getElementById('grupo-motivo-pendencia');
     if (grupoMotivo) grupoMotivo.style.display = 'none';
 

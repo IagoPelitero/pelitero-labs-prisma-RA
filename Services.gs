@@ -513,6 +513,8 @@ function validateAtendimentoInput_(dados) {
   const required = {
     numeroRA: 'Protocolo',
     cliente: 'Nome',
+    produto: 'Produto',
+    canal: 'Canal',
     status: 'Status'
   };
   Object.keys(required).forEach(function(key) {
@@ -525,8 +527,12 @@ function validateAtendimentoInput_(dados) {
     throw new Error('O SLA deve ser um número entre 1 e 8760 horas.');
   }
   if (isWaitingStatus_(input.status) && !input.motivoPendencia) {
-    throw new Error('"Pendente com" é obrigatório quando o Status é "Em análise".');
+    throw new Error('"Aguardando Retorno de" é obrigatório quando o Status é "Pendente".');
   }
+
+  // Todos os atendimentos da célula de Reclame Aqui são tratados como
+  // Urgentes automaticamente — o usuário nunca escolhe nem vê a prioridade.
+  input.prioridade = 'Urgente';
 
   input.cpf = input.cpf ? formatCPF(input.cpf) : '';
   return input;
@@ -690,14 +696,14 @@ function isWaitingStatus_(statusName) {
   const status = normalizeText_(statusName);
   if (!status) return false;
   const configured = getStatusConfigMap_()[status];
-  return configured ? normalizeText_(configured.Tipo) === 'espera' : status.indexOf('aguardando') !== -1;
+  return configured ? normalizeText_(configured.Tipo) === 'espera' : status.indexOf('pendente') !== -1;
 }
 
 function isFinalStatus_(statusName) {
   const normalized = normalizeText_(statusName);
   const configured = getStatusConfigMap_()[normalized];
   if (configured) return normalizeText_(configured.Tipo) === 'final';
-  return ['resolvido', 'finalizado', 'cancelado', 'improcedente'].indexOf(normalized) !== -1;
+  return ['resolvido', 'finalizado', 'cancelado', 'improcedente', 'concluido'].indexOf(normalized) !== -1;
 }
 
 function insertWaitTimeline_(record, type, date, elapsedHours, userName) {
@@ -791,31 +797,27 @@ function getDashboardData(filtros) {
   const today = new Date();
   const settings = getRuntimeSettings_();
 
-  let receivedToday = 0;
-  let inProgress = 0;
-  let pending = 0;
-  let finalized = 0;
-  let slaOnTime = 0;
-  let slaExpired = 0;
-  let resolutionTotal = 0;
-  let resolutionCount = 0;
+  let pendentes = 0;
+  let emAnalise = 0;
+  let concluidos = 0;
+  let pendentesAguardandoArea = 0;
+  let pendentesAguardandoCliente = 0;
   const alerts = [];
 
   raw.forEach(function(record, index) {
     const client = records[index];
-    if (isSameDay(record.DataAbertura, today)) receivedToday++;
     const waiting = isWaitingStatus_(record.Status);
     const finalStatus = isFinalStatus_(record.Status);
-    if (waiting) pending++;
-    else if (finalStatus) finalized++;
-    else inProgress++;
+    const waitingClient = normalizeText_(record.MotivoPendencia).indexOf('cliente') !== -1;
 
-    if (normalizeText_(client.slaStatus) === 'sla vencido') slaExpired++;
-    else slaOnTime++;
-
-    if (Number(record.TempoResolucaoHoras) >= 0 && record.TempoResolucaoHoras !== '') {
-      resolutionTotal += Number(record.TempoResolucaoHoras);
-      resolutionCount++;
+    if (waiting) {
+      pendentes++;
+      if (waitingClient) pendentesAguardandoCliente++;
+      else pendentesAguardandoArea++;
+    } else if (finalStatus) {
+      concluidos++;
+    } else {
+      emAnalise++;
     }
 
     if (!finalStatus && normalizeText_(client.slaStatus) === 'sla vencido') {
@@ -836,7 +838,6 @@ function getDashboardData(filtros) {
 
     if (waiting && record.DataInicioEspera) {
       const hours = Math.max(0, diffInHours(record.DataInicioEspera, today));
-      const waitingClient = normalizeText_(record.Status).indexOf('cliente') !== -1;
       const exceeded = waitingClient
         ? hours >= settings.waitClientDays * 24
         : hours >= settings.waitAreaHours;
@@ -854,13 +855,11 @@ function getDashboardData(filtros) {
 
   const cards = {
     totalAtendimentos: records.length,
-    recebidosHoje: receivedToday,
-    emAndamento: inProgress,
-    pendentes: pending,
-    finalizados: finalized,
-    slaNoPrazo: slaOnTime,
-    slaVencido: slaExpired,
-    tempoMedio: resolutionCount ? (resolutionTotal / resolutionCount).toFixed(1) + 'h' : '0h'
+    pendentes: pendentes,
+    emAnalise: emAnalise,
+    concluidos: concluidos,
+    pendentesAguardandoArea: pendentesAguardandoArea,
+    pendentesAguardandoCliente: pendentesAguardandoCliente
   };
 
   writeDashboardSnapshot_(cards);

@@ -247,13 +247,16 @@ const COLUMNS = {
  * Status padrão do sistema.
  * Tipos:
  *   - Espera: status de aguardo (pausa o SLA); é quando o campo
- *     "Pendente com" (Área/Cliente) fica visível no formulário.
+ *     "Aguardando Retorno de" (Área/Cliente) fica visível no formulário.
+ *   - Intermediario: em tratativa ativa, sem pendência declarada.
  *   - Final: status de encerramento.
- * Simplificado a pedido do negócio: apenas "Em análise" e "Finalizado".
+ * Fluxo operacional da célula de Reclame Aqui: apenas "Pendente",
+ * "Em análise" e "Concluído".
  */
 const DEFAULT_STATUS = [
-  { Id: 'ST001', Nome: 'Em análise', Tipo: 'Espera', Cor: '#FF9800', Ativo: true, Ordem: 1 },
-  { Id: 'ST002', Nome: 'Finalizado', Tipo: 'Final',  Cor: '#4CAF50', Ativo: true, Ordem: 2 }
+  { Id: 'ST001', Nome: 'Pendente',   Tipo: 'Espera',        Cor: '#FF9800', Ativo: true, Ordem: 1 },
+  { Id: 'ST002', Nome: 'Em análise', Tipo: 'Intermediario', Cor: '#2196F3', Ativo: true, Ordem: 2 },
+  { Id: 'ST003', Nome: 'Concluído',  Tipo: 'Final',         Cor: '#4CAF50', Ativo: true, Ordem: 3 }
 ];
 
 /**
@@ -274,17 +277,12 @@ const DEFAULT_PRIORIDADES = [
 ];
 
 /**
- * Canais de entrada padrão do Reclame Aqui.
+ * Canais de entrada padrão. Fluxo da célula de Reclame Aqui da Porto:
+ * apenas "SAC Preventivo" e "Reclame Aqui".
  */
 const DEFAULT_CANAIS = [
-  { Id: 'CN001', Nome: 'Reclame Aqui',   Icone: '📢', Ativo: true, Ordem: 1 },
-  { Id: 'CN002', Nome: 'Consumidor.gov', Icone: '🏛️', Ativo: true, Ordem: 2 },
-  { Id: 'CN003', Nome: 'Procon',         Icone: '⚖️', Ativo: true, Ordem: 3 },
-  { Id: 'CN004', Nome: 'Bacen',          Icone: '🏦', Ativo: true, Ordem: 4 },
-  { Id: 'CN005', Nome: 'Susep',          Icone: '📋', Ativo: true, Ordem: 5 },
-  { Id: 'CN006', Nome: 'ANS',            Icone: '🏥', Ativo: true, Ordem: 6 },
-  { Id: 'CN007', Nome: 'Judicial',       Icone: '⚖️', Ativo: true, Ordem: 7 },
-  { Id: 'CN008', Nome: 'Ouvidoria',      Icone: '📞', Ativo: true, Ordem: 8 }
+  { Id: 'CN001', Nome: 'SAC Preventivo', Icone: '📞', Ativo: true, Ordem: 1 },
+  { Id: 'CN002', Nome: 'Reclame Aqui',   Icone: '📢', Ativo: true, Ordem: 2 }
 ];
 
 /**
@@ -298,9 +296,9 @@ const DEFAULT_TIPOS_ATENDIMENTO = [
 ];
 
 /**
- * "Pendente com" (armazenado na coluna/planilha MotivosPendencia por
- * compatibilidade com o restante do sistema — Timeline, Histórico, etc.).
- * Utilizado apenas quando o Status do atendimento é "Em análise".
+ * "Aguardando Retorno de" (armazenado na coluna/planilha MotivosPendencia
+ * por compatibilidade com o restante do sistema — Timeline, Histórico,
+ * etc.). Utilizado apenas quando o Status do atendimento é "Pendente".
  * Simplificado a pedido do negócio: apenas "Área" e "Cliente".
  */
 const DEFAULT_MOTIVOS_PENDENCIA = [
@@ -342,18 +340,8 @@ const DEFAULT_CONFIGURACOES = [
  *   5. "Ordem" define a posição na lista (números maiores aparecem depois).
  */
 const DEFAULT_PRODUTOS = [
-  { Id: 'PD001', Nome: 'Auto',             Descricao: 'Seguro Automóvel',           Ativo: true, Ordem: 1 },
-  { Id: 'PD002', Nome: 'Residencial',      Descricao: 'Seguro Residencial',         Ativo: true, Ordem: 2 },
-  { Id: 'PD003', Nome: 'Vida',             Descricao: 'Seguro de Vida',             Ativo: true, Ordem: 3 },
-  { Id: 'PD004', Nome: 'Saúde',            Descricao: 'Plano de Saúde',             Ativo: true, Ordem: 4 },
-  { Id: 'PD005', Nome: 'Odontológico',     Descricao: 'Plano Odontológico',         Ativo: true, Ordem: 5 },
-  { Id: 'PD006', Nome: 'Consórcio',        Descricao: 'Consórcio',                  Ativo: true, Ordem: 6 },
-  { Id: 'PD007', Nome: 'Cartão',           Descricao: 'Cartão Porto Bank',          Ativo: true, Ordem: 7 },
-  { Id: 'PD008', Nome: 'Financiamento',    Descricao: 'Financiamento e Crédito',    Ativo: true, Ordem: 8 },
-  { Id: 'PD009', Nome: 'Capitalização',    Descricao: 'Título de Capitalização',    Ativo: true, Ordem: 9 },
-  { Id: 'PD010', Nome: 'Previdência',      Descricao: 'Previdência Privada',        Ativo: true, Ordem: 10 },
-  // Produto novo adicionado a pedido do negócio (conta digital do PortoBank).
-  { Id: 'PD011', Nome: 'Conta Digital PortoBank', Descricao: 'Conta digital, Pix, transferências e cartão da conta PortoBank', Ativo: true, Ordem: 11 }
+  { Id: 'PD001', Nome: 'Cartão de Crédito', Descricao: 'Cartão de Crédito Porto Bank', Ativo: true, Ordem: 1 },
+  { Id: 'PD002', Nome: 'Conta',             Descricao: 'Conta digital Porto Bank',     Ativo: true, Ordem: 2 }
 ];
 
 /**

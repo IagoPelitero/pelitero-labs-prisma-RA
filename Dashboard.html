@@ -41,8 +41,6 @@ Pages.dashboard = {
     html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
     html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
     html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
-    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
-    html += '  <div class="kpi-card skeleton-loading" style="min-height: 100px;"></div>';
     html += '</div>';
 
     // Alerts panel
@@ -104,71 +102,47 @@ Pages.dashboard = {
       'assignment',
       App.formatNumber(cards.totalAtendimentos || 0),
       'Total de Atendimentos',
-      '#0046C0',
-      cards.trendTotal || null
+      '#0046C0'
     );
 
-    // 2. Recebidos Hoje
-    html += Components.kpiCard(
-      'today',
-      App.formatNumber(cards.recebidosHoje || 0),
-      'Recebidos Hoje',
-      '#00A3E0',
-      cards.trendRecebidosHoje || null
-    );
-
-    // 3. Em Andamento
-    html += Components.kpiCard(
-      'pending',
-      App.formatNumber(cards.emAndamento || 0),
-      'Em Andamento',
-      '#FF9800',
-      cards.trendEmAndamento || null
-    );
-
-    // 4. Pendentes
+    // 2. Pendentes
     html += Components.kpiCard(
       'hourglass_empty',
       App.formatNumber(cards.pendentes || 0),
       'Pendentes',
-      '#FFC107',
-      cards.trendPendentes || null
+      '#FF9800'
     );
 
-    // 5. Finalizados
+    // 3. Em análise
+    html += Components.kpiCard(
+      'pending_actions',
+      App.formatNumber(cards.emAnalise || 0),
+      'Em Análise',
+      '#2196F3'
+    );
+
+    // 4. Concluídos
     html += Components.kpiCard(
       'check_circle',
-      App.formatNumber(cards.finalizados || 0),
-      'Finalizados',
-      '#43A047',
-      cards.trendFinalizados || null
+      App.formatNumber(cards.concluidos || 0),
+      'Concluídos',
+      '#43A047'
     );
 
-    // 6. SLA no Prazo
+    // 5. Pendentes aguardando Área
     html += Components.kpiCard(
-      'timer',
-      App.formatNumber(cards.slaNoPrazo || 0),
-      'SLA no Prazo',
-      '#4CAF50',
-      cards.trendSlaNoPrazo || null
+      'apartment',
+      App.formatNumber(cards.pendentesAguardandoArea || 0),
+      'Pendentes aguardando Área',
+      '#9C27B0'
     );
 
-    // 7. SLA Vencido
+    // 6. Pendentes aguardando Cliente
     html += Components.kpiCard(
-      'timer_off',
-      App.formatNumber(cards.slaVencido || 0),
-      'SLA Vencido',
-      '#E53935',
-      cards.trendSlaVencido || null
-    );
-
-    // 8. Tempo Médio
-    html += Components.kpiCard(
-      'speed',
-      cards.tempoMedio || '0h',
-      'Tempo Médio',
-      '#9C27B0',
-      cards.trendTempoMedio || null
+      'person',
+      App.formatNumber(cards.pendentesAguardandoCliente || 0),
+      'Pendentes aguardando Cliente',
+      '#00A3E0'
     );
 
     container.innerHTML = html;
