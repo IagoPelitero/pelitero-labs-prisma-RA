@@ -3,8 +3,8 @@
 ## Descrição do projeto
 
 Sistema corporativo da célula de **Reclame Aqui** do Portobank para gestão dos atendimentos
-dos produtos **Cartão de Crédito** e **Conta Digital**, recebidos pelos canais **Reclame Aqui**
-e **SAC Preventivo**. Permite que analistas cadastrem, acompanhem e concluam seus próprios
+dos produtos **Cartão de Crédito** e **Conta Digital PortoBank**, recebidos pelos canais
+**Reclame Aqui** e **SAC Preventivo**. Permite que analistas cadastrem, acompanhem e concluam seus próprios
 atendimentos, e que supervisores tenham visão completa da operação, podendo criar atendimentos
 e delegá-los a analistas — tudo com histórico auditável de alterações.
 
@@ -107,7 +107,24 @@ Todas as abas são criadas e mantidas automaticamente por `initializeSheets()` (
 | **Timeline** | Eventos cronológicos de cada atendimento (criação, mudança de status, delegação, observações, exclusão). |
 | **Histórico** | Registro imutável (somente inserção) de toda alteração de campo, com valor anterior/novo, usuário e justificativa. |
 | **Usuários** | Cadastro de analistas e supervisores (nome, e-mail, perfil, equipe, status). |
-| **Produtos / Categorias** | Listas administráveis (Cartão de Crédito e Conta Digital, com suas categorias) usadas para classificar atendimentos. |
+| **Produtos / Categorias** | Listas administráveis usadas para classificar atendimentos (ver catálogo abaixo). |
+
+### Catálogo de produtos e categorias
+
+O sistema trabalha com **apenas dois produtos** — os únicos exibidos em Novo Atendimento,
+Relatórios e Configurações:
+
+| Produto | Categorias |
+| --- | --- |
+| **Cartão de Crédito** | Contestação de compra · Cobrança indevida · Anuidade · Limite de crédito · Bloqueio/Desbloqueio · Fatura |
+| **Conta Digital PortoBank** | Conta Digital PortoBank · Abertura/Encerramento · Transferência/Pix · Cobrança indevida · Acesso ao aplicativo · Cartão de débito · Portabilidade de salário · Rendimento/Investimentos |
+
+O catálogo padrão fica em `DEFAULT_PRODUTOS`/`DEFAULT_CATEGORIAS` ([Config.gs](Config.gs)).
+Na primeira execução após a atualização, a migração (`reseedCatalog_` em
+[Database.gs](Database.gs)) **substitui os produtos e categorias antigos** da planilha por
+este catálogo (uma única vez por versão) e normaliza os produtos dos atendimentos já
+cadastrados (ex.: "Conta" → "Conta Digital PortoBank"). Depois disso, o supervisor pode
+incluir novas categorias para esses dois produtos pela tela de **Configurações**.
 
 Status, situações de pendência e canais são **regras fixas do fluxo**, definidas em
 [Config.gs](Config.gs) (não são abas da planilha nem administráveis pela interface):

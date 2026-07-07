@@ -183,7 +183,12 @@ function migrateLegacyData_(ss) {
     }
   });
 
-  // 2) Normaliza status e situação de pendência dos atendimentos existentes.
+  // 2) Ressemeia o catálogo de Produtos/Categorias (uma única vez por versão):
+  //    remove os produtos e categorias antigos e insere apenas
+  //    Cartão de Crédito e Conta Digital PortoBank com suas categorias.
+  reseedCatalog_(ss);
+
+  // 3) Normaliza status e situação de pendência dos atendimentos existentes.
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.ATENDIMENTOS);
   if (!sheet || sheet.getLastRow() <= 1) return;
 
@@ -218,6 +223,74 @@ function migrateLegacyData_(ss) {
   if (changed) {
     range.setValues(rows);
     Logger.log('Status/situações de atendimentos normalizados para o fluxo v3.');
+  }
+
+  normalizeProdutosAtendimentos_(sheet);
+}
+
+/**
+ * Substitui, uma única vez por versão de catálogo, o conteúdo das abas
+ * Produtos e Categorias pelos padrões atuais (DEFAULT_PRODUTOS e
+ * DEFAULT_CATEGORIAS em Config.gs). Garante que instalações antigas
+ * fiquem apenas com Cartão de Crédito e Conta Digital PortoBank.
+ */
+function reseedCatalog_(ss) {
+  const properties = PropertiesService.getScriptProperties();
+  const CATALOG_VERSION = '3.1.0';
+  if (properties.getProperty('PORTO_RA_CATALOG_VERSION') === CATALOG_VERSION) return;
+
+  const targets = [
+    { name: CONFIG.SHEET_NAMES.PRODUTOS,   columns: COLUMNS.PRODUTOS,   defaults: DEFAULT_PRODUTOS },
+    { name: CONFIG.SHEET_NAMES.CATEGORIAS, columns: COLUMNS.CATEGORIAS, defaults: DEFAULT_CATEGORIAS }
+  ];
+
+  targets.forEach(function(cfg) {
+    const sheet = ss.getSheetByName(cfg.name);
+    if (!sheet) return;
+    if (sheet.getLastRow() > 1) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
+    }
+    const rows = cfg.defaults.map(function(item) {
+      return toRowArray(item, cfg.columns);
+    });
+    sheet.getRange(2, 1, rows.length, cfg.columns.length).setValues(rows);
+    invalidateCache(cfg.name);
+    Logger.log('Catálogo ressemeado: ' + cfg.name + ' (' + rows.length + ' registros)');
+  });
+
+  properties.setProperty('PORTO_RA_CATALOG_VERSION', CATALOG_VERSION);
+}
+
+/**
+ * Ajusta os nomes de produto dos atendimentos existentes para o catálogo
+ * atual (ex: "Conta"/"Conta Digital" → "Conta Digital PortoBank").
+ */
+function normalizeProdutosAtendimentos_(sheet) {
+  if (!sheet || sheet.getLastRow() <= 1) return;
+  const produtoIndex = COLUMNS.ATENDIMENTOS.indexOf('Produto');
+  const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
+  const rows = range.getValues();
+  let changed = false;
+
+  const contaNames = ['conta', 'conta digital', 'conta digital portobank'];
+  const cartaoNames = ['cartao', 'cartao de credito'];
+
+  rows.forEach(function(row) {
+    const produto = normalizeText_(row[produtoIndex]);
+    if (!produto) return;
+    if (contaNames.indexOf(produto) !== -1 && row[produtoIndex] !== 'Conta Digital PortoBank') {
+      row[produtoIndex] = 'Conta Digital PortoBank';
+      changed = true;
+    } else if (cartaoNames.indexOf(produto) !== -1 && row[produtoIndex] !== 'Cartão de Crédito') {
+      row[produtoIndex] = 'Cartão de Crédito';
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    range.setValues(rows);
+    invalidateCache(CONFIG.SHEET_NAMES.ATENDIMENTOS);
+    Logger.log('Produtos dos atendimentos normalizados para o catálogo atual.');
   }
 }
 

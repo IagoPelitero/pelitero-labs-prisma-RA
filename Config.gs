@@ -30,7 +30,7 @@
 // CONFIGURAÇÕES GERAIS DO SISTEMA
 // ============================================================================
 const CONFIG = {
-  SCHEMA_VERSION: '3.0.0',
+  SCHEMA_VERSION: '3.1.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
   SHEET_NAMES: {
     ATENDIMENTOS: 'Atendimentos',
@@ -158,13 +158,14 @@ const CANAIS_LIST = [
 // ============================================================================
 
 /**
- * Produtos do Portobank atendidos pela célula: apenas Cartão de Crédito
- * e Conta Digital. Novos produtos podem ser criados pela tela de
- * Configurações (perfil Supervisor).
+ * Produtos atendidos pela célula: apenas Cartão de Crédito e
+ * Conta Digital PortoBank. Estas listas também são usadas pela migração
+ * (migrateLegacyData_ em Database.gs) para substituir os produtos e
+ * categorias antigos de instalações existentes.
  */
 const DEFAULT_PRODUTOS = [
-  { Id: 'PD001', Nome: 'Cartão de Crédito', Descricao: 'Cartão de crédito Portobank', Ativo: true, Ordem: 1 },
-  { Id: 'PD002', Nome: 'Conta Digital',     Descricao: 'Conta digital Portobank',     Ativo: true, Ordem: 2 }
+  { Id: 'PD001', Nome: 'Cartão de Crédito',       Descricao: 'Cartão de crédito Portobank',  Ativo: true, Ordem: 1 },
+  { Id: 'PD002', Nome: 'Conta Digital PortoBank', Descricao: 'Conta digital do PortoBank',   Ativo: true, Ordem: 2 }
 ];
 
 /**
@@ -172,14 +173,19 @@ const DEFAULT_PRODUTOS = [
  */
 const DEFAULT_CATEGORIAS = [
   // Cartão de Crédito
-  { Id: 'CT001', ProdutoId: 'PD001', Nome: 'Contestação de compra', Descricao: 'Contestações de compras no cartão',            Ativo: true, Ordem: 1 },
-  { Id: 'CT002', ProdutoId: 'PD001', Nome: 'Cobrança indevida',     Descricao: 'Cobranças ou tarifas indevidas no cartão',     Ativo: true, Ordem: 2 },
-  { Id: 'CT003', ProdutoId: 'PD001', Nome: 'Anuidade',              Descricao: 'Questões de anuidade e benefícios',            Ativo: true, Ordem: 3 },
-  { Id: 'CT004', ProdutoId: 'PD001', Nome: 'Limite de crédito',     Descricao: 'Revisão, aumento ou redução de limite',        Ativo: true, Ordem: 4 },
-  { Id: 'CT005', ProdutoId: 'PD001', Nome: 'Bloqueio/Desbloqueio',  Descricao: 'Problemas com bloqueio ou desbloqueio',        Ativo: true, Ordem: 5 },
-  // Conta Digital
-  { Id: 'CT006', ProdutoId: 'PD002', Nome: 'Abertura/Encerramento', Descricao: 'Problemas na abertura ou encerramento da conta',       Ativo: true, Ordem: 6 },
-  { Id: 'CT007', ProdutoId: 'PD002', Nome: 'Transferência/Pix',     Descricao: 'Problemas com transferências, TED ou Pix',             Ativo: true, Ordem: 7 },
-  { Id: 'CT008', ProdutoId: 'PD002', Nome: 'Cobrança indevida',     Descricao: 'Tarifas ou cobranças indevidas na conta digital',      Ativo: true, Ordem: 8 },
-  { Id: 'CT009', ProdutoId: 'PD002', Nome: 'Acesso ao aplicativo',  Descricao: 'Problemas de acesso, senha ou dispositivo',            Ativo: true, Ordem: 9 }
+  { Id: 'CT001', ProdutoId: 'PD001', Nome: 'Contestação de compra',    Descricao: 'Contestações de compras no cartão',                Ativo: true, Ordem: 1 },
+  { Id: 'CT002', ProdutoId: 'PD001', Nome: 'Cobrança indevida',        Descricao: 'Cobranças ou tarifas indevidas no cartão',         Ativo: true, Ordem: 2 },
+  { Id: 'CT003', ProdutoId: 'PD001', Nome: 'Anuidade',                 Descricao: 'Questões de anuidade e benefícios',                Ativo: true, Ordem: 3 },
+  { Id: 'CT004', ProdutoId: 'PD001', Nome: 'Limite de crédito',        Descricao: 'Revisão, aumento ou redução de limite',            Ativo: true, Ordem: 4 },
+  { Id: 'CT005', ProdutoId: 'PD001', Nome: 'Bloqueio/Desbloqueio',     Descricao: 'Problemas com bloqueio ou desbloqueio do cartão',  Ativo: true, Ordem: 5 },
+  { Id: 'CT006', ProdutoId: 'PD001', Nome: 'Fatura',                   Descricao: 'Divergências, fechamento e parcelamento de fatura', Ativo: true, Ordem: 6 },
+  // Conta Digital PortoBank
+  { Id: 'CT007', ProdutoId: 'PD002', Nome: 'Conta Digital PortoBank',  Descricao: 'Assuntos gerais da conta digital PortoBank',       Ativo: true, Ordem: 7 },
+  { Id: 'CT008', ProdutoId: 'PD002', Nome: 'Abertura/Encerramento',    Descricao: 'Problemas na abertura ou encerramento da conta',   Ativo: true, Ordem: 8 },
+  { Id: 'CT009', ProdutoId: 'PD002', Nome: 'Transferência/Pix',        Descricao: 'Problemas com transferências, TED ou Pix',         Ativo: true, Ordem: 9 },
+  { Id: 'CT010', ProdutoId: 'PD002', Nome: 'Cobrança indevida',        Descricao: 'Tarifas ou cobranças indevidas na conta digital',  Ativo: true, Ordem: 10 },
+  { Id: 'CT011', ProdutoId: 'PD002', Nome: 'Acesso ao aplicativo',     Descricao: 'Problemas de acesso, senha ou dispositivo',        Ativo: true, Ordem: 11 },
+  { Id: 'CT012', ProdutoId: 'PD002', Nome: 'Cartão de débito',         Descricao: 'Emissão, entrega e uso do cartão de débito',       Ativo: true, Ordem: 12 },
+  { Id: 'CT013', ProdutoId: 'PD002', Nome: 'Portabilidade de salário', Descricao: 'Solicitações de portabilidade de salário',         Ativo: true, Ordem: 13 },
+  { Id: 'CT014', ProdutoId: 'PD002', Nome: 'Rendimento/Investimentos', Descricao: 'Rendimento da conta e produtos de investimento',   Ativo: true, Ordem: 14 }
 ];
