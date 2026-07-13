@@ -46,6 +46,9 @@ Pages.dashboard = {
     }
     html += '</div>';
 
+    // Indicadores consolidados por canal (ReclameAqui, ChatPrivadoRA, SACPreventivo).
+    html += '<div id="dashboard-canais" style="margin-top:24px;"></div>';
+
     html += '<div class="card" style="margin-top: 24px;">';
     html += '  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">';
     html += '    <h2 style="margin:0;font-size:1.15rem;font-weight:600;">Atendimentos <span id="dashboard-contagem" class="badge" style="font-size:13px;vertical-align:middle;">0</span></h2>';
@@ -86,6 +89,7 @@ Pages.dashboard = {
         self.state.pagina = 1;
         self.filtrarLocal();
         self.renderizarKPIs(data && data.cards, data && data.porSituacao);
+        self.renderizarCanais(data && data.porCanal);
         self.renderizarTabela();
       })
       .withFailureHandler(function(erro) {
@@ -111,27 +115,71 @@ Pages.dashboard = {
     var html = '';
     html += Components.kpiCard('assignment', App.formatNumber(cards.totalAtendimentos || 0), 'Total de Atendimentos', '#0046C0');
     html += Components.kpiCard('hourglass_empty', App.formatNumber(cards.pendentes || 0), 'Pendentes', '#FF9800');
+    html += Components.kpiCard('person_search', App.formatNumber(cards.emAnalise || 0), 'Em análise', '#2196F3');
     html += Components.kpiCard('check_circle', App.formatNumber(cards.concluidos || 0), 'Concluídos', '#43A047');
 
-    var situacaoIcones = {
-      'Em análise área': 'apartment',
-      'Em análise do analista': 'person_search',
-      'Em análise aguardando retorno do cliente': 'person'
-    };
-    var situacaoCores = {
-      'Em análise área': '#9C27B0',
-      'Em análise do analista': '#2196F3',
-      'Em análise aguardando retorno do cliente': '#00A3E0'
-    };
+    var situacaoIcones = { 'Área': 'apartment', 'Cliente': 'person' };
+    var situacaoCores = { 'Área': '#9C27B0', 'Cliente': '#00A3E0' };
     Object.keys(porSituacao).forEach(function(situacao) {
       html += Components.kpiCard(
         situacaoIcones[situacao] || 'pending_actions',
         App.formatNumber(porSituacao[situacao] || 0),
-        situacao,
+        'Aguardando Retorno — ' + situacao,
         situacaoCores[situacao] || '#607D8B'
       );
     });
 
+    container.innerHTML = html;
+  },
+
+  // Gráficos/indicadores por canal: total, pendentes, em análise e
+  // concluídos de cada canal, com barras proporcionais.
+  renderizarCanais: function(porCanal) {
+    var container = document.getElementById('dashboard-canais');
+    if (!container) return;
+    porCanal = porCanal || {};
+    var canais = Object.keys(porCanal);
+    if (!canais.length) {
+      container.innerHTML = '';
+      return;
+    }
+
+    var series = [
+      { key: 'pendentes', label: 'Pendentes', cor: '#FF9800' },
+      { key: 'emAnalise', label: 'Em análise', cor: '#2196F3' },
+      { key: 'concluidos', label: 'Concluídos', cor: '#43A047' }
+    ];
+
+    var html = '<div class="card">';
+    html += '<h2 style="margin:0 0 16px 0;font-size:1.15rem;font-weight:600;">Atendimentos por Canal</h2>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">';
+
+    canais.forEach(function(canal) {
+      var dados = porCanal[canal] || {};
+      var total = Number(dados.total || 0);
+      html += '<div style="border:1px solid var(--border-color,#e0e0e0);border-radius:8px;padding:16px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+      html += '<strong style="font-size:14px;">' + App.escapeHtml(canal) + '</strong>';
+      html += '<span class="badge" style="background:#0046C0;">' + App.formatNumber(total) + ' total</span>';
+      html += '</div>';
+
+      series.forEach(function(serie) {
+        var valor = Number(dados[serie.key] || 0);
+        var pct = total > 0 ? Math.round((valor / total) * 100) : 0;
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">';
+        html += '<span>' + serie.label + '</span><span>' + App.formatNumber(valor) + '</span>';
+        html += '</div>';
+        html += '<div style="background:var(--border-color,#eceff1);border-radius:4px;height:8px;overflow:hidden;">';
+        html += '<div style="width:' + pct + '%;height:100%;background:' + serie.cor + ';"></div>';
+        html += '</div>';
+        html += '</div>';
+      });
+
+      html += '</div>';
+    });
+
+    html += '</div></div>';
     container.innerHTML = html;
   },
 
@@ -177,7 +225,7 @@ Pages.dashboard = {
       { label: 'Produto', field: 'produto', sortable: false },
       { label: 'Canal', field: 'canal', sortable: false },
       { label: 'Status', field: 'status', sortable: false },
-      { label: 'Situação', field: 'situacaoPendencia', sortable: false },
+      { label: 'Aguardando Retorno', field: 'situacaoPendencia', sortable: false },
       { label: 'Responsável', field: 'responsavel', sortable: false },
       { label: 'Data', field: 'dataAbertura', sortable: false }
     ];
@@ -242,8 +290,8 @@ Pages.dashboard = {
   alterarStatus: function(atendimento) {
     var self = this;
     var dd = App.dropdownData || {};
-    var statusList = dd.status || ['Pendente', 'Concluído'];
-    var situacoes = dd.situacoesPendencia || [];
+    var statusList = dd.status || ['Pendente', 'Em análise', 'Concluído'];
+    var situacoes = dd.situacoesPendencia || ['Área', 'Cliente'];
 
     var body = '<div class="form-group">';
     body += '<label class="form-label">Status</label>';
@@ -253,7 +301,7 @@ Pages.dashboard = {
     });
     body += '</select></div>';
     body += '<div class="form-group" id="quick-situacao-grupo">';
-    body += '<label class="form-label">Situação da pendência</label>';
+    body += '<label class="form-label">Aguardando Retorno de</label>';
     body += '<select id="quick-situacao" class="form-control">';
     body += '<option value="">Selecione</option>';
     situacoes.forEach(function(s) {
@@ -270,7 +318,7 @@ Pages.dashboard = {
         var status = document.getElementById('quick-status').value;
         var situacao = document.getElementById('quick-situacao').value;
         if (status === 'Pendente' && !situacao) {
-          Components.toast('Informe a situação da pendência.', 'warning');
+          Components.toast('Informe "Aguardando Retorno de" (Área ou Cliente).', 'warning');
           return;
         }
         self.salvarStatus(atendimento.id, status, status === 'Pendente' ? situacao : '');

@@ -7,19 +7,25 @@
    atendimento. Se render() recebe um id, carrega o atendimento; se não,
    abre em branco.
 
-   Campos: Protocolo Odin, CPF, Nome do cliente, Data, Produto, Categoria
-   (dependente do produto), Canal, Status (Pendente/Concluído), Situação
-   da pendência (só quando Pendente) e Observações. O campo "Responsável"
-   só aparece para o perfil Supervisor, que pode delegar o atendimento a
-   um analista — o analista nunca escolhe responsável (o servidor
-   identifica automaticamente quem criou; Services.gs/getActor_()).
+   O formulário NÃO tem estrutura fixa: os campos são montados a partir da
+   aba ConfigCampos (App.formConfig, carregado no bootstrap). O ADM decide
+   quais campos aparecem e quais são obrigatórios — sem alterar código.
+   Campos "base" (data, protocolo, cliente, cpf, produto, categoria, canal,
+   observações) mapeiam colunas fixas; campos criados pelo ADM são gravados
+   em CamposExtras (JSON).
+
+   Sempre fixos no formulário (regras do fluxo, fora da ConfigCampos):
+     - Status (Pendente / Em análise / Concluído);
+     - "Aguardando Retorno de" (Área/Cliente), exibido só quando Pendente;
+     - Responsável, visível apenas para Supervisor/ADM (delegação) — o
+       analista nunca escolhe responsável (Services.gs/getActor_()).
 
    Fluxo resumido:
      render(id)          → busca o atendimento (se edição) e desenha.
-     _renderForm()       → desenha os campos.
-     _bindEvents()       → eventos (status ↔ situação, produto ↔ categoria,
+     _renderForm()       → desenha os campos conforme a ConfigCampos.
+     _bindEvents()       → eventos (status ↔ aguardando, produto ↔ categoria,
                            máscara/validação de CPF, duplicidade de protocolo).
-     _validarFormulario()→ confere obrigatórios antes de salvar.
+     _validarFormulario()→ confere obrigatórios (ConfigCampos) antes de salvar.
      _coletarDados()     → junta os valores num objeto para o servidor.
      _salvar()           → salvarAtendimento()/atualizarAtendimento().
    ============================================================ */
@@ -29,6 +35,18 @@ Pages.novoAtendimento = {
     atendimento: null,
     timeline: [],
     salvando: false
+  },
+
+  // Ids fixos dos inputs dos campos base (mantidos por compatibilidade).
+  _baseFieldIds: {
+    dataAbertura: 'campo-data-abertura',
+    numeroRA: 'campo-ra',
+    cliente: 'campo-cliente',
+    cpf: 'campo-cpf',
+    produto: 'campo-produto',
+    categoria: 'campo-categoria',
+    canal: 'campo-canal',
+    observacoes: 'campo-observacoes'
   },
 
   render: function(atendimentoId) {
@@ -64,15 +82,87 @@ Pages.novoAtendimento = {
     }
   },
 
+  // Campos visíveis do formulário, na ordem definida pelo ADM (ConfigCampos).
+  // Se a configuração não carregar, usa o conjunto padrão de campos base
+  // para o formulário nunca abrir vazio.
+  _getFormFields: function() {
+    var fields = (App.formConfig || []).filter(function(field) {
+      return field && field.exibir;
+    });
+    if (fields.length) return fields;
+    return [
+      { campo: 'dataAbertura', rotulo: 'Data', tipo: 'date', obrigatorio: true, base: true },
+      { campo: 'numeroRA', rotulo: 'Protocolo', tipo: 'text', obrigatorio: true, base: true },
+      { campo: 'cliente', rotulo: 'Nome do cliente', tipo: 'text', obrigatorio: true, base: true },
+      { campo: 'cpf', rotulo: 'CPF', tipo: 'cpf', obrigatorio: true, base: true },
+      { campo: 'produto', rotulo: 'Produto', tipo: 'select', obrigatorio: false, base: true },
+      { campo: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false, base: true },
+      { campo: 'canal', rotulo: 'Canal', tipo: 'select', obrigatorio: true, base: true },
+      { campo: 'observacoes', rotulo: 'Observações', tipo: 'textarea', obrigatorio: false, base: true }
+    ];
+  },
+
+  _fieldId: function(field) {
+    return this._baseFieldIds[field.campo] || ('campo-extra-' + field.campo);
+  },
+
+  _fieldValue: function(field, atd) {
+    if (field.base) return atd[field.campo] || '';
+    return (atd.camposExtras || {})[field.campo] || '';
+  },
+
+  // Monta o HTML de um campo conforme seu tipo (ConfigCampos).
+  _fieldHtml: function(field, atd, dd) {
+    var id = this._fieldId(field);
+    var required = field.obrigatorio ? ' <span style="color:var(--danger)">*</span>' : '';
+    var label = '<label class="form-label" for="' + id + '">' + App.escapeHtml(field.rotulo) + required + '</label>';
+    var value = this._fieldValue(field, atd);
+    var html = '<div class="form-group">' + label;
+
+    if (field.campo === 'dataAbertura') {
+      var hoje = new Date().toISOString().split('T')[0];
+      var dataAbertura = atd.dataAbertura ? App.toInputDate(atd.dataAbertura) : hoje;
+      html += '<input type="date" id="' + id + '" class="form-control" value="' + dataAbertura + '">';
+    } else if (field.campo === 'numeroRA') {
+      html += '<input type="text" id="' + id + '" class="form-control" placeholder="Número do protocolo" value="' + App.escapeHtml(value) + '">';
+      html += '<small id="ra-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
+    } else if (field.campo === 'cpf') {
+      html += '<input type="text" id="' + id + '" class="form-control" placeholder="000.000.000-00" value="' + App.escapeHtml(value) + '" maxlength="14">';
+      html += '<small id="cpf-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
+    } else if (field.campo === 'produto') {
+      html += '<select id="' + id + '" class="form-control"><option value="">Selecione</option>';
+      (dd.produtos || []).forEach(function(p) {
+        html += '<option value="' + App.escapeHtml(p) + '"' + (value === p ? ' selected' : '') + '>' + App.escapeHtml(p) + '</option>';
+      });
+      html += '</select>';
+    } else if (field.campo === 'categoria') {
+      html += '<select id="' + id + '" class="form-control"></select>';
+    } else if (field.campo === 'canal') {
+      html += '<select id="' + id + '" class="form-control"><option value="">Selecione</option>';
+      (dd.canais || []).forEach(function(c) {
+        html += '<option value="' + App.escapeHtml(c) + '"' + (value === c ? ' selected' : '') + '>' + App.escapeHtml(c) + '</option>';
+      });
+      html += '</select>';
+    } else if (field.tipo === 'textarea') {
+      html += '<textarea id="' + id + '" class="form-control" rows="4" placeholder="' + App.escapeHtml(field.rotulo) + '">' + App.escapeHtml(value) + '</textarea>';
+    } else if (field.tipo === 'date') {
+      html += '<input type="date" id="' + id + '" class="form-control" value="' + App.escapeHtml(App.toInputDate(value)) + '">';
+    } else if (field.tipo === 'number') {
+      html += '<input type="number" id="' + id + '" class="form-control" value="' + App.escapeHtml(value) + '">';
+    } else {
+      html += '<input type="text" id="' + id + '" class="form-control" value="' + App.escapeHtml(value) + '">';
+    }
+
+    html += '</div>';
+    return html;
+  },
+
   _renderForm: function(container) {
     var self = this;
     var isEdit = !!self.state.atendimentoId;
     var atd = self.state.atendimento || {};
     var dd = App.dropdownData || {};
     var isSupervisor = App.isSupervisor();
-
-    var hoje = new Date().toISOString().split('T')[0];
-    var dataAbertura = atd.dataAbertura ? App.toInputDate(atd.dataAbertura) : hoje;
     var statusAtual = atd.status || 'Pendente';
 
     var titulo = isEdit ? 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || '') : 'Novo Atendimento';
@@ -85,85 +175,51 @@ Pages.novoAtendimento = {
     html += '<div class="card">';
     html += '  <form id="form-atendimento" autocomplete="off">';
 
-    // Linha 1: Protocolo Odin + Data
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-ra">Protocolo Odin <span style="color:var(--danger)">*</span></label>';
-    html += '      <input type="text" id="campo-ra" class="form-control" placeholder="Número do protocolo Odin" value="' + App.escapeHtml(atd.numeroRA || '') + '" required>';
-    html += '      <small id="ra-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
-    html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-data-abertura">Data <span style="color:var(--danger)">*</span></label>';
-    html += '      <input type="date" id="campo-data-abertura" class="form-control" value="' + dataAbertura + '" required>';
-    html += '    </div>';
-    html += '  </div>';
-
-    // Linha 2: Nome + CPF
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-cliente">Nome do cliente <span style="color:var(--danger)">*</span></label>';
-    html += '      <input type="text" id="campo-cliente" class="form-control" placeholder="Nome completo do cliente" value="' + App.escapeHtml(atd.cliente || '') + '" required>';
-    html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-cpf">CPF <span style="color:var(--danger)">*</span></label>';
-    html += '      <input type="text" id="campo-cpf" class="form-control" placeholder="000.000.000-00" value="' + App.escapeHtml(atd.cpf || '') + '" maxlength="14" required>';
-    html += '      <small id="cpf-feedback" style="display:none;font-size:12px;margin-top:4px;"></small>';
-    html += '    </div>';
-    html += '  </div>';
-
-    // Linha 3: Produto + Categoria (dependente do produto)
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-produto">Produto <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-produto" class="form-control" required>';
-    html += '        <option value="">Selecione</option>';
-    (dd.produtos || []).forEach(function(p) {
-      html += '        <option value="' + App.escapeHtml(p) + '"' + (atd.produto === p ? ' selected' : '') + '>' + App.escapeHtml(p) + '</option>';
+    // ── Campos configuráveis (ConfigCampos), dois por linha ──
+    var fields = self._getFormFields();
+    var pending = [];
+    fields.forEach(function(field) {
+      var isWide = field.tipo === 'textarea';
+      if (isWide) {
+        if (pending.length) {
+          html += '<div class="form-row">' + pending.join('') + '<div class="form-group"></div></div>';
+          pending = [];
+        }
+        html += self._fieldHtml(field, atd, dd);
+        return;
+      }
+      pending.push(self._fieldHtml(field, atd, dd));
+      if (pending.length === 2) {
+        html += '<div class="form-row">' + pending.join('') + '</div>';
+        pending = [];
+      }
     });
-    html += '      </select>';
-    html += '    </div>';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-categoria">Categoria <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-categoria" class="form-control" required></select>';
-    html += '    </div>';
-    html += '  </div>';
+    if (pending.length) {
+      html += '<div class="form-row">' + pending.join('') + '<div class="form-group"></div></div>';
+    }
 
-    // Linha 4: Canal + Status
+    // ── Campos fixos do fluxo: Status + Aguardando Retorno de ──
     html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-canal">Canal <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-canal" class="form-control" required>';
-    html += '        <option value="">Selecione</option>';
-    (dd.canais || []).forEach(function(c) {
-      html += '        <option value="' + App.escapeHtml(c) + '"' + (atd.canal === c ? ' selected' : '') + '>' + App.escapeHtml(c) + '</option>';
-    });
-    html += '      </select>';
-    html += '    </div>';
     html += '    <div class="form-group">';
     html += '      <label class="form-label" for="campo-status">Status <span style="color:var(--danger)">*</span></label>';
     html += '      <select id="campo-status" class="form-control" required>';
-    (dd.status || ['Pendente', 'Concluído']).forEach(function(s) {
+    (dd.status || ['Pendente', 'Em análise', 'Concluído']).forEach(function(s) {
       html += '        <option value="' + App.escapeHtml(s) + '"' + (statusAtual === s ? ' selected' : '') + '>' + App.escapeHtml(s) + '</option>';
     });
     html += '      </select>';
     html += '    </div>';
-    html += '  </div>';
-
-    // Linha 5: Situação da pendência (só quando Pendente)
-    html += '  <div class="form-row" id="grupo-situacao" style="' + (statusAtual === 'Pendente' ? '' : 'display:none;') + '">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-situacao">Situação da pendência <span style="color:var(--danger)">*</span></label>';
+    html += '    <div class="form-group" id="grupo-situacao" style="' + (statusAtual === 'Pendente' ? '' : 'display:none;') + '">';
+    html += '      <label class="form-label" for="campo-situacao">Aguardando Retorno de <span style="color:var(--danger)">*</span></label>';
     html += '      <select id="campo-situacao" class="form-control">';
     html += '        <option value="">Selecione</option>';
-    (dd.situacoesPendencia || []).forEach(function(s) {
+    (dd.situacoesPendencia || ['Área', 'Cliente']).forEach(function(s) {
       html += '        <option value="' + App.escapeHtml(s) + '"' + (atd.situacaoPendencia === s ? ' selected' : '') + '>' + App.escapeHtml(s) + '</option>';
     });
     html += '      </select>';
     html += '    </div>';
-    html += '    <div class="form-group"></div>';
     html += '  </div>';
 
-    // Responsável: visível apenas para Supervisor (delegação a um analista).
+    // Responsável: visível apenas para Supervisor/ADM (delegação a um analista).
     if (isSupervisor) {
       html += '  <div class="form-row" data-supervisor-only>';
       html += '    <div class="form-group">';
@@ -174,17 +230,11 @@ Pages.novoAtendimento = {
         html += '        <option value="' + App.escapeHtml(r) + '"' + (atd.responsavel === r ? ' selected' : '') + '>' + App.escapeHtml(r) + '</option>';
       });
       html += '      </select>';
-      html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Somente supervisores podem delegar o atendimento a um analista.</small>';
+      html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Supervisores e o ADM podem delegar/reatribuir o atendimento a um analista.</small>';
       html += '    </div>';
       html += '    <div class="form-group"></div>';
       html += '  </div>';
     }
-
-    // Observações
-    html += '  <div class="form-group">';
-    html += '    <label class="form-label" for="campo-observacoes">Observações</label>';
-    html += '    <textarea id="campo-observacoes" class="form-control" rows="4" placeholder="Observações sobre o atendimento (opcional)">' + App.escapeHtml(atd.observacoes || '') + '</textarea>';
-    html += '  </div>';
 
     // Botões de ação
     html += '  <div class="form-actions">';
@@ -231,6 +281,7 @@ Pages.novoAtendimento = {
   // Preenche o select de categorias conforme o produto escolhido
   // (usa dropdownData.categoriasPorProduto, calculado no servidor).
   _popularCategorias: function(selecionada) {
+    if (!document.getElementById('campo-categoria')) return;
     var dd = App.dropdownData || {};
     var produto = (document.getElementById('campo-produto') || {}).value || '';
     var porProduto = dd.categoriasPorProduto || {};
@@ -249,7 +300,7 @@ Pages.novoAtendimento = {
       campoCpf.addEventListener('blur', function() { self._validarCPF(this.value); });
     }
 
-    // Verificar duplicidade do Protocolo Odin
+    // Verificar duplicidade do protocolo
     var campoRA = document.getElementById('campo-ra');
     if (campoRA) {
       campoRA.addEventListener('blur', function() {
@@ -265,7 +316,7 @@ Pages.novoAtendimento = {
       });
     }
 
-    // Status muda → mostrar/esconder "Situação da pendência"
+    // Status muda → mostrar/esconder "Aguardando Retorno de" (só Pendente)
     var campoStatus = document.getElementById('campo-status');
     if (campoStatus) {
       campoStatus.addEventListener('change', function() {
@@ -314,7 +365,7 @@ Pages.novoAtendimento = {
         if (result && result.duplicado) {
           feedback.style.display = 'block';
           feedback.style.color = 'var(--warning)';
-          feedback.textContent = '⚠️ Já existe um atendimento com este Protocolo Odin.';
+          feedback.textContent = '⚠️ Já existe um atendimento com este protocolo.';
         } else {
           feedback.style.display = 'none';
           feedback.textContent = '';
@@ -346,28 +397,26 @@ Pages.novoAtendimento = {
     }
   },
 
+  // Valida os obrigatórios conforme a ConfigCampos + regras fixas do fluxo.
   _validarFormulario: function() {
+    var self = this;
     var erros = [];
-    var campos = {
-      'campo-ra': 'Protocolo Odin é obrigatório.',
-      'campo-cpf': 'CPF é obrigatório.',
-      'campo-cliente': 'Nome do cliente é obrigatório.',
-      'campo-data-abertura': 'Data é obrigatória.',
-      'campo-produto': 'Produto é obrigatório.',
-      'campo-categoria': 'Categoria é obrigatória.',
-      'campo-canal': 'Canal é obrigatório.',
-      'campo-status': 'Status é obrigatório.'
-    };
-    Object.keys(campos).forEach(function(id) {
-      var el = document.getElementById(id);
-      if (!el || !String(el.value || '').trim()) erros.push(campos[id]);
+
+    self._getFormFields().forEach(function(field) {
+      if (!field.obrigatorio) return;
+      var el = document.getElementById(self._fieldId(field));
+      if (!el || !String(el.value || '').trim()) {
+        erros.push(field.rotulo + ' é obrigatório.');
+      }
     });
 
     var status = document.getElementById('campo-status');
-    if (status && status.value === 'Pendente') {
+    if (!status || !status.value) {
+      erros.push('Status é obrigatório.');
+    } else if (status.value === 'Pendente') {
       var situacao = document.getElementById('campo-situacao');
       if (!situacao || !situacao.value) {
-        erros.push('Situação da pendência é obrigatória quando o status é "Pendente".');
+        erros.push('"Aguardando Retorno de" é obrigatório quando o status é "Pendente".');
       }
     }
 
@@ -379,22 +428,33 @@ Pages.novoAtendimento = {
     return erros;
   },
 
+  // Junta os valores do formulário num objeto para o servidor. Campos base
+  // viram propriedades diretas; campos personalizados vão em camposExtras.
   _coletarDados: function() {
+    var self = this;
     var campoResponsavel = document.getElementById('campo-responsavel');
     var campoSituacao = document.getElementById('campo-situacao');
-    return {
-      numeroRA: (document.getElementById('campo-ra').value || '').trim(),
-      cliente: (document.getElementById('campo-cliente').value || '').trim(),
-      cpf: (document.getElementById('campo-cpf').value || '').trim(),
-      produto: document.getElementById('campo-produto').value || '',
-      categoria: document.getElementById('campo-categoria').value || '',
-      canal: document.getElementById('campo-canal').value || '',
-      status: document.getElementById('campo-status').value || '',
+
+    var dados = {
+      numeroRA: '', cliente: '', cpf: '', produto: '', categoria: '',
+      canal: '', observacoes: '', dataAbertura: '',
+      status: (document.getElementById('campo-status') || {}).value || '',
       motivoPendencia: campoSituacao ? (campoSituacao.value || '') : '',
-      observacoes: (document.getElementById('campo-observacoes').value || '').trim(),
-      dataAbertura: document.getElementById('campo-data-abertura').value || '',
-      responsavel: campoResponsavel ? (campoResponsavel.value || '') : ''
+      responsavel: campoResponsavel ? (campoResponsavel.value || '') : '',
+      camposExtras: {}
     };
+
+    self._getFormFields().forEach(function(field) {
+      var el = document.getElementById(self._fieldId(field));
+      var value = el ? String(el.value || '').trim() : '';
+      if (field.base) {
+        dados[field.campo] = value;
+      } else if (value) {
+        dados.camposExtras[field.campo] = value;
+      }
+    });
+
+    return dados;
   },
 
   _setSaving: function(saving) {

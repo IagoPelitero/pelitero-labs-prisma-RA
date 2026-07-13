@@ -33,6 +33,7 @@ var App = {
   currentPage: 'dashboard',
   currentParams: {},
   dropdownData: {},
+  formConfig: [],
   user: {},
 
   // Ponto de partida da aplicação, chamado uma única vez no DOMContentLoaded.
@@ -71,6 +72,7 @@ var App = {
       .withSuccessHandler(function(result) {
         App.user = result && result.user ? result.user : {};
         App.dropdownData = result && result.dropdownData ? result.dropdownData : {};
+        App.formConfig = result && result.formConfig ? result.formConfig : [];
         App.renderUser();
         App.applyRoleVisibility();
         if (typeof onSuccess === 'function') onSuccess(result);
@@ -149,19 +151,29 @@ var App = {
     if (profile) profile.textContent = this.user.perfil || 'Analista';
   },
 
-  // Indica se o usuário logado tem perfil de supervisão/gestão.
-  isSupervisor: function() {
+  // Indica se o usuário logado é ADM (acesso total).
+  isAdmin: function() {
     var profile = String((this.user || {}).perfil || '').toLowerCase();
-    return ['supervisor', 'gestor', 'administrador', 'admin'].indexOf(profile) !== -1;
+    return ['adm', 'admin', 'administrador'].indexOf(profile) !== -1;
   },
 
-  // Esconde itens restritos (atributo "data-supervisor-only", como o menu
-  // Configurações) quando o perfil não é de supervisão. Se o usuário já
-  // estiver numa tela restrita, é redirecionado para o Dashboard.
+  // Indica se o usuário logado tem perfil de supervisão/gestão (Supervisor ou ADM).
+  isSupervisor: function() {
+    var profile = String((this.user || {}).perfil || '').toLowerCase();
+    return ['supervisor', 'gestor'].indexOf(profile) !== -1 || this.isAdmin();
+  },
+
+  // Esconde itens restritos: "data-supervisor-only" exige Supervisor/ADM e
+  // "data-admin-only" exige ADM. Se o usuário já estiver numa tela
+  // restrita, é redirecionado para o Dashboard.
   applyRoleVisibility: function() {
     var allowed = this.isSupervisor();
+    var admin = this.isAdmin();
     document.querySelectorAll('[data-supervisor-only]').forEach(function(element) {
       element.style.display = allowed ? '' : 'none';
+    });
+    document.querySelectorAll('[data-admin-only]').forEach(function(element) {
+      element.style.display = admin ? '' : 'none';
     });
     if (!allowed && this.currentPage === 'configuracoes') this.navigateTo('dashboard');
   },

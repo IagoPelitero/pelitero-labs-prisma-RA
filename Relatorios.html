@@ -66,7 +66,7 @@ Pages.relatorios = {
     html += '      <select id="rel-status" class="form-control"></select>';
     html += '    </div>';
     html += '    <div class="form-group">';
-    html += '      <label class="form-label">Situação da pendência</label>';
+    html += '      <label class="form-label">Aguardando Retorno de</label>';
     html += '      <select id="rel-situacao" class="form-control"></select>';
     html += '    </div>';
     html += '    <div class="form-group">';
@@ -232,7 +232,7 @@ Pages.relatorios = {
       { key: 'produto', label: 'Produto' },
       { key: 'categoria', label: 'Categoria' },
       { key: 'status', label: 'Status' },
-      { key: 'situacaoPendencia', label: 'Situação' },
+      { key: 'situacaoPendencia', label: 'Aguardando Retorno' },
       { key: 'canal', label: 'Canal' },
       { key: 'responsavel', label: 'Responsável' },
       { key: 'dataAbertura', label: 'Data Abertura' },
@@ -356,7 +356,7 @@ Pages.relatorios = {
         'Produto': d.produto || '',
         'Categoria': d.categoria || '',
         'Status': d.status || '',
-        'Situação da pendência': d.situacaoPendencia || '',
+        'Aguardando Retorno de': d.situacaoPendencia || '',
         'Canal': d.canal || '',
         'Responsável': d.responsavel || '',
         'Data Abertura': App.formatDateBR(d.dataAbertura),
@@ -443,7 +443,7 @@ Pages.relatorios = {
       doc.text('Pendentes: ' + r.pendentes, 160, 45);
       doc.text('Tempo Médio: ' + r.tempoMedio + 'h', 220, 45);
 
-      var cabecalhos = ['Protocolo Odin', 'Cliente', 'CPF', 'Produto', 'Categoria', 'Status', 'Situação', 'Canal', 'Responsável', 'Dt Abertura', 'Dt Conclusão', 'Tempo'];
+      var cabecalhos = ['Protocolo Odin', 'Cliente', 'CPF', 'Produto', 'Categoria', 'Status', 'Aguardando', 'Canal', 'Responsável', 'Dt Abertura', 'Dt Conclusão', 'Tempo'];
       var linhasTabela = dados.map(function(d) {
         return [
           String(d.numeroRA || ''),

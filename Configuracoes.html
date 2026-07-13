@@ -4,9 +4,11 @@
    ------------------------------------------------------------
    GUIA PARA QUEM ESTÁ COMEÇANDO
    Esta tela mostra as "listas cadastráveis" do sistema: Produtos,
-   Categorias e Usuários. Status ("Pendente"/"Concluído"), situações de
-   pendência e canais ("Reclame Aqui"/"SAC Preventivo") são regras fixas
-   do fluxo, definidas em Config.gs, e por isso não aparecem aqui.
+   Categorias, Usuários (só ADM) e Campos do formulário (só ADM).
+   Status ("Pendente"/"Em análise"/"Concluído"), "Aguardando Retorno de"
+   (Área/Cliente) e canais ("Reclame Aqui"/"Chat Privado"/"SAC Preventivo")
+   são regras fixas do fluxo, definidas em Config.gs, e por isso não
+   aparecem aqui.
 
    "metadata" (logo abaixo) descreve, para cada tipo de cadastro, quais
    campos existem no formulário (nome, tipo de campo, se é obrigatório).
@@ -43,15 +45,34 @@ Pages.configuracoes = {
       ]
     },
     usuarios: {
-      label: 'Usuários e responsáveis', icon: 'group',
+      label: 'Usuários e responsáveis', icon: 'group', adminOnly: true,
       fields: [
         { key: 'Nome', label: 'Nome', required: true },
         { key: 'Email', label: 'E-mail', type: 'email' },
-        { key: 'Perfil', label: 'Perfil', type: 'select', options: ['Analista', 'Supervisor'], required: true },
+        { key: 'Perfil', label: 'Perfil', type: 'select', options: ['Analista', 'Supervisor', 'ADM'], required: true },
         { key: 'Equipe', label: 'Equipe' },
         { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true }
       ]
+    },
+    camposFormulario: {
+      label: 'Campos do formulário', icon: 'dynamic_form', adminOnly: true,
+      fields: [
+        { key: 'Rotulo', label: 'Rótulo', required: true },
+        { key: 'Tipo', label: 'Tipo', type: 'select', options: ['text', 'date', 'textarea', 'number'] },
+        { key: 'Exibir', label: 'Exibir no formulário', type: 'checkbox', defaultValue: true, trueLabel: 'Exibido', falseLabel: 'Oculto' },
+        { key: 'Obrigatorio', label: 'Obrigatório', type: 'checkbox', defaultValue: false, trueLabel: 'Obrigatório', falseLabel: 'Opcional' },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
     }
+  },
+
+  // Entidades visíveis para o usuário logado: gestão de usuários e dos
+  // campos do formulário são exclusivas do ADM.
+  visibleEntities: function() {
+    var self = this;
+    return Object.keys(this.metadata).filter(function(key) {
+      return !self.metadata[key].adminOnly || App.isAdmin();
+    });
   },
 
   render: function(container) {
@@ -84,7 +105,9 @@ Pages.configuracoes = {
       '<button class="btn btn-primary" onclick="Pages.configuracoes.openForm()">+ Novo registro</button></div>';
     html += '<div class="config-layout"><aside class="config-nav">';
     var self = this;
-    Object.keys(this.metadata).forEach(function(key) {
+    var visible = this.visibleEntities();
+    if (visible.indexOf(this.active) === -1) this.active = visible[0] || 'produtos';
+    visible.forEach(function(key) {
       var meta = self.metadata[key];
       html += '<button class="config-nav-item' + (self.active === key ? ' active' : '') +
         '" onclick="Pages.configuracoes.switchEntity(\'' + key + '\')">' +
@@ -137,8 +160,8 @@ Pages.configuracoes = {
   formatCell: function(value, field) {
     if (field.type === 'checkbox') {
       return value === true || String(value).toLowerCase() === 'true'
-        ? '<span class="badge badge-success">Ativo</span>'
-        : '<span class="badge badge-neutral">Inativo</span>';
+        ? '<span class="badge badge-success">' + (field.trueLabel || 'Ativo') + '</span>'
+        : '<span class="badge badge-neutral">' + (field.falseLabel || 'Inativo') + '</span>';
     }
     if (field.type === 'color') {
       return '<span class="color-preview" style="background:' + this.escape(value || '#999') + '"></span>' +

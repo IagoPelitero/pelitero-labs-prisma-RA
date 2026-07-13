@@ -15,12 +15,16 @@
  *   - Funções COM "_" no final (ex: validateAtendimentoInput_) → internas.
  *
  * Regras centrais do fluxo:
- *   - Status possíveis: "Pendente" e "Concluído" (STATUS_LIST em Config.gs).
- *   - Quando Pendente, a "Situação da pendência" é obrigatória
- *     (SITUACOES_PENDENCIA em Config.gs).
- *   - Analista vê/edita apenas os próprios atendimentos; Supervisor vê
- *     todos e pode delegar a um analista (canAccessAtendimento_,
- *     restrictToOwnerIfNeeded_).
+ *   - Status possíveis: "Pendente", "Em análise" e "Concluído"
+ *     (STATUS_LIST em Config.gs).
+ *   - Quando Pendente, "Aguardando Retorno de" (Área/Cliente) é obrigatório
+ *     (SITUACOES_PENDENCIA em Config.gs); oculto nos demais status.
+ *   - Atendimentos são gravados em abas separadas por canal (ReclameAqui,
+ *     ChatPrivadoRA, SACPreventivo); consultas consolidam as três abas.
+ *   - Analista vê/edita apenas os próprios atendimentos; Supervisor e ADM
+ *     veem todos e podem delegar/reatribuir (canAccessAtendimento_,
+ *     restrictToOwnerIfNeeded_). Gestão de usuários e dos campos do
+ *     formulário (ConfigCampos) são exclusivas do ADM (requireAdmin_).
  * ------------------------------------------------------------------------
  */
 
@@ -54,6 +58,7 @@ function getBootstrapData() {
 
   return {
     user: getActor_(),
+    formConfig: getFormConfig_(),
     dropdownData: {
       produtos: pluck_(produtos, 'Nome'),
       categorias: pluck_(categorias, 'Nome'),
@@ -65,6 +70,30 @@ function getBootstrapData() {
       statusCores: getStatusColorMap_()
     }
   };
+}
+
+/**
+ * Configuração dinâmica do formulário "Novo Atendimento" (aba ConfigCampos).
+ * Retorna os campos normalizados e ordenados; o frontend monta o formulário
+ * a partir desta lista e o servidor valida com as mesmas regras.
+ */
+function getFormConfig_() {
+  return getAll(CONFIG.SHEET_NAMES.CONFIG_CAMPOS)
+    .filter(function(item) { return item.Campo; })
+    .map(function(item) {
+      return {
+        id: String(item.Id || ''),
+        campo: String(item.Campo || ''),
+        rotulo: String(item.Rotulo || item.Campo || ''),
+        tipo: String(item.Tipo || 'text'),
+        exibir: isTrue_(item.Exibir),
+        obrigatorio: isTrue_(item.Obrigatorio),
+        ordem: Number(item.Ordem || 9999),
+        base: isTrue_(item.Base),
+        bloqueado: isTrue_(item.Bloqueado)
+      };
+    })
+    .sort(function(a, b) { return a.ordem - b.ordem; });
 }
 
 function activeSorted_(sheetName) {
@@ -99,12 +128,12 @@ function getAtendimentos(filtros, pagina, ordenacao) {
 
 function getAtendimento(id) {
   ensureDatabaseReady();
-  const record = getById(CONFIG.SHEET_NAMES.ATENDIMENTOS, sanitizeInput(id));
-  if (!record || isTrue_(record.Excluido)) return null;
-  if (!canAccessAtendimento_(record, getActor_())) return null;
+  const found = findAtendimento_(sanitizeInput(id));
+  if (!found || isTrue_(found.record.Excluido)) return null;
+  if (!canAccessAtendimento_(found.record, getActor_())) return null;
 
   return {
-    atendimento: toClientAtendimento_(record, getStatusColorMap_()),
+    atendimento: toClientAtendimento_(found.record, getStatusColorMap_()),
     timeline: getTimeline(id)
   };
 }
@@ -125,10 +154,42 @@ function verificarProtocoloDuplicado(protocolo, ignorarId) {
   return { duplicado: duplicado };
 }
 
+/**
+ * Nomes das abas de atendimento (uma por canal).
+ */
+function getAtendimentoSheetNames_() {
+  return CANAL_SHEETS.map(function(item) {
+    return CONFIG.SHEET_NAMES[item.sheetKey];
+  });
+}
+
+/**
+ * Todos os atendimentos ativos, consolidados das três abas por canal.
+ * A pesquisa e os relatórios usam esta função — o usuário nunca precisa
+ * saber em qual aba o registro está gravado.
+ */
 function getActiveAtendimentos_() {
-  return getAll(CONFIG.SHEET_NAMES.ATENDIMENTOS).filter(function(record) {
+  let records = [];
+  getAtendimentoSheetNames_().forEach(function(sheetName) {
+    records = records.concat(getAll(sheetName));
+  });
+  return records.filter(function(record) {
     return !isTrue_(record.Excluido);
   });
+}
+
+/**
+ * Localiza um atendimento pelo Id em qualquer uma das abas por canal.
+ * @returns {Object|null} { record, sheetName } ou null se não encontrado.
+ */
+function findAtendimento_(id) {
+  if (!id) return null;
+  const sheetNames = getAtendimentoSheetNames_();
+  for (let i = 0; i < sheetNames.length; i++) {
+    const record = getById(sheetNames[i], id);
+    if (record) return { record: record, sheetName: sheetNames[i] };
+  }
+  return null;
 }
 
 function applyAtendimentoFilters_(records, filtros) {
@@ -222,10 +283,12 @@ function salvarAtendimento(dados) {
     DataAtualizacao: now,
     Excluido: false,
     ExcluidoPor: '',
-    DataExclusao: ''
+    DataExclusao: '',
+    CamposExtras: input.camposExtras
   };
 
-  insertAtendimentoUnique_(record);
+  // O canal define a aba onde o atendimento é gravado.
+  insertAtendimentoUnique_(record, sheetNameForCanalConfig_(input.canal));
   insertTimeline_(record.Id, 'Criação', 'Atendimento criado.', '', input.status, actor.nome, '');
   if (input.responsavel !== actor.nome) {
     insertTimeline_(record.Id, 'Delegação', 'Atendimento delegado pelo supervisor.',
@@ -238,8 +301,9 @@ function salvarAtendimento(dados) {
 function atualizarAtendimento(id, dados, justificativa) {
   ensureDatabaseReady();
   const safeId = sanitizeInput(id);
-  const oldRecord = getById(CONFIG.SHEET_NAMES.ATENDIMENTOS, safeId);
-  if (!oldRecord || isTrue_(oldRecord.Excluido)) throw new Error('Atendimento não encontrado.');
+  const found = findAtendimento_(safeId);
+  if (!found || isTrue_(found.record.Excluido)) throw new Error('Atendimento não encontrado.');
+  const oldRecord = found.record;
 
   const actor = getActor_();
   if (!canAccessAtendimento_(oldRecord, actor)) {
@@ -275,11 +339,13 @@ function atualizarAtendimento(id, dados, justificativa) {
     TempoResolucaoHoras: resolution.hours,
     Observacoes: input.observacoes,
     AtualizadoPor: actor.nome,
-    DataAtualizacao: now
+    DataAtualizacao: now,
+    CamposExtras: input.camposExtras
   };
 
   const history = buildChangeHistory_(safeId, oldRecord, updates, actor.nome, safeJustification);
-  updateAtendimentoUnique_(safeId, updates);
+  // Se o canal mudou, o registro é movido para a aba do novo canal.
+  updateAtendimentoUnique_(safeId, updates, found.sheetName, sheetNameForCanalConfig_(input.canal));
 
   if (history.length > 0) {
     batchInsert(CONFIG.SHEET_NAMES.HISTORICO, history);
@@ -311,8 +377,9 @@ function atualizarAtendimento(id, dados, justificativa) {
 function alterarStatusAtendimento(id, status, situacao) {
   ensureDatabaseReady();
   const safeId = sanitizeInput(id);
-  const record = getById(CONFIG.SHEET_NAMES.ATENDIMENTOS, safeId);
-  if (!record || isTrue_(record.Excluido)) throw new Error('Atendimento não encontrado.');
+  const found = findAtendimento_(safeId);
+  if (!found || isTrue_(found.record.Excluido)) throw new Error('Atendimento não encontrado.');
+  const record = found.record;
 
   const actor = getActor_();
   if (!canAccessAtendimento_(record, actor)) {
@@ -333,12 +400,12 @@ function alterarStatusAtendimento(id, status, situacao) {
 
   updateAtendimentoUnique_(safeId, {
     Status: newStatus,
-    MotivoPendencia: isFinalStatus_(newStatus) ? '' : newSituacao,
+    MotivoPendencia: isWaitingStatus_(newStatus) ? newSituacao : '',
     DataResolucao: resolution.date,
     TempoResolucaoHoras: resolution.hours,
     AtualizadoPor: actor.nome,
     DataAtualizacao: now
-  });
+  }, found.sheetName, found.sheetName);
 
   insertTimeline_(safeId, isFinalStatus_(newStatus) ? 'Encerramento' : 'Mudança de status',
     'Status alterado pelo dashboard.',
@@ -352,8 +419,9 @@ function alterarStatusAtendimento(id, status, situacao) {
 function excluirAtendimento(id) {
   ensureDatabaseReady();
   const safeId = sanitizeInput(id);
-  const record = getById(CONFIG.SHEET_NAMES.ATENDIMENTOS, safeId);
-  if (!record || isTrue_(record.Excluido)) return { success: false, message: 'Atendimento não encontrado.' };
+  const found = findAtendimento_(safeId);
+  if (!found || isTrue_(found.record.Excluido)) return { success: false, message: 'Atendimento não encontrado.' };
+  const record = found.record;
 
   const actor = getActor_();
   if (!canAccessAtendimento_(record, actor)) {
@@ -375,7 +443,7 @@ function excluirAtendimento(id) {
   });
 
   // Exclusão lógica mantém rastreabilidade e permite auditoria futura.
-  update(CONFIG.SHEET_NAMES.ATENDIMENTOS, safeId, {
+  update(found.sheetName, safeId, {
     Excluido: true,
     ExcluidoPor: actor.nome,
     DataExclusao: now,
@@ -391,15 +459,15 @@ function adicionarObservacao(atendimentoId, texto) {
   const id = sanitizeInput(atendimentoId);
   const observation = sanitizeInput(texto);
   if (!observation) throw new Error('A observação não pode ficar vazia.');
-  const record = getById(CONFIG.SHEET_NAMES.ATENDIMENTOS, id);
-  if (!record || isTrue_(record.Excluido)) throw new Error('Atendimento não encontrado.');
+  const found = findAtendimento_(id);
+  if (!found || isTrue_(found.record.Excluido)) throw new Error('Atendimento não encontrado.');
 
   const actor = getActor_();
-  if (!canAccessAtendimento_(record, actor)) {
+  if (!canAccessAtendimento_(found.record, actor)) {
     throw new Error('Você não tem permissão para alterar este atendimento.');
   }
   insertTimeline_(id, 'Observação', observation, '', '', actor.nome, '');
-  update(CONFIG.SHEET_NAMES.ATENDIMENTOS, id, {
+  update(found.sheetName, id, {
     AtualizadoPor: actor.nome,
     DataAtualizacao: new Date()
   });
@@ -407,6 +475,7 @@ function adicionarObservacao(atendimentoId, texto) {
 }
 
 function validateAtendimentoInput_(dados) {
+  const formConfig = getFormConfig_();
   const input = {
     numeroRA: sanitizeInput(dados.numeroRA),
     cliente: sanitizeInput(dados.cliente),
@@ -421,43 +490,60 @@ function validateAtendimentoInput_(dados) {
     motivoPendencia: sanitizeInput(dados.motivoPendencia)
   };
 
-  const required = {
-    numeroRA: 'Protocolo Odin',
-    cliente: 'Nome do cliente',
-    cpf: 'CPF',
-    dataAbertura: 'Data',
-    produto: 'Produto',
-    canal: 'Canal',
-    status: 'Status'
-  };
-  Object.keys(required).forEach(function(key) {
-    if (!input[key]) throw new Error(required[key] + ' é obrigatório.');
+  // Campos personalizados (Base=false na ConfigCampos): sanitizados um a um
+  // e gravados como JSON na coluna CamposExtras.
+  const extrasInput = (dados.camposExtras && typeof dados.camposExtras === 'object') ? dados.camposExtras : {};
+  const extras = {};
+  formConfig.forEach(function(field) {
+    if (field.base) return;
+    const value = sanitizeInput(extrasInput[field.campo]);
+    if (field.exibir && field.obrigatorio && !value) {
+      throw new Error(field.rotulo + ' é obrigatório.');
+    }
+    if (value) extras[field.campo] = value;
+  });
+  input.camposExtras = Object.keys(extras).length > 0 ? JSON.stringify(extras) : '';
+
+  // Obrigatoriedade dos campos base conforme a configuração do ADM.
+  formConfig.forEach(function(field) {
+    if (!field.base || !field.exibir || !field.obrigatorio) return;
+    if (input[field.campo] === undefined) return;
+    if (!input[field.campo]) throw new Error(field.rotulo + ' é obrigatório.');
   });
 
-  if (!validateCPF(input.cpf)) throw new Error('CPF inválido.');
-  assertValidStatus_(input.status, input.motivoPendencia);
-  if (isFinalStatus_(input.status)) input.motivoPendencia = '';
+  // Regras fixas do fluxo (independem da ConfigCampos): o Canal define a aba
+  // onde o atendimento é gravado e o Status controla o ciclo de vida.
+  if (!input.canal) throw new Error('Canal é obrigatório.');
+  const canalValido = CANAIS_LIST.some(function(canal) {
+    return normalizeText_(canal) === normalizeText_(input.canal);
+  });
+  if (!canalValido) throw new Error('Canal inválido.');
+  if (!input.status) throw new Error('Status é obrigatório.');
 
-  input.cpf = formatCPF(input.cpf);
+  if (input.cpf && !validateCPF(input.cpf)) throw new Error('CPF inválido.');
+  assertValidStatus_(input.status, input.motivoPendencia);
+  if (!isWaitingStatus_(input.status)) input.motivoPendencia = '';
+
+  if (input.cpf) input.cpf = formatCPF(input.cpf);
   return input;
 }
 
 /**
- * Garante que o status é um dos valores fixos e que a situação da
- * pendência foi informada (e é válida) quando o status é "Pendente".
+ * Garante que o status é um dos valores fixos e que "Aguardando Retorno de"
+ * (Área/Cliente) foi informado quando o status é "Pendente".
  */
 function assertValidStatus_(status, situacao) {
   const validStatus = STATUS_LIST.some(function(item) {
     return normalizeText_(item.Nome) === normalizeText_(status);
   });
-  if (!validStatus) throw new Error('Status inválido. Utilize "Pendente" ou "Concluído".');
+  if (!validStatus) throw new Error('Status inválido. Utilize "Pendente", "Em análise" ou "Concluído".');
 
   if (isWaitingStatus_(status)) {
     const validSituacao = SITUACOES_PENDENCIA.some(function(item) {
       return normalizeText_(item) === normalizeText_(situacao);
     });
     if (!validSituacao) {
-      throw new Error('Informe a situação da pendência quando o status for "Pendente".');
+      throw new Error('Informe "Aguardando Retorno de" (Área ou Cliente) quando o status for "Pendente".');
     }
   }
 }
@@ -484,58 +570,86 @@ function statusLabel_(status, situacao) {
 }
 
 /**
- * Escritas atômicas do atendimento: a verificação de Protocolo Odin e a
- * gravação acontecem sob o mesmo lock para impedir duplicidades em
- * requisições paralelas.
+ * Escritas atômicas do atendimento: a verificação de protocolo duplicado e
+ * a gravação acontecem sob o mesmo lock para impedir duplicidades em
+ * requisições paralelas. A unicidade é verificada nas três abas por canal.
  */
-function insertAtendimentoUnique_(record) {
+function insertAtendimentoUnique_(record, sheetName) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    const sheet = getSpreadsheet().getSheetByName(CONFIG.SHEET_NAMES.ATENDIMENTOS);
-    assertUniqueNumeroRAInSheet_(sheet, record.NumeroRA, '');
+    const ss = getSpreadsheet();
+    assertUniqueNumeroRAAllSheets_(ss, record.NumeroRA, '');
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) throw new Error('Aba do canal não encontrada: ' + sheetName);
     const row = toRowArray(record, COLUMNS.ATENDIMENTOS);
     sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
-    invalidateCache(CONFIG.SHEET_NAMES.ATENDIMENTOS);
+    invalidateCache(sheetName);
   } finally {
     try { lock.releaseLock(); } catch (e) { /* lock não adquirido */ }
   }
 }
 
-function updateAtendimentoUnique_(id, updates) {
+/**
+ * Atualiza um atendimento em sua aba atual. Quando o canal muda
+ * (fromSheetName !== toSheetName), o registro é movido para a aba do novo
+ * canal — removido da origem e regravado no destino, sob o mesmo lock.
+ */
+function updateAtendimentoUnique_(id, updates, fromSheetName, toSheetName) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    const sheet = getSpreadsheet().getSheetByName(CONFIG.SHEET_NAMES.ATENDIMENTOS);
+    const ss = getSpreadsheet();
     if (updates.NumeroRA !== undefined) {
-      assertUniqueNumeroRAInSheet_(sheet, updates.NumeroRA, id);
+      assertUniqueNumeroRAAllSheets_(ss, updates.NumeroRA, id);
     }
-    const rowIndex = findRowById(sheet, id);
+    const fromSheet = ss.getSheetByName(fromSheetName);
+    if (!fromSheet) throw new Error('Aba do canal não encontrada: ' + fromSheetName);
+    const rowIndex = findRowById(fromSheet, id);
     if (rowIndex === -1) throw new Error('Atendimento não encontrado.');
-    const currentRow = sheet.getRange(rowIndex, 1, 1, COLUMNS.ATENDIMENTOS.length).getValues()[0];
+    const currentRow = fromSheet.getRange(rowIndex, 1, 1, COLUMNS.ATENDIMENTOS.length).getValues()[0];
     const current = toObject(currentRow, COLUMNS.ATENDIMENTOS);
     Object.keys(updates).forEach(function(key) { current[key] = updates[key]; });
-    sheet.getRange(rowIndex, 1, 1, COLUMNS.ATENDIMENTOS.length)
-      .setValues([toRowArray(current, COLUMNS.ATENDIMENTOS)]);
-    invalidateCache(CONFIG.SHEET_NAMES.ATENDIMENTOS);
+    const newRow = toRowArray(current, COLUMNS.ATENDIMENTOS);
+
+    if (toSheetName && toSheetName !== fromSheetName) {
+      const toSheet = ss.getSheetByName(toSheetName);
+      if (!toSheet) throw new Error('Aba do canal não encontrada: ' + toSheetName);
+      toSheet.getRange(toSheet.getLastRow() + 1, 1, 1, newRow.length).setValues([newRow]);
+      fromSheet.deleteRow(rowIndex);
+      invalidateCache(toSheetName);
+    } else {
+      fromSheet.getRange(rowIndex, 1, 1, COLUMNS.ATENDIMENTOS.length).setValues([newRow]);
+    }
+    invalidateCache(fromSheetName);
   } finally {
     try { lock.releaseLock(); } catch (e) { /* lock não adquirido */ }
   }
 }
 
-function assertUniqueNumeroRAInSheet_(sheet, numeroRA, ignoredId) {
-  if (!sheet || sheet.getLastRow() <= 1) return;
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length).getValues();
+/**
+ * Verifica a duplicidade do protocolo nas três abas por canal.
+ * Protocolos vazios não são verificados (campo pode ser opcional na
+ * ConfigCampos).
+ */
+function assertUniqueNumeroRAAllSheets_(ss, numeroRA, ignoredId) {
+  const normalized = normalizeText_(numeroRA);
+  if (!normalized) return;
   const idIndex = COLUMNS.ATENDIMENTOS.indexOf('Id');
   const raIndex = COLUMNS.ATENDIMENTOS.indexOf('NumeroRA');
   const deletedIndex = COLUMNS.ATENDIMENTOS.indexOf('Excluido');
-  const normalized = normalizeText_(numeroRA);
-  const duplicate = data.some(function(row) {
-    return String(row[idIndex]) !== String(ignoredId || '') &&
-      !isTrue_(row[deletedIndex]) &&
-      normalizeText_(row[raIndex]) === normalized;
+
+  const duplicate = getAtendimentoSheetNames_().some(function(sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() <= 1) return false;
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length).getValues();
+    return data.some(function(row) {
+      return String(row[idIndex]) !== String(ignoredId || '') &&
+        !isTrue_(row[deletedIndex]) &&
+        normalizeText_(row[raIndex]) === normalized;
+    });
   });
-  if (duplicate) throw new Error('Já existe um atendimento com este Protocolo Odin.');
+  if (duplicate) throw new Error('Já existe um atendimento com este protocolo.');
 }
 
 // ============================================================================
@@ -639,25 +753,47 @@ function getDashboardData() {
   const cards = {
     totalAtendimentos: records.length,
     pendentes: 0,
+    emAnalise: 0,
     concluidos: 0
   };
   const porSituacao = {};
   SITUACOES_PENDENCIA.forEach(function(situacao) { porSituacao[situacao] = 0; });
 
+  // Indicadores por canal (ReclameAqui, ChatPrivadoRA e SACPreventivo).
+  const porCanal = {};
+  CANAIS_LIST.forEach(function(canal) {
+    porCanal[canal] = { total: 0, pendentes: 0, emAnalise: 0, concluidos: 0 };
+  });
+
   records.forEach(function(record) {
+    let bucket = null;
+    for (let i = 0; i < CANAIS_LIST.length; i++) {
+      if (normalizeText_(CANAIS_LIST[i]) === normalizeText_(record.canal)) {
+        bucket = porCanal[CANAIS_LIST[i]];
+        break;
+      }
+    }
+    if (bucket) bucket.total++;
+
     if (isFinalStatus_(record.status)) {
       cards.concluidos++;
-    } else {
+      if (bucket) bucket.concluidos++;
+    } else if (isWaitingStatus_(record.status)) {
       cards.pendentes++;
+      if (bucket) bucket.pendentes++;
       if (porSituacao[record.situacaoPendencia] !== undefined) {
         porSituacao[record.situacaoPendencia]++;
       }
+    } else {
+      cards.emAnalise++;
+      if (bucket) bucket.emAnalise++;
     }
   });
 
   return {
     cards: cards,
     porSituacao: porSituacao,
+    porCanal: porCanal,
     atendimentos: records,
     user: actor
   };
@@ -682,9 +818,12 @@ function getRelatorio(filtros) {
 function getConfiguracoes() {
   ensureDatabaseReady();
   requireSupervisor_();
+  const isAdmin = isAdminProfile_(getActor_().perfil);
   const entities = getConfigurationEntities_();
   const result = {};
   Object.keys(entities).forEach(function(key) {
+    // Gestão de usuários e dos campos do formulário são exclusivas do ADM.
+    if (entities[key].adminOnly && !isAdmin) return;
     result[key] = getAll(entities[key].sheet).map(serializeRecord_);
   });
   return { entities: result, user: getActor_() };
@@ -696,25 +835,31 @@ function salvarConfiguracao(entidade, dados, id) {
   const entities = getConfigurationEntities_();
   const meta = entities[sanitizeInput(entidade)];
   if (!meta) throw new Error('Tipo de configuração inválido.');
+  if (meta.adminOnly) requireAdmin_();
 
   const input = dados || {};
   const record = {};
   meta.columns.forEach(function(column) {
     if (column === 'Id') return;
     if (input[column] === undefined) return;
-    if (column === 'Ativo') record[column] = isTrue_(input[column]);
-    else if (column === 'Ordem') {
+    if (['Ativo', 'Exibir', 'Obrigatorio'].indexOf(column) !== -1) {
+      record[column] = isTrue_(input[column]);
+    } else if (column === 'Ordem') {
       record[column] = input[column] === '' ? '' : Number(input[column]);
     } else {
       record[column] = sanitizeInput(input[column]);
     }
   });
 
-  if (!record.Nome) throw new Error('Nome é obrigatório.');
+  if (meta.key === 'camposFormulario') {
+    if (!record.Rotulo) throw new Error('Rótulo do campo é obrigatório.');
+  } else if (!record.Nome) {
+    throw new Error('Nome é obrigatório.');
+  }
   if (meta.key === 'usuarios' && record.Email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.Email)) {
     throw new Error('E-mail inválido.');
   }
-  if (meta.key === 'usuarios' && ['Analista', 'Supervisor'].indexOf(record.Perfil) === -1) {
+  if (meta.key === 'usuarios' && ['Analista', 'Supervisor', 'ADM'].indexOf(record.Perfil) === -1) {
     throw new Error('Perfil de usuário inválido.');
   }
   if (meta.key === 'categorias' && record.ProdutoId &&
@@ -725,9 +870,34 @@ function salvarConfiguracao(entidade, dados, id) {
   let recordId = sanitizeInput(id);
   const exists = recordId ? getById(meta.sheet, recordId) : null;
   if (meta.key === 'usuarios' && exists && isTrue_(exists.Ativo) &&
-      normalizeText_(exists.Perfil) === 'supervisor' &&
-      (!isTrue_(record.Ativo) || normalizeText_(record.Perfil) !== 'supervisor')) {
-    assertAnotherSupervisor_(recordId);
+      normalizeText_(exists.Perfil) === 'adm' &&
+      (!isTrue_(record.Ativo) || normalizeText_(record.Perfil) !== 'adm')) {
+    assertAnotherAdmin_(recordId);
+  }
+  if (meta.key === 'camposFormulario') {
+    if (exists) {
+      // Campos bloqueados (ex: Canal) não podem ser ocultados/desobrigados;
+      // a chave interna e a origem (Base) nunca mudam pela interface.
+      if (isTrue_(exists.Bloqueado)) {
+        record.Exibir = true;
+        record.Obrigatorio = true;
+      }
+      delete record.Campo;
+      delete record.Base;
+      delete record.Bloqueado;
+    } else {
+      // Campo novo criado pelo ADM: gera a chave interna a partir do rótulo
+      // e grava os valores na coluna CamposExtras dos atendimentos.
+      record.Campo = slugifyFieldKey_(record.Rotulo);
+      if (!record.Campo) throw new Error('Rótulo do campo é inválido.');
+      const clash = getFormConfig_().some(function(field) {
+        return field.campo === record.Campo;
+      });
+      if (clash) throw new Error('Já existe um campo com este rótulo.');
+      record.Base = false;
+      record.Bloqueado = false;
+      if (!record.Tipo) record.Tipo = 'text';
+    }
   }
   if (exists) {
     update(meta.sheet, recordId, record);
@@ -752,16 +922,29 @@ function excluirConfiguracao(entidade, id) {
   const entities = getConfigurationEntities_();
   const meta = entities[sanitizeInput(entidade)];
   if (!meta) throw new Error('Tipo de configuração inválido.');
+  if (meta.adminOnly) requireAdmin_();
   const safeId = sanitizeInput(id);
   const existing = getById(meta.sheet, safeId);
   if (!existing) throw new Error('Registro não encontrado.');
-  if (meta.key === 'usuarios' && isTrue_(existing.Ativo) && normalizeText_(existing.Perfil) === 'supervisor') {
-    assertAnotherSupervisor_(safeId);
+  if (meta.key === 'usuarios' && isTrue_(existing.Ativo) && normalizeText_(existing.Perfil) === 'adm') {
+    assertAnotherAdmin_(safeId);
   }
 
-  // Desativação lógica preserva o histórico dos atendimentos já vinculados.
-  update(meta.sheet, safeId, { Ativo: false });
-  auditConfiguration_('Desativação', meta.label, safeId, existing);
+  if (meta.key === 'camposFormulario') {
+    // Campos base do sistema não podem ser removidos (apenas ocultados);
+    // campos personalizados são excluídos de fato da ConfigCampos.
+    if (isTrue_(existing.Bloqueado)) {
+      throw new Error('Este campo é fixo do fluxo e não pode ser removido.');
+    }
+    if (isTrue_(existing.Base)) {
+      throw new Error('Campos padrão não podem ser removidos. Desmarque "Exibir" para ocultá-los do formulário.');
+    }
+    remove(meta.sheet, safeId);
+  } else {
+    // Desativação lógica preserva o histórico dos atendimentos já vinculados.
+    update(meta.sheet, safeId, { Ativo: false });
+  }
+  auditConfiguration_(meta.key === 'camposFormulario' ? 'Exclusão' : 'Desativação', meta.label, safeId, existing);
   invalidateAllCache();
   SERVICE_CONTEXT_ = {};
   return { success: true };
@@ -779,9 +962,25 @@ function getConfigurationEntities_() {
     },
     usuarios: {
       key: 'usuarios', label: 'Usuários e responsáveis', sheet: CONFIG.SHEET_NAMES.USUARIOS,
-      columns: COLUMNS.USUARIOS, prefix: 'USR'
+      columns: COLUMNS.USUARIOS, prefix: 'USR', adminOnly: true
+    },
+    camposFormulario: {
+      key: 'camposFormulario', label: 'Campos do formulário', sheet: CONFIG.SHEET_NAMES.CONFIG_CAMPOS,
+      columns: COLUMNS.CONFIG_CAMPOS, prefix: 'FC', adminOnly: true
     }
   };
+}
+
+/**
+ * Gera a chave interna de um campo personalizado a partir do rótulo
+ * (ex: "Número da Agência" → "numeroDaAgencia").
+ */
+function slugifyFieldKey_(rotulo) {
+  const words = normalizeText_(rotulo).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(function(w) { return w; });
+  if (!words.length) return '';
+  return words.map(function(word, index) {
+    return index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1);
+  }).join('');
 }
 
 function auditConfiguration_(action, label, id, value) {
@@ -798,14 +997,14 @@ function auditConfiguration_(action, label, id, value) {
   });
 }
 
-function assertAnotherSupervisor_(ignoredId) {
-  const activeSupervisors = getAll(CONFIG.SHEET_NAMES.USUARIOS).filter(function(user) {
+function assertAnotherAdmin_(ignoredId) {
+  const activeAdmins = getAll(CONFIG.SHEET_NAMES.USUARIOS).filter(function(user) {
     return String(user.Id) !== String(ignoredId) &&
       isTrue_(user.Ativo) &&
-      normalizeText_(user.Perfil) === 'supervisor';
+      normalizeText_(user.Perfil) === 'adm';
   });
-  if (!activeSupervisors.length) {
-    throw new Error('Cadastre outro supervisor ativo antes de remover este acesso.');
+  if (!activeAdmins.length) {
+    throw new Error('Cadastre outro ADM ativo antes de remover este acesso.');
   }
 }
 
@@ -836,6 +1035,8 @@ function toClientAtendimento_(record, colorMap) {
     statusCor: colorMap[String(record.Status || '')] || '',
     situacaoPendencia: String(record.MotivoPendencia || ''),
     motivoPendencia: String(record.MotivoPendencia || ''),
+    aguardandoRetorno: String(record.MotivoPendencia || ''),
+    camposExtras: parseCamposExtras_(record.CamposExtras),
     responsavel: String(record.Responsavel || ''),
     tempoResolucao: record.TempoResolucaoHoras === '' ? '' : Number(record.TempoResolucaoHoras || 0),
     observacoes: String(record.Observacoes || ''),
@@ -844,6 +1045,19 @@ function toClientAtendimento_(record, colorMap) {
     atualizadoPor: String(record.AtualizadoPor || ''),
     dataAtualizacao: toIso_(record.DataAtualizacao)
   };
+}
+
+/**
+ * Converte o JSON da coluna CamposExtras em objeto simples { campo: valor }.
+ */
+function parseCamposExtras_(value) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
 }
 
 function getActor_() {
@@ -874,17 +1088,32 @@ function getActor_() {
 function requireSupervisor_() {
   const actor = getActor_();
   if (!isSupervisorProfile_(actor.perfil)) {
-    throw new Error('Apenas supervisores podem alterar as configurações.');
+    throw new Error('Apenas supervisores ou o ADM podem alterar as configurações.');
+  }
+}
+
+function requireAdmin_() {
+  const actor = getActor_();
+  if (!isAdminProfile_(actor.perfil)) {
+    throw new Error('Apenas o ADM pode executar esta ação.');
   }
 }
 
 /**
- * Verifica se um perfil corresponde a um nível de supervisão/gestão.
- * Usado para controlar quem vê/edita todos os atendimentos (Supervisor) e
- * quem vê/edita apenas os próprios (Analista).
+ * Verifica se um perfil corresponde ao ADM (acesso total: gestão de
+ * usuários, campos do formulário e configurações críticas).
+ */
+function isAdminProfile_(perfil) {
+  return ['adm', 'admin', 'administrador'].indexOf(normalizeText_(perfil)) !== -1;
+}
+
+/**
+ * Verifica se um perfil corresponde a um nível de supervisão/gestão
+ * (Supervisor ou ADM). Usado para controlar quem vê/edita todos os
+ * atendimentos e quem vê/edita apenas os próprios (Analista).
  */
 function isSupervisorProfile_(perfil) {
-  return ['supervisor', 'gestor', 'administrador', 'admin'].indexOf(normalizeText_(perfil)) !== -1;
+  return ['supervisor', 'gestor'].indexOf(normalizeText_(perfil)) !== -1 || isAdminProfile_(perfil);
 }
 
 /**

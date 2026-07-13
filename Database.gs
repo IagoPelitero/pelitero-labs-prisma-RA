@@ -106,12 +106,15 @@ function initializeSheets() {
     
     // Mapeamento de planilha -> colunas -> dados padrão
     const sheetsConfig = [
-      { name: CONFIG.SHEET_NAMES.ATENDIMENTOS, columns: COLUMNS.ATENDIMENTOS, defaults: [] },
-      { name: CONFIG.SHEET_NAMES.TIMELINE,     columns: COLUMNS.TIMELINE,     defaults: [] },
-      { name: CONFIG.SHEET_NAMES.HISTORICO,    columns: COLUMNS.HISTORICO,    defaults: [] },
-      { name: CONFIG.SHEET_NAMES.USUARIOS,     columns: COLUMNS.USUARIOS,     defaults: [] },
-      { name: CONFIG.SHEET_NAMES.PRODUTOS,     columns: COLUMNS.PRODUTOS,     defaults: DEFAULT_PRODUTOS },
-      { name: CONFIG.SHEET_NAMES.CATEGORIAS,   columns: COLUMNS.CATEGORIAS,   defaults: DEFAULT_CATEGORIAS }
+      { name: CONFIG.SHEET_NAMES.RECLAME_AQUI,   columns: COLUMNS.ATENDIMENTOS,  defaults: [] },
+      { name: CONFIG.SHEET_NAMES.CHAT_PRIVADO,   columns: COLUMNS.ATENDIMENTOS,  defaults: [] },
+      { name: CONFIG.SHEET_NAMES.SAC_PREVENTIVO, columns: COLUMNS.ATENDIMENTOS,  defaults: [] },
+      { name: CONFIG.SHEET_NAMES.CONFIG_CAMPOS,  columns: COLUMNS.CONFIG_CAMPOS, defaults: DEFAULT_CONFIG_CAMPOS },
+      { name: CONFIG.SHEET_NAMES.TIMELINE,       columns: COLUMNS.TIMELINE,      defaults: [] },
+      { name: CONFIG.SHEET_NAMES.HISTORICO,      columns: COLUMNS.HISTORICO,     defaults: [] },
+      { name: CONFIG.SHEET_NAMES.USUARIOS,       columns: COLUMNS.USUARIOS,      defaults: [] },
+      { name: CONFIG.SHEET_NAMES.PRODUTOS,       columns: COLUMNS.PRODUTOS,      defaults: DEFAULT_PRODUTOS },
+      { name: CONFIG.SHEET_NAMES.CATEGORIAS,     columns: COLUMNS.CATEGORIAS,    defaults: DEFAULT_CATEGORIAS }
     ];
     
     sheetsConfig.forEach(function(cfg) {
@@ -164,9 +167,11 @@ function initializeSheets() {
 }
 
 /**
- * Migração v3: remove abas descontinuadas (SLA, prioridades, tipos de
- * atendimento, parâmetros gerais etc.) e normaliza status/situações antigas
- * dos atendimentos para o novo fluxo (Pendente/Concluído).
+ * Migração v4: remove abas descontinuadas, ressemeia o catálogo, move os
+ * atendimentos da aba legada "Atendimentos" para as abas por canal
+ * (ReclameAqui, ChatPrivadoRA, SACPreventivo), normaliza o fluxo de status
+ * (Pendente / Em análise / Concluído + "Aguardando Retorno de") e garante
+ * que exista um usuário ADM.
  */
 function migrateLegacyData_(ss) {
   // 1) Remove abas que deixaram de existir no fluxo simplificado.
@@ -183,49 +188,165 @@ function migrateLegacyData_(ss) {
     }
   });
 
-  // 2) Ressemeia o catálogo de Produtos/Categorias (uma única vez por versão):
-  //    remove os produtos e categorias antigos e insere apenas
-  //    Cartão de Crédito e Conta Digital PortoBank com suas categorias.
+  // 2) Ressemeia o catálogo de Produtos/Categorias (uma única vez por versão).
   reseedCatalog_(ss);
 
-  // 3) Normaliza status e situação de pendência dos atendimentos existentes.
-  const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.ATENDIMENTOS);
-  if (!sheet || sheet.getLastRow() <= 1) return;
+  // 3) Move os atendimentos legados para as abas por canal e normaliza status.
+  migrateAtendimentosPorCanal_(ss);
 
-  const statusIndex = COLUMNS.ATENDIMENTOS.indexOf('Status');
-  const motivoIndex = COLUMNS.ATENDIMENTOS.indexOf('MotivoPendencia');
-  const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
-  const rows = range.getValues();
-  let changed = false;
+  // 4) Garante um usuário ADM (instalações antigas só tinham Supervisor).
+  promoteFirstAdmin_();
+}
 
-  const finalNames = ['concluido', 'resolvido', 'finalizado', 'encerrado', 'cancelado', 'improcedente'];
-  const motivoMap = {
-    'area': 'Em análise área',
-    'cliente': 'Em análise aguardando retorno do cliente'
-  };
+/**
+ * Move cada linha da aba legada "Atendimentos" para a aba do seu canal e
+ * normaliza status/situação para o fluxo v4:
+ *   - Status finais → "Concluído" (sem situação);
+ *   - "Em análise do analista" → status "Em análise";
+ *   - "Em análise área" → Pendente / Aguardando Retorno de "Área";
+ *   - "...retorno do cliente" → Pendente / Aguardando Retorno de "Cliente".
+ * Executa uma única vez (flag em Script Properties) e remove a aba legada.
+ */
+function migrateAtendimentosPorCanal_(ss) {
+  const properties = PropertiesService.getScriptProperties();
+  const MIGRATION_FLAG = 'PORTO_RA_CANAL_MIGRATION';
+  if (properties.getProperty(MIGRATION_FLAG) === '4.0.0') return;
 
-  rows.forEach(function(row) {
-    const status = normalizeText_(row[statusIndex]);
-    if (!status) return;
-    if (finalNames.indexOf(status) !== -1) {
-      if (row[statusIndex] !== 'Concluído') { row[statusIndex] = 'Concluído'; changed = true; }
-      if (row[motivoIndex]) { row[motivoIndex] = ''; changed = true; }
-    } else {
-      if (row[statusIndex] !== 'Pendente') { row[statusIndex] = 'Pendente'; changed = true; }
-      const motivo = normalizeText_(row[motivoIndex]);
-      const mapped = motivoMap[motivo] || (SITUACOES_PENDENCIA.indexOf(String(row[motivoIndex])) !== -1
-        ? String(row[motivoIndex])
-        : 'Em análise do analista');
-      if (row[motivoIndex] !== mapped) { row[motivoIndex] = mapped; changed = true; }
+  const legacySheet = ss.getSheetByName(CONFIG.LEGACY_ATENDIMENTOS_SHEET);
+  if (legacySheet && legacySheet.getLastRow() > 1) {
+    const lastCol = legacySheet.getLastColumn();
+    const values = legacySheet.getRange(1, 1, legacySheet.getLastRow(), lastCol).getValues();
+    const headers = values[0].map(function(value) { return String(value); });
+    const buckets = {};
+
+    for (let i = 1; i < values.length; i++) {
+      const record = {};
+      headers.forEach(function(header, index) {
+        if (header) record[header] = values[i][index];
+      });
+      if (!record.Id) continue;
+
+      normalizeStatusV4_(record);
+      const sheetName = sheetNameForCanalConfig_(record.Canal);
+      if (!buckets[sheetName]) buckets[sheetName] = [];
+      buckets[sheetName].push(toRowArray(record, COLUMNS.ATENDIMENTOS));
+    }
+
+    Object.keys(buckets).forEach(function(sheetName) {
+      const target = ss.getSheetByName(sheetName);
+      if (!target || buckets[sheetName].length === 0) return;
+      target.getRange(target.getLastRow() + 1, 1, buckets[sheetName].length, COLUMNS.ATENDIMENTOS.length)
+        .setValues(buckets[sheetName]);
+      invalidateCache(sheetName);
+      Logger.log('Atendimentos migrados para ' + sheetName + ': ' + buckets[sheetName].length);
+    });
+  }
+
+  if (legacySheet && ss.getSheets().length > 1) {
+    ss.deleteSheet(legacySheet);
+    Logger.log('Aba legada removida: ' + CONFIG.LEGACY_ATENDIMENTOS_SHEET);
+  }
+
+  // Normaliza também registros já existentes nas abas por canal
+  // (caso a planilha tenha sido editada manualmente com valores antigos).
+  CANAL_SHEETS.forEach(function(item) {
+    const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES[item.sheetKey]);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
+    const rows = range.getValues();
+    let changed = false;
+    rows.forEach(function(row) {
+      const record = toObject(row, COLUMNS.ATENDIMENTOS);
+      if (!record.Id) return;
+      if (normalizeStatusV4_(record)) {
+        const updated = toRowArray(record, COLUMNS.ATENDIMENTOS);
+        for (let c = 0; c < updated.length; c++) row[c] = updated[c];
+        changed = true;
+      }
+    });
+    if (changed) {
+      range.setValues(rows);
+      invalidateCache(sheet.getName());
     }
   });
 
-  if (changed) {
-    range.setValues(rows);
-    Logger.log('Status/situações de atendimentos normalizados para o fluxo v3.');
+  properties.setProperty(MIGRATION_FLAG, '4.0.0');
+}
+
+/**
+ * Normaliza Status/MotivoPendencia de um registro para o fluxo v4.
+ * Altera o objeto recebido e retorna true quando algo mudou.
+ */
+function normalizeStatusV4_(record) {
+  const finalNames = ['concluido', 'resolvido', 'finalizado', 'encerrado', 'cancelado', 'improcedente'];
+  const status = normalizeText_(record.Status);
+  const motivo = normalizeText_(record.MotivoPendencia);
+  let newStatus = record.Status;
+  let newMotivo = record.MotivoPendencia;
+
+  if (finalNames.indexOf(status) !== -1) {
+    newStatus = 'Concluído';
+    newMotivo = '';
+  } else if (status === 'em analise') {
+    newMotivo = '';
+  } else {
+    // Pendente (ou status desconhecido): decide pela situação legada.
+    if (motivo.indexOf('area') !== -1) {
+      newStatus = 'Pendente';
+      newMotivo = 'Área';
+    } else if (motivo.indexOf('cliente') !== -1) {
+      newStatus = 'Pendente';
+      newMotivo = 'Cliente';
+    } else if (motivo.indexOf('analista') !== -1 || !motivo) {
+      newStatus = 'Em análise';
+      newMotivo = '';
+    } else {
+      newStatus = 'Pendente';
+      newMotivo = SITUACOES_PENDENCIA.indexOf(String(record.MotivoPendencia)) !== -1
+        ? String(record.MotivoPendencia)
+        : 'Área';
+    }
   }
 
-  normalizeProdutosAtendimentos_(sheet);
+  const changed = String(record.Status) !== String(newStatus) ||
+    String(record.MotivoPendencia || '') !== String(newMotivo || '');
+  record.Status = newStatus;
+  record.MotivoPendencia = newMotivo;
+  return changed;
+}
+
+/**
+ * Retorna o nome da aba correspondente a um canal (Config.gs/CANAL_SHEETS).
+ * Canais desconhecidos ou vazios caem na aba ReclameAqui.
+ */
+function sheetNameForCanalConfig_(canal) {
+  const normalized = normalizeText_(canal);
+  for (let i = 0; i < CANAL_SHEETS.length; i++) {
+    if (normalizeText_(CANAL_SHEETS[i].canal) === normalized) {
+      return CONFIG.SHEET_NAMES[CANAL_SHEETS[i].sheetKey];
+    }
+  }
+  return CONFIG.SHEET_NAMES.RECLAME_AQUI;
+}
+
+/**
+ * Garante que exista pelo menos um usuário ativo com perfil ADM.
+ * Em instalações antigas, promove o primeiro Supervisor ativo.
+ */
+function promoteFirstAdmin_() {
+  const users = getAll(CONFIG.SHEET_NAMES.USUARIOS);
+  const hasAdmin = users.some(function(user) {
+    return isTrue_(user.Ativo) && normalizeText_(user.Perfil) === 'adm';
+  });
+  if (hasAdmin) return;
+
+  const supervisor = users.find(function(user) {
+    return isTrue_(user.Ativo) && ['supervisor', 'gestor', 'administrador', 'admin'].indexOf(normalizeText_(user.Perfil)) !== -1;
+  });
+  if (supervisor) {
+    update(CONFIG.SHEET_NAMES.USUARIOS, supervisor.Id, { Perfil: 'ADM' });
+    Logger.log('Usuário promovido a ADM: ' + supervisor.Nome);
+  }
 }
 
 /**
@@ -259,39 +380,6 @@ function reseedCatalog_(ss) {
   });
 
   properties.setProperty('PORTO_RA_CATALOG_VERSION', CATALOG_VERSION);
-}
-
-/**
- * Ajusta os nomes de produto dos atendimentos existentes para o catálogo
- * atual (ex: "Conta"/"Conta Digital" → "Conta Digital PortoBank").
- */
-function normalizeProdutosAtendimentos_(sheet) {
-  if (!sheet || sheet.getLastRow() <= 1) return;
-  const produtoIndex = COLUMNS.ATENDIMENTOS.indexOf('Produto');
-  const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
-  const rows = range.getValues();
-  let changed = false;
-
-  const contaNames = ['conta', 'conta digital', 'conta digital portobank'];
-  const cartaoNames = ['cartao', 'cartao de credito'];
-
-  rows.forEach(function(row) {
-    const produto = normalizeText_(row[produtoIndex]);
-    if (!produto) return;
-    if (contaNames.indexOf(produto) !== -1 && row[produtoIndex] !== 'Conta Digital PortoBank') {
-      row[produtoIndex] = 'Conta Digital PortoBank';
-      changed = true;
-    } else if (cartaoNames.indexOf(produto) !== -1 && row[produtoIndex] !== 'Cartão de Crédito') {
-      row[produtoIndex] = 'Cartão de Crédito';
-      changed = true;
-    }
-  });
-
-  if (changed) {
-    range.setValues(rows);
-    invalidateCache(CONFIG.SHEET_NAMES.ATENDIMENTOS);
-    Logger.log('Produtos dos atendimentos normalizados para o catálogo atual.');
-  }
 }
 
 /**
@@ -341,7 +429,8 @@ function ensureSheetSchema_(sheet, columns) {
 }
 
 /**
- * Cadastra o primeiro usuário como supervisor para viabilizar a configuração inicial.
+ * Cadastra o primeiro usuário como ADM para viabilizar a configuração inicial
+ * (gestão de usuários e dos campos do formulário são exclusivas do ADM).
  */
 function bootstrapSupervisor_() {
   const sheet = getSpreadsheet().getSheetByName(CONFIG.SHEET_NAMES.USUARIOS);
@@ -354,12 +443,12 @@ function bootstrapSupervisor_() {
     email = '';
   }
 
-  const nome = email ? email.split('@')[0] : 'Supervisor inicial';
+  const nome = email ? email.split('@')[0] : 'Administrador inicial';
   const user = {
     Id: generateId('USR'),
     Nome: nome,
     Email: email,
-    Perfil: 'Supervisor',
+    Perfil: 'ADM',
     Equipe: 'RA',
     Ativo: true,
     DataCadastro: new Date(),
@@ -824,12 +913,15 @@ function findRowById(sheet, id) {
  */
 function getColumnsForSheet(sheetName) {
   const mapping = {};
-  mapping[CONFIG.SHEET_NAMES.ATENDIMENTOS] = COLUMNS.ATENDIMENTOS;
-  mapping[CONFIG.SHEET_NAMES.TIMELINE]     = COLUMNS.TIMELINE;
-  mapping[CONFIG.SHEET_NAMES.HISTORICO]    = COLUMNS.HISTORICO;
-  mapping[CONFIG.SHEET_NAMES.USUARIOS]     = COLUMNS.USUARIOS;
-  mapping[CONFIG.SHEET_NAMES.PRODUTOS]     = COLUMNS.PRODUTOS;
-  mapping[CONFIG.SHEET_NAMES.CATEGORIAS]   = COLUMNS.CATEGORIAS;
+  mapping[CONFIG.SHEET_NAMES.RECLAME_AQUI]   = COLUMNS.ATENDIMENTOS;
+  mapping[CONFIG.SHEET_NAMES.CHAT_PRIVADO]   = COLUMNS.ATENDIMENTOS;
+  mapping[CONFIG.SHEET_NAMES.SAC_PREVENTIVO] = COLUMNS.ATENDIMENTOS;
+  mapping[CONFIG.SHEET_NAMES.CONFIG_CAMPOS]  = COLUMNS.CONFIG_CAMPOS;
+  mapping[CONFIG.SHEET_NAMES.TIMELINE]       = COLUMNS.TIMELINE;
+  mapping[CONFIG.SHEET_NAMES.HISTORICO]      = COLUMNS.HISTORICO;
+  mapping[CONFIG.SHEET_NAMES.USUARIOS]       = COLUMNS.USUARIOS;
+  mapping[CONFIG.SHEET_NAMES.PRODUTOS]       = COLUMNS.PRODUTOS;
+  mapping[CONFIG.SHEET_NAMES.CATEGORIAS]     = COLUMNS.CATEGORIAS;
 
   return mapping[sheetName] || [];
 }

@@ -30,16 +30,23 @@
 // CONFIGURAÇÕES GERAIS DO SISTEMA
 // ============================================================================
 const CONFIG = {
-  SCHEMA_VERSION: '3.1.0',
+  SCHEMA_VERSION: '4.0.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
   SHEET_NAMES: {
-    ATENDIMENTOS: 'Atendimentos',
+    // Abas de atendimento separadas por canal. A aba legada "Atendimentos"
+    // é migrada automaticamente para estas três (migrateLegacyData_).
+    RECLAME_AQUI: 'ReclameAqui',
+    CHAT_PRIVADO: 'ChatPrivadoRA',
+    SAC_PREVENTIVO: 'SACPreventivo',
+    CONFIG_CAMPOS: 'ConfigCampos',
     TIMELINE: 'Timeline',
     HISTORICO: 'Histórico',
     USUARIOS: 'Usuários',
     PRODUTOS: 'Produtos',
     CATEGORIAS: 'Categorias'
   },
+  // Nome da aba legada (pré-v4), usada apenas pela migração.
+  LEGACY_ATENDIMENTOS_SHEET: 'Atendimentos',
   CACHE_TTL: 300,        // Tempo de cache em segundos (5 minutos)
   PAGE_SIZE: 50,         // Registros por página na listagem
   LOCK_TIMEOUT_MS: 30000 // Timeout para LockService (30 segundos)
@@ -71,7 +78,19 @@ const COLUMNS = {
     'DataAtualizacao',
     'Excluido',
     'ExcluidoPor',
-    'DataExclusao'
+    'DataExclusao',
+    'CamposExtras'      // JSON com os campos personalizados do formulário (ConfigCampos)
+  ],
+  CONFIG_CAMPOS: [
+    'Id',
+    'Campo',        // Chave interna do campo (ex: numeroRA, cliente, agencia)
+    'Rotulo',       // Rótulo exibido no formulário
+    'Tipo',         // text | date | textarea | number | select | cpf
+    'Exibir',       // Sim/Não
+    'Obrigatorio',  // Sim/Não
+    'Ordem',
+    'Base',         // true = mapeia coluna fixa; false = gravado em CamposExtras
+    'Bloqueado'     // true = não pode ser ocultado nem tornado opcional (ex: Canal)
   ],
   TIMELINE: [
     'Id',
@@ -127,30 +146,42 @@ const COLUMNS = {
 // ============================================================================
 
 /**
- * Status do atendimento. Fluxo da célula de Reclame Aqui:
- * apenas "Pendente" e "Concluído".
+ * Status do atendimento. Fluxo da célula RA:
+ * Pendente → Em análise → Concluído.
  */
 const STATUS_LIST = [
-  { Nome: 'Pendente',  Tipo: 'Espera', Cor: '#FF9800' },
-  { Nome: 'Concluído', Tipo: 'Final',  Cor: '#4CAF50' }
+  { Nome: 'Pendente',   Tipo: 'Espera',    Cor: '#FF9800' },
+  { Nome: 'Em análise', Tipo: 'Andamento', Cor: '#2196F3' },
+  { Nome: 'Concluído',  Tipo: 'Final',     Cor: '#4CAF50' }
 ];
 
 /**
- * Situação da pendência (armazenada na coluna MotivoPendencia).
- * Obrigatória sempre que o Status é "Pendente".
+ * "Aguardando Retorno de" (armazenado na coluna MotivoPendencia).
+ * Obrigatório sempre que o Status é "Pendente"; oculto nos demais status.
  */
 const SITUACOES_PENDENCIA = [
-  'Em análise área',
-  'Em análise do analista',
-  'Em análise aguardando retorno do cliente'
+  'Área',
+  'Cliente'
 ];
 
 /**
- * Canais de entrada do atendimento.
+ * Canais de entrada do atendimento. O Chat Privado faz parte do Reclame
+ * Aqui, mas possui aba própria para facilitar o controle operacional.
  */
 const CANAIS_LIST = [
   'Reclame Aqui',
+  'Chat Privado',
   'SAC Preventivo'
+];
+
+/**
+ * Mapeamento Canal → aba do Google Sheets onde o atendimento é gravado.
+ * As chaves são comparadas com normalizeText_ (sem acentos/caixa).
+ */
+const CANAL_SHEETS = [
+  { canal: 'Reclame Aqui',   sheetKey: 'RECLAME_AQUI' },
+  { canal: 'Chat Privado',   sheetKey: 'CHAT_PRIVADO' },
+  { canal: 'SAC Preventivo', sheetKey: 'SAC_PREVENTIVO' }
 ];
 
 // ============================================================================
@@ -166,6 +197,27 @@ const CANAIS_LIST = [
 const DEFAULT_PRODUTOS = [
   { Id: 'PD001', Nome: 'Cartão de Crédito',       Descricao: 'Cartão de crédito Portobank',  Ativo: true, Ordem: 1 },
   { Id: 'PD002', Nome: 'Conta Digital PortoBank', Descricao: 'Conta digital do PortoBank',   Ativo: true, Ordem: 2 }
+];
+
+/**
+ * Campos padrão do formulário "Novo Atendimento" (aba ConfigCampos).
+ * O ADM administra estes registros pela tela de Configurações: pode ocultar,
+ * tornar opcional/obrigatório, reordenar e criar campos novos — sem alterar
+ * código. Campos com Base=true mapeiam colunas fixas da planilha; campos
+ * com Base=false são gravados na coluna CamposExtras (JSON).
+ * "Bloqueado" impede ocultar/desobrigar o campo (o Canal define em qual aba
+ * o atendimento é gravado, por isso é sempre obrigatório).
+ */
+const DEFAULT_CONFIG_CAMPOS = [
+  { Id: 'FC001', Campo: 'dataAbertura', Rotulo: 'Data',            Tipo: 'date',     Exibir: true,  Obrigatorio: true,  Ordem: 1, Base: true,  Bloqueado: false },
+  { Id: 'FC002', Campo: 'numeroRA',     Rotulo: 'Protocolo',       Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 2, Base: true,  Bloqueado: false },
+  { Id: 'FC003', Campo: 'cliente',      Rotulo: 'Nome do cliente', Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 3, Base: true,  Bloqueado: false },
+  { Id: 'FC004', Campo: 'cpf',          Rotulo: 'CPF',             Tipo: 'cpf',      Exibir: true,  Obrigatorio: true,  Ordem: 4, Base: true,  Bloqueado: false },
+  { Id: 'FC005', Campo: 'produto',      Rotulo: 'Produto',         Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 5, Base: true,  Bloqueado: false },
+  { Id: 'FC006', Campo: 'categoria',    Rotulo: 'Categoria',       Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 6, Base: true,  Bloqueado: false },
+  { Id: 'FC007', Campo: 'canal',        Rotulo: 'Canal',           Tipo: 'select',   Exibir: true,  Obrigatorio: true,  Ordem: 7, Base: true,  Bloqueado: true },
+  { Id: 'FC008', Campo: 'observacoes',  Rotulo: 'Observações',     Tipo: 'textarea', Exibir: true,  Obrigatorio: false, Ordem: 8, Base: true,  Bloqueado: false },
+  { Id: 'FC009', Campo: 'agencia',      Rotulo: 'Agência',         Tipo: 'text',     Exibir: false, Obrigatorio: false, Ordem: 9, Base: false, Bloqueado: false }
 ];
 
 /**
