@@ -23,6 +23,8 @@
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <!-- Chart.js: gráficos da tela Indicadores -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <?!= include('Styles'); ?>
 </head>
 <body>
@@ -50,6 +52,10 @@
         <li class="sidebar-item" data-page="relatorios" data-tooltip="Relatórios">
           <span class="material-icons">description</span><span class="sidebar-label">Relatórios</span>
         </li>
+        <!-- Indicadores: visão analítica com gráficos, restrita à supervisão (Supervisor/ADM) -->
+        <li class="sidebar-item" data-page="indicadores" data-supervisor-only data-tooltip="Indicadores">
+          <span class="material-icons">insights</span><span class="sidebar-label">Indicadores</span>
+        </li>
         <li class="sidebar-item" data-page="configuracoes" data-supervisor-only data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
         </li>
@@ -72,6 +78,13 @@
             <span id="header-date"></span>
             <span id="header-time"></span>
           </div>
+          <!-- Seletor de tema (Azul padrão, Rosa, Brasil, Dark) — persiste em localStorage -->
+          <select id="theme-select" class="theme-select" title="Tema do sistema">
+            <option value="azul">🔵 Azul</option>
+            <option value="rosa">🌸 Rosa</option>
+            <option value="brasil">🇧🇷 Brasil</option>
+            <option value="dark">🌙 Dark</option>
+          </select>
           <button class="btn-refresh" onclick="App.refreshCurrentPage()" title="Atualizar dados">
             <span class="material-icons">refresh</span>
           </button>
@@ -100,6 +113,7 @@
   <?!= include('Dashboard'); ?>
   <?!= include('NovoAtendimento'); ?>
   <?!= include('Relatorios'); ?>
+  <?!= include('Indicadores'); ?>
   <?!= include('Configuracoes'); ?>
 </body>
 </html>

@@ -42,6 +42,7 @@ var App = {
     this.bindShell();
     this.startClock();
     this.restoreSidebar();
+    this.restoreTheme();
     // Skeleton leve enquanto os dados de apoio carregam (sem overlay bloqueante).
     var app = document.getElementById('app');
     if (app) {
@@ -201,6 +202,42 @@ var App = {
     } catch (e) {}
   },
 
+  // ── Sistema de Temas ──
+  // Temas disponíveis (definidos em Styles.html via body[data-theme=...]).
+  // O tema "azul" é o padrão e não usa atributo.
+  themes: ['azul', 'rosa', 'brasil', 'dark'],
+
+  /**
+   * Aplica um tema visual e persiste a escolha em localStorage, para que
+   * o sistema reabra sempre com o último tema utilizado.
+   * @param {string} theme - 'azul' | 'rosa' | 'brasil' | 'dark'.
+   */
+  applyTheme: function(theme) {
+    if (this.themes.indexOf(theme) === -1) theme = 'azul';
+    if (theme === 'azul') {
+      document.body.removeAttribute('data-theme');
+    } else {
+      document.body.setAttribute('data-theme', theme);
+    }
+    try { localStorage.setItem('prisma-ra-theme', theme); } catch (e) {}
+    var select = document.getElementById('theme-select');
+    if (select && select.value !== theme) select.value = theme;
+  },
+
+  // Restaura o último tema utilizado (padrão: azul) e liga o seletor
+  // do cabeçalho.
+  restoreTheme: function() {
+    var saved = 'azul';
+    try { saved = localStorage.getItem('prisma-ra-theme') || 'azul'; } catch (e) {}
+    this.applyTheme(saved);
+    var select = document.getElementById('theme-select');
+    if (select) {
+      select.addEventListener('change', function() {
+        App.applyTheme(this.value);
+      });
+    }
+  },
+
   // Fecha o menu "gaveta" do celular.
   closeMobileSidebar: function() {
     var sidebar = document.getElementById('sidebar');
@@ -269,20 +306,37 @@ var App = {
     return Number(value || 0).toLocaleString('pt-BR');
   },
 
+  /**
+   * Converte um valor em Date SEM deslocamento de fuso horário.
+   * Correção de bug: new Date('2026-01-01') é interpretado como UTC e, em
+   * fusos negativos (Brasil), exibia o dia anterior. Strings "AAAA-MM-DD"
+   * agora são montadas com ano/mês/dia locais.
+   * @param {*} value - Date, ISO string ou "AAAA-MM-DD".
+   * @returns {Date|null} Data local ou null se inválida.
+   */
+  parseDate: function(value) {
+    if (!value) return null;
+    if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+    var match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    }
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  },
+
   // Formata uma data (ISO ou Date) como DD/MM/AAAA. Retorna "—" se vazia.
   formatDateBR: function(value) {
-    if (!value) return '—';
-    var d = new Date(value);
-    if (isNaN(d.getTime())) return '—';
+    var d = App.parseDate(value);
+    if (!d) return '—';
     return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear();
   },
 
   // Converte uma data (ISO ou Date) para o formato aceito por
   // <input type="date"> (AAAA-MM-DD).
   toInputDate: function(value) {
-    if (!value) return '';
-    var d = new Date(value);
-    if (isNaN(d.getTime())) return '';
+    var d = App.parseDate(value);
+    if (!d) return '';
     return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   },
 

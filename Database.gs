@@ -87,34 +87,13 @@ function getSpreadsheet() {
 
 /**
  * Executa a migração de estrutura somente quando a versão do esquema muda.
- * Antes de qualquer verificação, migra as chaves de propriedades da marca
- * anterior para que instalações existentes continuem funcionando.
  */
 function ensureDatabaseReady() {
-  migrateLegacyProperties_();
   const properties = PropertiesService.getScriptProperties();
   if (properties.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) !== CONFIG.SCHEMA_VERSION) {
     initializeSheets();
     properties.setProperty(PROPERTY_KEYS.SCHEMA_VERSION, CONFIG.SCHEMA_VERSION);
   }
-}
-
-/**
- * Copia, uma única vez, os valores das Script Properties legadas
- * (PORTO_RA_*) para as chaves atuais (PRISMA_RA_*) e remove as antigas.
- * Garante que o rebranding não desvincule a planilha nem repita migrações
- * de dados já executadas.
- */
-function migrateLegacyProperties_() {
-  const properties = PropertiesService.getScriptProperties();
-  Object.keys(LEGACY_PROPERTY_KEYS).forEach(function(legacyKey) {
-    const value = properties.getProperty(legacyKey);
-    if (!value) return;
-    if (!properties.getProperty(LEGACY_PROPERTY_KEYS[legacyKey])) {
-      properties.setProperty(LEGACY_PROPERTY_KEYS[legacyKey], value);
-    }
-    properties.deleteProperty(legacyKey);
-  });
 }
 
 /**
@@ -414,7 +393,7 @@ function reseedCatalog_(ss) {
  * @param {Spreadsheet} ss - Planilha principal do sistema.
  */
 function normalizeProdutosAtendimentos_(ss) {
-  const contaNames = ['conta', 'conta digital', 'conta digital portobank'];
+  const contaNames = ['conta', 'conta digital'];
   const cartaoNames = ['cartao', 'cartao de credito'];
   const produtoIndex = COLUMNS.ATENDIMENTOS.indexOf('Produto');
 

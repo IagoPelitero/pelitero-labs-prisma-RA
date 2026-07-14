@@ -32,6 +32,7 @@ conclusão, com trilha de auditoria completa.
 | **HTML5 / CSS3 / JavaScript (ES6 no servidor, ES5 no cliente)** | Frontend SPA sem frameworks |
 | **HtmlService / google.script.run** | Ponte navegador ↔ servidor |
 | **CacheService / LockService / PropertiesService** | Performance, concorrência e versionamento |
+| **Chart.js** | Gráficos interativos da tela Indicadores (via CDN) |
 | **SheetJS (xlsx) e jsPDF** | Exportação de relatórios em Excel e PDF (via CDN) |
 
 ---
@@ -104,9 +105,10 @@ O navegador **nunca** acessa o Google Sheets diretamente.
 | [Styles.html](Styles.html) | Design system e estilos globais (variáveis CSS, layout, responsividade, cards, tabelas). |
 | [Scripts.html](Scripts.html) | Núcleo do frontend (`App`): navegação SPA, usuário logado, visibilidade por perfil e helpers compartilhados. |
 | [Components.html](Components.html) | Componentes de UI reutilizáveis: modal, toast, badges, tabela, paginação, timeline, KPIs. |
-| [Dashboard.html](Dashboard.html) | Dashboard principal: KPIs, indicadores/gráficos por canal e lista de atendimentos com ação rápida de status. |
-| [NovoAtendimento.html](NovoAtendimento.html) | Cadastro/edição de atendimentos com formulário montado dinamicamente (ConfigCampos). |
+| [Dashboard.html](Dashboard.html) | Dashboard principal: KPIs, indicadores por canal, **tabela dinâmica** de atendimentos e **edição em modal** (sem sair da tela). |
+| [NovoAtendimento.html](NovoAtendimento.html) | Módulo compartilhado `AtendimentoForm` (formulário dinâmico via ConfigCampos) + página de criação/edição em tela cheia. |
 | [Relatorios.html](Relatorios.html) | Filtros, relatórios, exportação Excel/CSV/PDF e painel de produtividade. |
+| [Indicadores.html](Indicadores.html) | Painel analítico da supervisão: 8 gráficos Chart.js e cards de resumo, todos reagindo aos filtros. |
 | [Configuracoes.html](Configuracoes.html) | Administração de Produtos, Categorias, Usuários e Campos do formulário, com acesso por perfil. |
 
 ### Outros arquivos
@@ -124,6 +126,13 @@ O navegador **nunca** acessa o Google Sheets diretamente.
 
 - Cadastro, edição, exclusão (lógica) e acompanhamento de atendimentos;
 - **Formulário configurável** pelo ADM sem alteração de código (aba ConfigCampos);
+- **Tabela dinâmica** no Dashboard: novos campos criados na configuração aparecem
+  automaticamente como colunas, sempre na ordem Data → Cliente → CPF → Produto →
+  Categoria → Responsável → campos adicionais → Ações;
+- **Edição em modal** direto no Dashboard: carrega todos os dados, valida, salva sem
+  recarregar a página e atualiza a tabela mantendo o usuário na tela;
+- **Painel de Indicadores** (supervisão) com 8 gráficos Chart.js e filtros reativos;
+- **Sistema de temas** (Azul, Rosa, Brasil e Dark) com persistência em localStorage;
 - Armazenamento **separado por canal** com consulta consolidada e transparente;
 - Alteração rápida de status direto na tabela do Dashboard;
 - Delegação/reatribuição de atendimentos entre analistas (Supervisor/ADM);
@@ -227,8 +236,45 @@ Indicadores consolidados das três abas de canal, em uma única chamada ao servi
   pendências por "Aguardando Retorno de" (Área/Cliente);
 - **Por canal**: cartões com total e barras proporcionais de pendentes / em análise /
   concluídos para Reclame Aqui, Chat Privado e SAC Preventivo;
-- **Lista operacional**: busca instantânea, paginação e ações rápidas (alterar status,
-  editar, excluir) direto na tabela.
+- **Tabela dinâmica**: as colunas seguem sempre a ordem Data, Cliente, CPF, Produto,
+  Categoria, Responsável e, na sequência, os demais campos visíveis da ConfigCampos
+  (status, aguardando retorno, protocolo, canal, observações e campos criados pelo
+  ADM) — com Ações sempre por último. A busca local também cobre os campos
+  personalizados;
+- **Edição em modal**: o botão Editar abre um modal com o formulário completo
+  (mesmo `AtendimentoForm` da tela Novo Atendimento), exige justificativa, salva sem
+  recarregar a página e atualiza a tabela mantendo o usuário no Dashboard.
+
+## Indicadores (supervisão)
+
+Tela exclusiva de Supervisor/ADM com análise visual da operação (Chart.js):
+
+- **Filtros**: Data Inicial/Final, Produto, Categoria, Canal, Responsável, Status e
+  "Aguardando Retorno de" — qualquer mudança atualiza automaticamente todos os
+  gráficos e cards;
+- **Cards de resumo**: Total, Pendentes, Em análise, Concluídos, Aguardando Área e
+  Aguardando Cliente;
+- **Gráficos**: atendimentos por dia (linha), por produto (barras), por categoria
+  (barras), por canal (pizza), por responsável (barras horizontais), por status
+  (pizza), aguardando retorno Área x Cliente (rosca) e evolução diária acumulada no
+  período (linha);
+- As cores de texto/grade dos gráficos acompanham o tema ativo (inclusive Dark).
+
+## Sistema de Temas
+
+Quatro temas trocáveis pelo seletor no cabeçalho, aplicados via variáveis CSS
+(`body[data-theme]`) a toda a interface — sidebar, cabeçalho, rodapé, cards,
+tabelas, botões, modais e inputs:
+
+| Tema | Identidade |
+| --- | --- |
+| **Azul** (padrão) | Azul corporativo |
+| **Rosa** | Tons de rosa/magenta |
+| **Brasil** | Verde, amarelo e azul |
+| **Dark** | Superfícies escuras com azul vibrante |
+
+A escolha é persistida em `localStorage` (`prisma-ra-theme`) e restaurada
+automaticamente na próxima abertura.
 
 ---
 
@@ -284,12 +330,13 @@ pelitero-labs-prisma-RA/
 ├── Services.gs            # Regras de negócio e permissões
 ├── Utils.gs               # Funções auxiliares puras
 ├── Index.html             # Shell da SPA
-├── Styles.html            # Design system (CSS)
-├── Scripts.html           # Núcleo do frontend (App)
+├── Styles.html            # Design system (CSS) + sistema de temas
+├── Scripts.html           # Núcleo do frontend (App, navegação, temas)
 ├── Components.html        # Componentes de UI reutilizáveis
-├── Dashboard.html         # Página: dashboard
-├── NovoAtendimento.html   # Página: cadastro/edição (formulário dinâmico)
+├── Dashboard.html         # Página: dashboard (tabela dinâmica + modal de edição)
+├── NovoAtendimento.html   # AtendimentoForm compartilhado + página de cadastro
 ├── Relatorios.html        # Página: relatórios e exportações
+├── Indicadores.html       # Página: gráficos analíticos da supervisão
 ├── Configuracoes.html     # Página: administração
 ├── .clasp.json.example    # Modelo de configuração do clasp
 ├── .claspignore           # Arquivos sincronizados com o Apps Script
@@ -298,13 +345,39 @@ pelitero-labs-prisma-RA/
 
 ---
 
-## Melhorias futuras
+## Melhorias implementadas
 
-- **Gráficos interativos com Chart.js** (evolução temporal, comparativo entre canais);
+- Painel **Indicadores** com 8 gráficos Chart.js e filtros 100% reativos;
+- **Sistema de temas** (Azul, Rosa, Brasil, Dark) com persistência da preferência;
+- **Tabela dinâmica** no Dashboard — colunas geradas a partir da ConfigCampos, com
+  novos campos aparecendo automaticamente e Ações sempre por último;
+- **Edição em modal** no Dashboard, sem navegação nem recarga de página;
+- Refatoração DRY: módulo `AtendimentoForm` compartilhado entre a página Novo
+  Atendimento e o modal de edição (uma única fonte da verdade para o formulário);
+- Modais com suporte a validação (`onConfirm` pode manter o modal aberto);
+- Busca do Dashboard passou a cobrir também os campos personalizados.
+
+## Correções realizadas
+
+- **Contador da tabela do Dashboard invisível**: a classe `.badge` tinha texto
+  branco sem cor de fundo padrão — o número ao lado de "Atendimentos" não aparecia.
+  Corrigido com fundo padrão na cor primária do tema;
+- **Datas deslocadas em um dia**: strings `AAAA-MM-DD` eram interpretadas como UTC
+  (fuso do Brasil exibia o dia anterior). Novo `App.parseDate` trata datas puras
+  como horário local;
+- **Perda de dados em campos ocultos**: editar um atendimento apagava valores de
+  campos que o ADM ocultou na ConfigCampos (base e personalizados). O servidor agora
+  preserva os valores existentes (`preserveHiddenFields_` em Services.gs);
+- **Sidebar não acompanhava o tema**: o gradiente era fixo no CSS; passou a usar as
+  variáveis do tema;
+- **Lógica duplicada removida**: escape de HTML centralizado em `App.escapeHtml` e
+  resquícios de migrações da marca anterior eliminados.
+
+## Próximas evoluções
+
 - Notificações por e-mail em delegações e estouro de prazo (SLA);
 - Metas e SLA configuráveis por canal, com alertas visuais no Dashboard;
 - Exportação agendada de relatórios (triggers de tempo do Apps Script);
-- Tema escuro e preferências por usuário;
 - Suíte de testes automatizados para as regras de negócio (`Services.gs`);
 - Internacionalização (i18n) da interface;
 - Modo multi-célula: múltiplas equipes isoladas na mesma instalação.

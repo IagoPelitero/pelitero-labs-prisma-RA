@@ -366,6 +366,9 @@ function atualizarAtendimento(id, dados, justificativa) {
   }
 
   const input = validateAtendimentoInput_(dados || {});
+  // Campos ocultados na ConfigCampos não vêm do formulário: preserva os
+  // valores já gravados para a edição não apagar dados existentes.
+  preserveHiddenFields_(input, oldRecord);
 
   // Analista não escolhe responsável: mantém o responsável atual. Apenas o
   // Supervisor pode reatribuir o atendimento a outro analista.
@@ -602,6 +605,44 @@ function validateAtendimentoInput_(dados) {
 
   if (input.cpf) input.cpf = formatCPF(input.cpf);
   return input;
+}
+
+/**
+ * Correção de bug: campos ocultados na ConfigCampos (Exibir = Não) não são
+ * enviados pelo formulário; sem esta função, toda edição apagaria os
+ * valores já gravados nesses campos. Campos base ocultos mantêm o valor
+ * atual do registro e campos personalizados ocultos são reintegrados ao
+ * JSON de CamposExtras.
+ * @param {Object} input - Dados validados do formulário (alterado in place).
+ * @param {Object} oldRecord - Registro atual da planilha.
+ */
+function preserveHiddenFields_(input, oldRecord) {
+  // Mapa campo do formulário → coluna da planilha (apenas campos base).
+  const columnByField = {
+    numeroRA: 'NumeroRA', dataAbertura: 'DataAbertura', cliente: 'Cliente',
+    cpf: 'CPF', produto: 'Produto', categoria: 'Categoria',
+    canal: 'Canal', observacoes: 'Observacoes'
+  };
+  const hiddenExtras = {};
+  const oldExtras = parseCamposExtras_(oldRecord.CamposExtras);
+
+  getFormConfig_().forEach(function(field) {
+    if (field.exibir) return;
+    if (field.base) {
+      const column = columnByField[field.campo];
+      if (column && !input[field.campo]) input[field.campo] = oldRecord[column];
+    } else if (oldExtras[field.campo] !== undefined) {
+      hiddenExtras[field.campo] = oldExtras[field.campo];
+    }
+  });
+
+  if (Object.keys(hiddenExtras).length > 0) {
+    const extras = parseCamposExtras_(input.camposExtras);
+    Object.keys(hiddenExtras).forEach(function(key) {
+      if (extras[key] === undefined) extras[key] = hiddenExtras[key];
+    });
+    input.camposExtras = JSON.stringify(extras);
+  }
 }
 
 /**

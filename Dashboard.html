@@ -6,21 +6,25 @@
    ------------------------------------------------------------
    GUIA PARA QUEM ESTÁ COMEÇANDO
    Primeira tela do sistema. Mostra:
-     1) KPIs (total, pendentes, concluídos e pendentes por situação);
-     2) A lista de atendimentos do usuário (Analista vê só os seus;
-        Supervisor vê os de todos — regra aplicada no servidor), com
-        alteração de status/situação direto na tabela.
+     1) KPIs (total, pendentes, em análise, concluídos e aguardando
+        retorno por Área/Cliente);
+     2) Indicadores por canal (ReclameAqui, ChatPrivadoRA, SACPreventivo);
+     3) A tabela DINÂMICA de atendimentos do usuário (Analista vê só os
+        seus; Supervisor/ADM veem todos — regra aplicada no servidor).
+
+   Tabela dinâmica: a ordem das colunas é sempre
+     Data → Cliente → CPF → Produto → Categoria → Responsável →
+     campos adicionais (status, aguardando, protocolo, canal e campos
+     criados pelo ADM na ConfigCampos) → Ações (sempre a última).
+   Campos novos adicionados na configuração aparecem automaticamente,
+   sem alteração de código (_colunasTabela lê App.formConfig).
+
+   Edição: o botão "Editar" abre um MODAL (abrirEdicao) que reutiliza o
+   AtendimentoForm (NovoAtendimento.html), salva sem recarregar a página
+   e atualiza a tabela mantendo o usuário no Dashboard.
 
    Tudo vem de UMA única chamada ao servidor (getDashboardData em
    Services.gs), para evitar telas de carregamento em sequência.
-
-   Fluxo:
-     render(container)   → desenha o esqueleto e chama carregarDados().
-     carregarDados()     → busca cards + atendimentos no servidor.
-     renderizarKPIs()    → preenche os cartões de resumo.
-     renderizarTabela()  → desenha a tabela com busca local e ações.
-     alterarStatus(id)   → abre o mini-modal de mudança de status e chama
-                           alterarStatusAtendimento() no servidor.
    ============================================================ */
 Pages.dashboard = {
   state: {
@@ -31,6 +35,11 @@ Pages.dashboard = {
     porPagina: 25
   },
 
+  /**
+   * Desenha o esqueleto da tela (KPIs, canais, tabela) e dispara o
+   * carregamento único de dados do servidor.
+   * @param {HTMLElement} container - <main id="app">.
+   */
   render: function(container) {
     var html = '';
 
@@ -65,6 +74,8 @@ Pages.dashboard = {
     container.innerHTML = html;
 
     var self = this;
+    // Busca local com debounce: filtra a lista já carregada sem nova
+    // chamada ao servidor.
     var busca = document.getElementById('dashboard-busca');
     if (busca) {
       var timer = null;
@@ -83,6 +94,10 @@ Pages.dashboard = {
     this.carregarDados();
   },
 
+  /**
+   * Busca KPIs + indicadores por canal + atendimentos em UMA chamada
+   * (getDashboardData) e desenha tudo.
+   */
   carregarDados: function() {
     var self = this;
     google.script.run
@@ -108,6 +123,11 @@ Pages.dashboard = {
       .getDashboardData();
   },
 
+  /**
+   * Preenche os cartões de resumo (KPIs) do topo.
+   * @param {Object} cards - Totais gerais.
+   * @param {Object} porSituacao - Pendentes por "Aguardando Retorno de".
+   */
   renderizarKPIs: function(cards, porSituacao) {
     var container = document.getElementById('dashboard-kpis');
     if (!container) return;
@@ -134,8 +154,11 @@ Pages.dashboard = {
     container.innerHTML = html;
   },
 
-  // Gráficos/indicadores por canal: total, pendentes, em análise e
-  // concluídos de cada canal, com barras proporcionais.
+  /**
+   * Indicadores por canal: total, pendentes, em análise e concluídos de
+   * cada canal, com barras proporcionais.
+   * @param {Object} porCanal - { canal: { total, pendentes, ... } }.
+   */
   renderizarCanais: function(porCanal) {
     var container = document.getElementById('dashboard-canais');
     if (!container) return;
@@ -159,10 +182,10 @@ Pages.dashboard = {
     canais.forEach(function(canal) {
       var dados = porCanal[canal] || {};
       var total = Number(dados.total || 0);
-      html += '<div style="border:1px solid var(--border-color,#e0e0e0);border-radius:8px;padding:16px;">';
+      html += '<div style="border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:16px;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
       html += '<strong style="font-size:14px;">' + App.escapeHtml(canal) + '</strong>';
-      html += '<span class="badge" style="background:#0046C0;">' + App.formatNumber(total) + ' total</span>';
+      html += '<span class="badge">' + App.formatNumber(total) + ' total</span>';
       html += '</div>';
 
       series.forEach(function(serie) {
@@ -172,7 +195,7 @@ Pages.dashboard = {
         html += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">';
         html += '<span>' + serie.label + '</span><span>' + App.formatNumber(valor) + '</span>';
         html += '</div>';
-        html += '<div style="background:var(--border-color,#eceff1);border-radius:4px;height:8px;overflow:hidden;">';
+        html += '<div style="background:var(--border-light,#eceff1);border-radius:4px;height:8px;overflow:hidden;">';
         html += '<div style="width:' + pct + '%;height:100%;background:' + serie.cor + ';"></div>';
         html += '</div>';
         html += '</div>';
@@ -185,17 +208,25 @@ Pages.dashboard = {
     container.innerHTML = html;
   },
 
+  /**
+   * Filtra a lista carregada pelo termo de busca (client-side).
+   * A busca cobre os campos base, o status/aguardando e também os
+   * campos personalizados (camposExtras).
+   */
   filtrarLocal: function() {
     var termo = (this.state.termoBusca || '').toLowerCase().trim();
     if (!termo) {
       this.state.filtrados = this.state.atendimentos.slice();
     } else {
       this.state.filtrados = this.state.atendimentos.filter(function(item) {
-        return [item.numeroRA, item.cliente, item.cpf, item.produto, item.categoria,
-          item.status, item.situacaoPendencia, item.responsavel, item.canal]
-          .some(function(campo) {
-            return campo && String(campo).toLowerCase().indexOf(termo) !== -1;
-          });
+        var campos = [item.numeroRA, item.cliente, item.cpf, item.produto, item.categoria,
+          item.status, item.situacaoPendencia, item.responsavel, item.canal, item.observacoes];
+        // Inclui os valores dos campos personalizados na busca.
+        var extras = item.camposExtras || {};
+        Object.keys(extras).forEach(function(key) { campos.push(extras[key]); });
+        return campos.some(function(campo) {
+          return campo && String(campo).toLowerCase().indexOf(termo) !== -1;
+        });
       });
     }
 
@@ -203,6 +234,69 @@ Pages.dashboard = {
     if (badge) badge.textContent = App.formatNumber(this.state.filtrados.length);
   },
 
+  /**
+   * Monta as colunas da tabela dinamicamente.
+   * Ordem obrigatória: Data, Cliente, CPF, Produto, Categoria,
+   * Responsável; depois os campos de fluxo (Status, Aguardando Retorno)
+   * e qualquer outro campo visível da ConfigCampos (protocolo, canal,
+   * observações e campos criados pelo ADM). A coluna Ações é adicionada
+   * automaticamente pelo Components.dataTable como última.
+   * @returns {Object[]} Colunas { campo, label, base }.
+   */
+  _colunasTabela: function() {
+    var fixas = [
+      { campo: 'dataAbertura', label: 'Data', base: true },
+      { campo: 'cliente', label: 'Cliente', base: true },
+      { campo: 'cpf', label: 'CPF', base: true },
+      { campo: 'produto', label: 'Produto', base: true },
+      { campo: 'categoria', label: 'Categoria', base: true },
+      { campo: 'responsavel', label: 'Responsável', base: true }
+    ];
+    var chavesFixas = fixas.map(function(c) { return c.campo; });
+
+    // Campos de fluxo sempre exibidos após as colunas fixas.
+    var adicionais = [
+      { campo: 'status', label: 'Status', base: true },
+      { campo: 'situacaoPendencia', label: 'Aguardando Retorno', base: true }
+    ];
+
+    // Demais campos visíveis da configuração (novos campos aparecem
+    // automaticamente aqui, sem alteração de código).
+    (App.formConfig || []).forEach(function(field) {
+      if (!field || !field.exibir) return;
+      if (chavesFixas.indexOf(field.campo) !== -1) return;
+      adicionais.push({ campo: field.campo, label: field.rotulo, base: !!field.base });
+    });
+
+    return fixas.concat(adicionais);
+  },
+
+  /**
+   * Valor exibido de uma célula, conforme o tipo da coluna.
+   * @param {Object} item - Atendimento (formato do cliente).
+   * @param {Object} col - Coluna de _colunasTabela().
+   * @returns {string} HTML seguro da célula.
+   */
+  _valorCelula: function(item, col) {
+    if (col.campo === 'dataAbertura') return App.formatDateBR(item.dataAbertura);
+    if (col.campo === 'status') return Components.statusBadge(item.status, item.statusCor || null);
+    if (col.campo === 'situacaoPendencia') return App.escapeHtml(item.situacaoPendencia || '—');
+    if (col.campo === 'cliente') return App.escapeHtml(item.cliente || '');
+    if (col.campo === 'numeroRA') return '<strong>' + App.escapeHtml(item.numeroRA || '') + '</strong>';
+
+    var valor = col.base ? item[col.campo] : (item.camposExtras || {})[col.campo];
+    valor = valor === undefined || valor === null ? '' : String(valor);
+    // Textos longos (ex.: observações) são truncados para não quebrar o layout.
+    if (valor.length > 40) {
+      return '<span title="' + App.escapeHtml(valor) + '">' + App.escapeHtml(valor.slice(0, 40)) + '…</span>';
+    }
+    return App.escapeHtml(valor || '—');
+  },
+
+  /**
+   * Desenha a tabela dinâmica paginada com as ações por linha
+   * (alterar status, editar em modal, excluir).
+   */
   renderizarTabela: function() {
     var self = this;
     var container = document.getElementById('dashboard-tabela');
@@ -221,29 +315,14 @@ Pages.dashboard = {
     var inicio = (self.state.pagina - 1) * self.state.porPagina;
     var paginados = dados.slice(inicio, inicio + self.state.porPagina);
 
-    var headers = [
-      { label: 'Protocolo', field: 'numeroRA', sortable: false },
-      { label: 'Cliente', field: 'cliente', sortable: false },
-      { label: 'Produto', field: 'produto', sortable: false },
-      { label: 'Canal', field: 'canal', sortable: false },
-      { label: 'Status', field: 'status', sortable: false },
-      { label: 'Aguardando Retorno', field: 'situacaoPendencia', sortable: false },
-      { label: 'Responsável', field: 'responsavel', sortable: false },
-      { label: 'Data', field: 'dataAbertura', sortable: false }
-    ];
+    var colunas = self._colunasTabela();
+    var headers = colunas.map(function(col) {
+      return { label: col.label, field: col.campo, sortable: false };
+    });
 
     var rows = paginados.map(function(item) {
       return {
-        cells: [
-          '<strong>' + App.escapeHtml(item.numeroRA || '') + '</strong>',
-          App.escapeHtml(item.cliente || ''),
-          App.escapeHtml(item.produto || ''),
-          App.escapeHtml(item.canal || ''),
-          Components.statusBadge(item.status, item.statusCor || null),
-          App.escapeHtml(item.situacaoPendencia || '—'),
-          App.escapeHtml(item.responsavel || ''),
-          App.formatDateBR(item.dataAbertura)
-        ],
+        cells: colunas.map(function(col) { return self._valorCelula(item, col); }),
         id: item.id,
         raw: item
       };
@@ -258,7 +337,8 @@ Pages.dashboard = {
       {
         icon: 'edit',
         title: 'Editar',
-        onClick: function(row) { App.navigateTo('novoAtendimento', row.id); }
+        // Edição em modal: o usuário permanece no Dashboard.
+        onClick: function(row) { self.abrirEdicao(row.raw); }
       },
       {
         icon: 'delete',
@@ -287,8 +367,108 @@ Pages.dashboard = {
     }
   },
 
-  // Mini-modal para o analista (ou supervisor) mudar o status/situação
-  // sem sair do dashboard.
+  /**
+   * Abre o MODAL de edição do atendimento: carrega os dados completos do
+   * servidor e reutiliza o AtendimentoForm (mesmo formulário da tela
+   * Novo Atendimento). O usuário permanece no Dashboard.
+   * @param {Object} atendimento - Linha da tabela (formato do cliente).
+   */
+  abrirEdicao: function(atendimento) {
+    var self = this;
+    Components.showLoading('Carregando atendimento...');
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (!result || !result.atendimento) {
+          Components.toast('Atendimento não encontrado.', 'error');
+          return;
+        }
+        self._renderModalEdicao(result.atendimento);
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao carregar atendimento: ' + err.message, 'error');
+      })
+      .getAtendimento(atendimento.id);
+  },
+
+  // Desenha o modal de edição com o formulário completo + justificativa
+  // (obrigatória para auditoria, como na edição em tela cheia).
+  _renderModalEdicao: function(atd) {
+    var self = this;
+    var dd = App.dropdownData || {};
+
+    var body = '<form id="form-atendimento" autocomplete="off">';
+    body += AtendimentoForm.camposHtml(atd, dd);
+    body += '<div class="form-group">';
+    body += '  <label class="form-label" for="campo-justificativa-modal">Justificativa da alteração <span style="color:var(--danger)">*</span></label>';
+    body += '  <textarea id="campo-justificativa-modal" class="form-control" rows="2" placeholder="Informe o motivo da edição (registrado no histórico)..."></textarea>';
+    body += '</div>';
+    body += '</form>';
+
+    Components.modal({
+      title: 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || ''),
+      body: body,
+      size: 'xl',
+      confirmText: '💾 Salvar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        // return false mantém o modal aberto (validação/gravação assíncrona).
+        return self._salvarEdicaoModal(atd.id);
+      }
+    });
+
+    // O formulário só existe no DOM depois que o modal foi desenhado.
+    AtendimentoForm.popularCategorias(atd.categoria || '');
+    AtendimentoForm.bindFieldEvents(atd.id);
+  },
+
+  /**
+   * Valida e grava a edição feita no modal. Em caso de erro de validação
+   * retorna false (modal permanece aberto, edições preservadas); a
+   * gravação é assíncrona e o modal é fechado apenas no sucesso, com a
+   * tabela atualizada sem recarregar a página.
+   * @param {string} id - Id do atendimento em edição.
+   * @returns {boolean} false para o modal não fechar automaticamente.
+   */
+  _salvarEdicaoModal: function(id) {
+    var self = this;
+    var erros = AtendimentoForm.validar();
+    var campoJust = document.getElementById('campo-justificativa-modal');
+    var justificativa = campoJust ? campoJust.value.trim() : '';
+    if (!justificativa) erros.push('Justificativa é obrigatória para alterações.');
+
+    if (erros.length > 0) {
+      Components.toast(erros.join('\n'), 'danger', 5000);
+      return false;
+    }
+
+    var dados = AtendimentoForm.coletar();
+    Components.showLoading('Salvando atendimento...');
+    google.script.run
+      .withSuccessHandler(function(result) {
+        Components.hideLoading();
+        if (result && result.success) {
+          Components.closeModal();
+          Components.toast('Atendimento atualizado com sucesso!', 'success');
+          self.carregarDados(); // atualiza a tabela mantendo o usuário na tela
+        } else {
+          Components.toast((result && result.message) || 'Erro ao atualizar atendimento.', 'danger');
+        }
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast('Erro ao atualizar: ' + err.message, 'danger');
+      })
+      .atualizarAtendimento(id, dados, justificativa);
+
+    return false;
+  },
+
+  /**
+   * Mini-modal para mudar o status/situação sem sair do dashboard.
+   * @param {Object} atendimento - Linha da tabela.
+   */
   alterarStatus: function(atendimento) {
     var self = this;
     var dd = App.dropdownData || {};
@@ -321,13 +501,13 @@ Pages.dashboard = {
         var situacao = document.getElementById('quick-situacao').value;
         if (status === 'Pendente' && !situacao) {
           Components.toast('Informe "Aguardando Retorno de" (Área ou Cliente).', 'warning');
-          return;
+          return false; // mantém o modal aberto para corrigir
         }
         self.salvarStatus(atendimento.id, status, status === 'Pendente' ? situacao : '');
       }
     });
 
-    // Esconde a situação quando o status escolhido é "Concluído".
+    // Esconde "Aguardando Retorno de" quando o status não é "Pendente".
     var statusSelect = document.getElementById('quick-status');
     var grupoSituacao = document.getElementById('quick-situacao-grupo');
     var syncSituacao = function() {
@@ -339,6 +519,12 @@ Pages.dashboard = {
     }
   },
 
+  /**
+   * Grava a mudança rápida de status e recarrega os dados.
+   * @param {string} id - Id do atendimento.
+   * @param {string} status - Novo status.
+   * @param {string} situacao - "Aguardando Retorno de" (se Pendente).
+   */
   salvarStatus: function(id, status, situacao) {
     var self = this;
     Components.showLoading('Atualizando status...');
@@ -359,6 +545,10 @@ Pages.dashboard = {
       .alterarStatusAtendimento(id, status, situacao);
   },
 
+  /**
+   * Exclusão lógica a partir da tabela.
+   * @param {string} id - Id do atendimento.
+   */
   excluir: function(id) {
     var self = this;
     Components.showLoading('Excluindo atendimento...');

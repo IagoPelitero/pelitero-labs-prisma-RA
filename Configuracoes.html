@@ -297,10 +297,10 @@ Pages.configuracoes = {
     }, 'Confirmar alteração');
   },
 
+  // Delegado para o helper global (DRY): a lógica de escape de HTML vive
+  // em um único lugar, App.escapeHtml (Scripts.html).
   escape: function(value) {
-    var div = document.createElement('div');
-    div.textContent = value === undefined || value === null ? '' : String(value);
-    return div.innerHTML;
+    return App.escapeHtml(value);
   }
 };
 </script>

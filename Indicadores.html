@@ -1,0 +1,433 @@
+<script>
+/* ============================================================
+   Pelitero Labs Prisma RA — Indicadores.html
+   Pages.indicadores — Painel analítico da supervisão (Chart.js)
+   Desenvolvido por Pelitero Labs.
+   ------------------------------------------------------------
+   GUIA PARA QUEM ESTÁ COMEÇANDO
+   Tela restrita à supervisão (Supervisor/ADM — o item de menu usa
+   data-supervisor-only e o servidor já limita os dados por perfil).
+
+   Fluxo:
+     render()      → desenha filtros + cards + grade de gráficos e
+                     dispara a primeira carga.
+     atualizar()   → chama getRelatorio(filtros) no servidor (mesma
+                     função dos Relatórios — DRY) e redesenha TUDO:
+                     cards de resumo e todos os gráficos.
+     Qualquer mudança de filtro chama atualizar() automaticamente.
+
+   Gráficos (Chart.js, carregado via CDN no Index.html):
+     - Atendimentos por dia (linha)
+     - Evolução diária acumulada no período (linha, card largo)
+     - Por Produto (barras) / Por Categoria (barras)
+     - Por Canal (pizza) / Por Status (pizza)
+     - Por Responsável (barras horizontais)
+     - Aguardando Retorno: Área x Cliente (rosca)
+   Os gráficos são destruídos e recriados a cada atualização para não
+   vazar instâncias do Chart.js.
+   ============================================================ */
+Pages.indicadores = {
+  state: {
+    dados: [],
+    charts: {} // instâncias Chart.js ativas, por id de canvas
+  },
+
+  // Paleta usada em todos os gráficos (mantém identidade entre temas).
+  _cores: ['#0046C0', '#00A3E0', '#43A047', '#FF9800', '#9C27B0', '#E53935',
+           '#00897B', '#F06292', '#7E57C2', '#FDD835', '#5C6BC0', '#8D6E63'],
+
+  // Mapeamento filtro → id do input na tela. As chaves são as mesmas
+  // aceitas por applyAtendimentoFilters_ no servidor.
+  _filtroIds: {
+    dataInicio: 'ind-data-inicio',
+    dataFim: 'ind-data-fim',
+    produto: 'ind-produto',
+    categoria: 'ind-categoria',
+    canal: 'ind-canal',
+    analista: 'ind-analista',
+    status: 'ind-status',
+    situacao: 'ind-situacao'
+  },
+
+  /**
+   * Desenha a tela (filtros, cards e grade de gráficos) e carrega os
+   * dados iniciais. Analistas são redirecionados ao Dashboard.
+   * @param {HTMLElement} container - <main id="app">.
+   */
+  render: function(container) {
+    container = container || document.getElementById('app');
+
+    // Permissão: tela exclusiva da supervisão (regra também no servidor).
+    if (!App.isSupervisor()) {
+      App.navigateTo('dashboard');
+      return;
+    }
+
+    var dd = App.dropdownData || {};
+    var html = '';
+
+    html += '<div class="page-header">';
+    html += '  <div>';
+    html += '    <h1 class="page-title">Indicadores</h1>';
+    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Visão analítica da operação — todos os gráficos respondem aos filtros.</p>';
+    html += '  </div>';
+    html += '</div>';
+
+    // ── Filtros: qualquer alteração atualiza todos os gráficos ──
+    html += '<div class="card" style="margin-bottom:24px;">';
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group"><label class="form-label">Data Inicial</label><input type="date" id="ind-data-inicio" class="form-control"></div>';
+    html += '    <div class="form-group"><label class="form-label">Data Final</label><input type="date" id="ind-data-fim" class="form-control"></div>';
+    html += '    <div class="form-group"><label class="form-label">Produto</label><select id="ind-produto" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Categoria</label><select id="ind-categoria" class="form-control"></select></div>';
+    html += '  </div>';
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group"><label class="form-label">Canal</label><select id="ind-canal" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Responsável</label><select id="ind-analista" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Status</label><select id="ind-status" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Aguardando Retorno de</label><select id="ind-situacao" class="form-control"></select></div>';
+    html += '  </div>';
+    html += '  <div class="form-actions" style="margin-top:4px;">';
+    html += '    <button class="btn btn-secondary" id="ind-limpar">🗑️ Limpar Filtros</button>';
+    html += '  </div>';
+    html += '</div>';
+
+    // ── Cards de resumo ──
+    html += '<div class="grid-4" id="ind-cards"></div>';
+
+    // ── Grade de gráficos ──
+    html += '<div class="charts-grid" id="ind-graficos">';
+    html += this._chartCard('ind-chart-dia', 'Atendimentos por dia');
+    html += this._chartCard('ind-chart-produto', 'Atendimentos por Produto');
+    html += this._chartCard('ind-chart-categoria', 'Atendimentos por Categoria');
+    html += this._chartCard('ind-chart-canal', 'Atendimentos por Canal');
+    html += this._chartCard('ind-chart-responsavel', 'Atendimentos por Responsável');
+    html += this._chartCard('ind-chart-status', 'Atendimentos por Status');
+    html += this._chartCard('ind-chart-aguardando', 'Aguardando Retorno (Área x Cliente)');
+    html += this._chartCard('ind-chart-evolucao', 'Evolução Diária no Período', true);
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    // Preenche os selects com as listas do bootstrap.
+    App.fillSelect('ind-produto', dd.produtos || [], 'Todos');
+    App.fillSelect('ind-categoria', dd.categorias || [], 'Todas');
+    App.fillSelect('ind-canal', dd.canais || [], 'Todos');
+    App.fillSelect('ind-analista', dd.responsaveis || [], 'Todos');
+    App.fillSelect('ind-status', dd.status || [], 'Todos');
+    App.fillSelect('ind-situacao', dd.situacoesPendencia || [], 'Todas');
+
+    this._bindFiltros();
+    this.atualizar();
+  },
+
+  // HTML de um card de gráfico (o canvas recebe o Chart.js depois).
+  _chartCard: function(canvasId, titulo, wide) {
+    return '<div class="chart-card' + (wide ? ' chart-wide' : '') + '">' +
+      '<h3>' + titulo + '</h3>' +
+      '<div class="chart-canvas-wrap"><canvas id="' + canvasId + '"></canvas></div>' +
+      '</div>';
+  },
+
+  // Liga os filtros: qualquer mudança atualiza automaticamente todos os
+  // gráficos (com debounce leve para os campos de data).
+  _bindFiltros: function() {
+    var self = this;
+    var timer = null;
+    var agendar = function() {
+      clearTimeout(timer);
+      timer = setTimeout(function() { self.atualizar(); }, 250);
+    };
+    Object.keys(self._filtroIds).forEach(function(key) {
+      var el = document.getElementById(self._filtroIds[key]);
+      if (el) el.addEventListener('change', agendar);
+    });
+    var limpar = document.getElementById('ind-limpar');
+    if (limpar) {
+      limpar.addEventListener('click', function() {
+        Object.keys(self._filtroIds).forEach(function(key) {
+          var el = document.getElementById(self._filtroIds[key]);
+          if (el) el.value = '';
+        });
+        self.atualizar();
+      });
+    }
+  },
+
+  // Lê os valores atuais dos filtros no formato aceito pelo servidor.
+  getFiltros: function() {
+    var self = this;
+    var filtros = {};
+    Object.keys(self._filtroIds).forEach(function(key) {
+      var el = document.getElementById(self._filtroIds[key]);
+      filtros[key] = el ? String(el.value || '').trim() : '';
+    });
+    return filtros;
+  },
+
+  /**
+   * Busca os dados filtrados no servidor (getRelatorio — mesma regra de
+   * permissão dos Relatórios) e redesenha cards e gráficos.
+   */
+  atualizar: function() {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.dados = dados || [];
+        self.renderCards();
+        self.renderCharts();
+      })
+      .withFailureHandler(function(err) {
+        Components.toast('Erro ao carregar indicadores: ' + err.message, 'error');
+      })
+      .getRelatorio(self.getFiltros());
+  },
+
+  // ── Classificadores de status (regras do fluxo) ──
+  _ehConcluido: function(item) {
+    return String(item.status || '').toLowerCase().indexOf('conclu') === 0;
+  },
+  _ehPendente: function(item) {
+    return String(item.status || '').toLowerCase() === 'pendente';
+  },
+  _ehEmAnalise: function(item) {
+    return !this._ehConcluido(item) && !this._ehPendente(item);
+  },
+
+  /**
+   * Cards de resumo: Total, Pendentes, Em análise, Concluídos,
+   * Aguardando Área e Aguardando Cliente.
+   */
+  renderCards: function() {
+    var self = this;
+    var container = document.getElementById('ind-cards');
+    if (!container) return;
+
+    var resumo = { total: 0, pendentes: 0, emAnalise: 0, concluidos: 0, area: 0, cliente: 0 };
+    self.state.dados.forEach(function(item) {
+      resumo.total++;
+      if (self._ehConcluido(item)) {
+        resumo.concluidos++;
+      } else if (self._ehPendente(item)) {
+        resumo.pendentes++;
+        var aguardando = String(item.situacaoPendencia || '').toLowerCase();
+        if (aguardando.indexOf('rea') !== -1) resumo.area++;      // "Área" (sem acento após lower)
+        else if (aguardando.indexOf('cliente') !== -1) resumo.cliente++;
+      } else {
+        resumo.emAnalise++;
+      }
+    });
+
+    var html = '';
+    html += Components.kpiCard('assignment', App.formatNumber(resumo.total), 'Total', '#0046C0');
+    html += Components.kpiCard('hourglass_empty', App.formatNumber(resumo.pendentes), 'Pendentes', '#FF9800');
+    html += Components.kpiCard('person_search', App.formatNumber(resumo.emAnalise), 'Em análise', '#2196F3');
+    html += Components.kpiCard('check_circle', App.formatNumber(resumo.concluidos), 'Concluídos', '#43A047');
+    html += Components.kpiCard('apartment', App.formatNumber(resumo.area), 'Aguardando Área', '#9C27B0');
+    html += Components.kpiCard('person', App.formatNumber(resumo.cliente), 'Aguardando Cliente', '#00A3E0');
+    container.innerHTML = html;
+  },
+
+  /**
+   * Agrupa os dados por um campo e devolve rótulos/contagens ordenados
+   * do maior para o menor.
+   * @param {string} campo - Campo do atendimento (formato do cliente).
+   * @returns {Object} { labels: string[], valores: number[] }.
+   */
+  _agruparPor: function(campo) {
+    var grupos = {};
+    this.state.dados.forEach(function(item) {
+      var chave = String(item[campo] || '—');
+      grupos[chave] = (grupos[chave] || 0) + 1;
+    });
+    var labels = Object.keys(grupos).sort(function(a, b) { return grupos[b] - grupos[a]; });
+    return {
+      labels: labels,
+      valores: labels.map(function(l) { return grupos[l]; })
+    };
+  },
+
+  /**
+   * Agrupa os atendimentos por dia de abertura (chave AAAA-MM-DD,
+   * exibida como DD/MM), em ordem cronológica.
+   * @returns {Object} { labels, valores, chaves }.
+   */
+  _agruparPorDia: function() {
+    var grupos = {};
+    this.state.dados.forEach(function(item) {
+      var d = App.parseDate(item.dataAbertura);
+      if (!d) return;
+      var chave = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+      grupos[chave] = (grupos[chave] || 0) + 1;
+    });
+    var chaves = Object.keys(grupos).sort();
+    return {
+      chaves: chaves,
+      labels: chaves.map(function(c) { return c.slice(8, 10) + '/' + c.slice(5, 7); }),
+      valores: chaves.map(function(c) { return grupos[c]; })
+    };
+  },
+
+  /**
+   * Destrói o gráfico anterior do canvas (se houver) e cria um novo.
+   * Sem isso o Chart.js acumularia instâncias a cada atualização.
+   * @param {string} canvasId - Id do canvas.
+   * @param {Object} config - Configuração do Chart.js.
+   */
+  _criarChart: function(canvasId, config) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    if (this.state.charts[canvasId]) {
+      this.state.charts[canvasId].destroy();
+    }
+    this.state.charts[canvasId] = new Chart(canvas.getContext('2d'), config);
+  },
+
+  /** Redesenha todos os gráficos a partir dos dados filtrados. */
+  renderCharts: function() {
+    var self = this;
+    if (typeof Chart === 'undefined') {
+      Components.toast('Biblioteca de gráficos ainda não carregou. Tente novamente em alguns segundos.', 'warning');
+      return;
+    }
+
+    // Cores de texto/grades acompanham o tema atual (inclusive Dark).
+    var css = getComputedStyle(document.body);
+    var corTexto = (css.getPropertyValue('--text-secondary') || '#6B7280').trim();
+    var corGrade = (css.getPropertyValue('--border') || '#E5E7EB').trim();
+    Chart.defaults.color = corTexto;
+    Chart.defaults.borderColor = corGrade;
+
+    var basePlugins = { legend: { position: 'bottom' } };
+
+    // ── Atendimentos por dia (linha) ──
+    var porDia = self._agruparPorDia();
+    self._criarChart('ind-chart-dia', {
+      type: 'line',
+      data: {
+        labels: porDia.labels,
+        datasets: [{
+          label: 'Abertos',
+          data: porDia.valores,
+          borderColor: self._cores[0],
+          backgroundColor: self._cores[0] + '33',
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+    });
+
+    // ── Por Produto (barras) ──
+    var porProduto = self._agruparPor('produto');
+    self._criarChart('ind-chart-produto', {
+      type: 'bar',
+      data: {
+        labels: porProduto.labels,
+        datasets: [{ label: 'Atendimentos', data: porProduto.valores, backgroundColor: self._cores[0] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+
+    // ── Por Categoria (barras) ──
+    var porCategoria = self._agruparPor('categoria');
+    self._criarChart('ind-chart-categoria', {
+      type: 'bar',
+      data: {
+        labels: porCategoria.labels,
+        datasets: [{ label: 'Atendimentos', data: porCategoria.valores, backgroundColor: self._cores[1] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+
+    // ── Por Canal (pizza) ──
+    var porCanal = self._agruparPor('canal');
+    self._criarChart('ind-chart-canal', {
+      type: 'pie',
+      data: {
+        labels: porCanal.labels,
+        datasets: [{ data: porCanal.valores, backgroundColor: self._cores }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+    });
+
+    // ── Por Responsável (barras horizontais) ──
+    var porResponsavel = self._agruparPor('responsavel');
+    self._criarChart('ind-chart-responsavel', {
+      type: 'bar',
+      data: {
+        labels: porResponsavel.labels,
+        datasets: [{ label: 'Atendimentos', data: porResponsavel.valores, backgroundColor: self._cores[2] }]
+      },
+      options: {
+        indexAxis: 'y', // barras horizontais
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    // ── Por Status (pizza) ──
+    var porStatus = self._agruparPor('status');
+    self._criarChart('ind-chart-status', {
+      type: 'pie',
+      data: {
+        labels: porStatus.labels,
+        datasets: [{
+          data: porStatus.valores,
+          backgroundColor: porStatus.labels.map(function(label) {
+            return (App.dropdownData.statusCores || {})[label] || self._cores[5];
+          })
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+    });
+
+    // ── Aguardando Retorno: Área x Cliente (rosca) ──
+    var aguardando = { 'Área': 0, 'Cliente': 0 };
+    self.state.dados.forEach(function(item) {
+      if (!self._ehPendente(item)) return;
+      var s = String(item.situacaoPendencia || '');
+      if (aguardando[s] !== undefined) aguardando[s]++;
+    });
+    self._criarChart('ind-chart-aguardando', {
+      type: 'doughnut',
+      data: {
+        labels: ['Área', 'Cliente'],
+        datasets: [{ data: [aguardando['Área'], aguardando['Cliente']], backgroundColor: [self._cores[4], self._cores[1]] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+    });
+
+    // ── Evolução diária acumulada (abertos x concluídos) ──
+    var chaves = porDia.chaves;
+    var concluidosPorDia = {};
+    self.state.dados.forEach(function(item) {
+      if (!self._ehConcluido(item)) return;
+      var d = App.parseDate(item.dataConclusao || item.dataAbertura);
+      if (!d) return;
+      var chave = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+      concluidosPorDia[chave] = (concluidosPorDia[chave] || 0) + 1;
+    });
+    var acumAbertos = [], acumConcluidos = [];
+    var somaA = 0, somaC = 0;
+    chaves.forEach(function(chave, index) {
+      somaA += porDia.valores[index];
+      somaC += concluidosPorDia[chave] || 0;
+      acumAbertos.push(somaA);
+      acumConcluidos.push(somaC);
+    });
+    self._criarChart('ind-chart-evolucao', {
+      type: 'line',
+      data: {
+        labels: porDia.labels,
+        datasets: [
+          { label: 'Abertos (acumulado)', data: acumAbertos, borderColor: self._cores[0], backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'Concluídos (acumulado)', data: acumConcluidos, borderColor: self._cores[2], backgroundColor: 'transparent', tension: 0.3 }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+    });
+  }
+};
+</script>

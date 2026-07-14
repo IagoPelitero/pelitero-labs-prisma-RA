@@ -56,24 +56,15 @@ const CONFIG = {
 
 // ============================================================================
 // CHAVES DE SCRIPT PROPERTIES
-// Centralizadas para evitar strings repetidas pelo código. As chaves da
-// marca anterior (PORTO_RA_*) são migradas automaticamente na primeira
-// execução (migrateLegacyProperties_ em Database.gs), preservando o vínculo
-// com a planilha e o controle de versão de instalações existentes.
+// Centralizadas para evitar strings repetidas pelo código. Caso uma
+// instalação anterior perca o vínculo com a planilha, basta executar
+// configurarPlanilha('<ID>') uma única vez no editor (Code.gs).
 // ============================================================================
 const PROPERTY_KEYS = {
   SPREADSHEET_ID: 'PRISMA_RA_SPREADSHEET_ID',
   SCHEMA_VERSION: 'PRISMA_RA_SCHEMA_VERSION',
   CATALOG_VERSION: 'PRISMA_RA_CATALOG_VERSION',
   CANAL_MIGRATION: 'PRISMA_RA_CANAL_MIGRATION'
-};
-
-/** Mapeamento chave legada → chave atual, usado apenas pela migração. */
-const LEGACY_PROPERTY_KEYS = {
-  PORTO_RA_SPREADSHEET_ID: PROPERTY_KEYS.SPREADSHEET_ID,
-  PORTO_RA_SCHEMA_VERSION: PROPERTY_KEYS.SCHEMA_VERSION,
-  PORTO_RA_CATALOG_VERSION: PROPERTY_KEYS.CATALOG_VERSION,
-  PORTO_RA_CANAL_MIGRATION: PROPERTY_KEYS.CANAL_MIGRATION
 };
 
 // ============================================================================

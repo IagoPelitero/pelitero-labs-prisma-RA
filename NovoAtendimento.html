@@ -1,46 +1,41 @@
 <script>
 /* ============================================================
    Pelitero Labs Prisma RA — NovoAtendimento.html
-   Pages.novoAtendimento — Cadastro e edição de atendimentos
    Desenvolvido por Pelitero Labs.
    ------------------------------------------------------------
    GUIA PARA QUEM ESTÁ COMEÇANDO
-   Tela de formulário usada tanto para CRIAR quanto para EDITAR um
-   atendimento. Se render() recebe um id, carrega o atendimento; se não,
-   abre em branco.
+   Este arquivo contém DUAS peças:
 
-   O formulário NÃO tem estrutura fixa: os campos são montados a partir da
-   aba ConfigCampos (App.formConfig, carregado no bootstrap). O ADM decide
-   quais campos aparecem e quais são obrigatórios — sem alterar código.
-   Campos "base" (data, protocolo, cliente, cpf, produto, categoria, canal,
-   observações) mapeiam colunas fixas; campos criados pelo ADM são gravados
-   em CamposExtras (JSON).
+   1) AtendimentoForm — módulo compartilhado (DRY) com toda a lógica do
+      formulário de atendimento: montagem dos campos a partir da
+      ConfigCampos, eventos (CPF, protocolo duplicado, produto→categoria,
+      status→aguardando), validação e coleta dos dados. É usado tanto
+      pela página Novo Atendimento quanto pelo MODAL de edição do
+      Dashboard — a mesma regra em um único lugar.
 
-   Sempre fixos no formulário (regras do fluxo, fora da ConfigCampos):
+   2) Pages.novoAtendimento — a página em si (criar/editar em tela cheia),
+      que delega a parte de formulário ao AtendimentoForm e cuida apenas
+      de layout, botões, observações e timeline.
+
+   O formulário NÃO tem estrutura fixa: os campos vêm da aba ConfigCampos
+   (App.formConfig). Campos "base" mapeiam colunas fixas; campos criados
+   pelo ADM são gravados em CamposExtras (JSON).
+
+   Sempre fixos (regras do fluxo, fora da ConfigCampos):
      - Status (Pendente / Em análise / Concluído);
      - "Aguardando Retorno de" (Área/Cliente), exibido só quando Pendente;
-     - Responsável, visível apenas para Supervisor/ADM (delegação) — o
-       analista nunca escolhe responsável (Services.gs/getActor_()).
-
-   Fluxo resumido:
-     render(id)          → busca o atendimento (se edição) e desenha.
-     _renderForm()       → desenha os campos conforme a ConfigCampos.
-     _bindEvents()       → eventos (status ↔ aguardando, produto ↔ categoria,
-                           máscara/validação de CPF, duplicidade de protocolo).
-     _validarFormulario()→ confere obrigatórios (ConfigCampos) antes de salvar.
-     _coletarDados()     → junta os valores num objeto para o servidor.
-     _salvar()           → salvarAtendimento()/atualizarAtendimento().
+     - Responsável, visível apenas para Supervisor/ADM (delegação).
    ============================================================ */
-Pages.novoAtendimento = {
-  state: {
-    atendimentoId: null,
-    atendimento: null,
-    timeline: [],
-    salvando: false
-  },
 
+/**
+ * Módulo compartilhado do formulário de atendimento.
+ * Todas as funções operam sobre os mesmos ids de campos (campo-*), então
+ * o formulário pode ser desenhado tanto na página quanto dentro do modal
+ * de edição do Dashboard — nunca os dois ao mesmo tempo.
+ */
+var AtendimentoForm = {
   // Ids fixos dos inputs dos campos base (mantidos por compatibilidade).
-  _baseFieldIds: {
+  baseFieldIds: {
     dataAbertura: 'campo-data-abertura',
     numeroRA: 'campo-ra',
     cliente: 'campo-cliente',
@@ -51,43 +46,13 @@ Pages.novoAtendimento = {
     observacoes: 'campo-observacoes'
   },
 
-  render: function(atendimentoId) {
-    var self = this;
-    self.state.atendimentoId = atendimentoId || null;
-    self.state.atendimento = null;
-    self.state.timeline = [];
-    self.state.salvando = false;
-
-    var container = document.getElementById('app');
-    if (!container) return;
-
-    if (atendimentoId) {
-      container.innerHTML = '<div class="card skeleton-loading" style="min-height:320px;"></div>';
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result && result.atendimento) {
-            self.state.atendimento = result.atendimento;
-            self.state.timeline = result.timeline || [];
-            self._renderForm(container);
-          } else {
-            Components.toast('Atendimento não encontrado.', 'danger');
-            App.navigateTo('dashboard');
-          }
-        })
-        .withFailureHandler(function(err) {
-          Components.toast('Erro ao carregar atendimento: ' + err.message, 'danger');
-          App.navigateTo('dashboard');
-        })
-        .getAtendimento(atendimentoId);
-    } else {
-      self._renderForm(container);
-    }
-  },
-
-  // Campos visíveis do formulário, na ordem definida pelo ADM (ConfigCampos).
-  // Se a configuração não carregar, usa o conjunto padrão de campos base
-  // para o formulário nunca abrir vazio.
-  _getFormFields: function() {
+  /**
+   * Campos visíveis do formulário, na ordem definida pelo ADM
+   * (ConfigCampos). Se a configuração não carregar, usa o conjunto padrão
+   * de campos base para o formulário nunca abrir vazio.
+   * @returns {Object[]} Campos { campo, rotulo, tipo, obrigatorio, base }.
+   */
+  getFields: function() {
     var fields = (App.formConfig || []).filter(function(field) {
       return field && field.exibir;
     });
@@ -104,21 +69,38 @@ Pages.novoAtendimento = {
     ];
   },
 
-  _fieldId: function(field) {
-    return this._baseFieldIds[field.campo] || ('campo-extra-' + field.campo);
+  /**
+   * Id do elemento HTML de um campo (base → id fixo; extra → prefixado).
+   * @param {Object} field - Campo da ConfigCampos.
+   * @returns {string} Id do input correspondente.
+   */
+  fieldId: function(field) {
+    return this.baseFieldIds[field.campo] || ('campo-extra-' + field.campo);
   },
 
-  _fieldValue: function(field, atd) {
+  /**
+   * Valor atual de um campo em um atendimento carregado.
+   * @param {Object} field - Campo da ConfigCampos.
+   * @param {Object} atd - Atendimento (formato do cliente) ou {}.
+   * @returns {string} Valor do campo.
+   */
+  fieldValue: function(field, atd) {
     if (field.base) return atd[field.campo] || '';
     return (atd.camposExtras || {})[field.campo] || '';
   },
 
-  // Monta o HTML de um campo conforme seu tipo (ConfigCampos).
-  _fieldHtml: function(field, atd, dd) {
-    var id = this._fieldId(field);
+  /**
+   * Monta o HTML de um campo conforme seu tipo (ConfigCampos).
+   * @param {Object} field - Campo a desenhar.
+   * @param {Object} atd - Atendimento em edição ou {}.
+   * @param {Object} dd - App.dropdownData (listas de produtos, canais...).
+   * @returns {string} HTML do form-group do campo.
+   */
+  fieldHtml: function(field, atd, dd) {
+    var id = this.fieldId(field);
     var required = field.obrigatorio ? ' <span style="color:var(--danger)">*</span>' : '';
     var label = '<label class="form-label" for="' + id + '">' + App.escapeHtml(field.rotulo) + required + '</label>';
-    var value = this._fieldValue(field, atd);
+    var value = this.fieldValue(field, atd);
     var html = '<div class="form-group">' + label;
 
     if (field.campo === 'dataAbertura') {
@@ -159,38 +141,32 @@ Pages.novoAtendimento = {
     return html;
   },
 
-  _renderForm: function(container) {
+  /**
+   * Monta TODO o corpo do formulário: campos configuráveis (dois por
+   * linha), a linha fixa Status + "Aguardando Retorno de" e, para
+   * Supervisor/ADM, o campo Responsável (delegação).
+   * @param {Object} atd - Atendimento em edição ou {}.
+   * @param {Object} dd - App.dropdownData.
+   * @returns {string} HTML dos campos do formulário.
+   */
+  camposHtml: function(atd, dd) {
     var self = this;
-    var isEdit = !!self.state.atendimentoId;
-    var atd = self.state.atendimento || {};
-    var dd = App.dropdownData || {};
-    var isSupervisor = App.isSupervisor();
     var statusAtual = atd.status || 'Pendente';
-
-    var titulo = isEdit ? 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || '') : 'Novo Atendimento';
-
     var html = '';
-    html += '<div class="page-header">';
-    html += '  <h1 class="page-title">' + titulo + '</h1>';
-    html += '</div>';
-
-    html += '<div class="card">';
-    html += '  <form id="form-atendimento" autocomplete="off">';
 
     // ── Campos configuráveis (ConfigCampos), dois por linha ──
-    var fields = self._getFormFields();
     var pending = [];
-    fields.forEach(function(field) {
+    self.getFields().forEach(function(field) {
       var isWide = field.tipo === 'textarea';
       if (isWide) {
         if (pending.length) {
           html += '<div class="form-row">' + pending.join('') + '<div class="form-group"></div></div>';
           pending = [];
         }
-        html += self._fieldHtml(field, atd, dd);
+        html += self.fieldHtml(field, atd, dd);
         return;
       }
-      pending.push(self._fieldHtml(field, atd, dd));
+      pending.push(self.fieldHtml(field, atd, dd));
       if (pending.length === 2) {
         html += '<div class="form-row">' + pending.join('') + '</div>';
         pending = [];
@@ -201,44 +177,299 @@ Pages.novoAtendimento = {
     }
 
     // ── Campos fixos do fluxo: Status + Aguardando Retorno de ──
-    html += '  <div class="form-row">';
-    html += '    <div class="form-group">';
-    html += '      <label class="form-label" for="campo-status">Status <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-status" class="form-control" required>';
+    html += '<div class="form-row">';
+    html += '  <div class="form-group">';
+    html += '    <label class="form-label" for="campo-status">Status <span style="color:var(--danger)">*</span></label>';
+    html += '    <select id="campo-status" class="form-control" required>';
     (dd.status || ['Pendente', 'Em análise', 'Concluído']).forEach(function(s) {
-      html += '        <option value="' + App.escapeHtml(s) + '"' + (statusAtual === s ? ' selected' : '') + '>' + App.escapeHtml(s) + '</option>';
+      html += '      <option value="' + App.escapeHtml(s) + '"' + (statusAtual === s ? ' selected' : '') + '>' + App.escapeHtml(s) + '</option>';
     });
-    html += '      </select>';
-    html += '    </div>';
-    html += '    <div class="form-group" id="grupo-situacao" style="' + (statusAtual === 'Pendente' ? '' : 'display:none;') + '">';
-    html += '      <label class="form-label" for="campo-situacao">Aguardando Retorno de <span style="color:var(--danger)">*</span></label>';
-    html += '      <select id="campo-situacao" class="form-control">';
-    html += '        <option value="">Selecione</option>';
-    (dd.situacoesPendencia || ['Área', 'Cliente']).forEach(function(s) {
-      html += '        <option value="' + App.escapeHtml(s) + '"' + (atd.situacaoPendencia === s ? ' selected' : '') + '>' + App.escapeHtml(s) + '</option>';
-    });
-    html += '      </select>';
-    html += '    </div>';
+    html += '    </select>';
     html += '  </div>';
+    html += '  <div class="form-group" id="grupo-situacao" style="' + (statusAtual === 'Pendente' ? '' : 'display:none;') + '">';
+    html += '    <label class="form-label" for="campo-situacao">Aguardando Retorno de <span style="color:var(--danger)">*</span></label>';
+    html += '    <select id="campo-situacao" class="form-control">';
+    html += '      <option value="">Selecione</option>';
+    (dd.situacoesPendencia || ['Área', 'Cliente']).forEach(function(s) {
+      html += '      <option value="' + App.escapeHtml(s) + '"' + (atd.situacaoPendencia === s ? ' selected' : '') + '>' + App.escapeHtml(s) + '</option>';
+    });
+    html += '    </select>';
+    html += '  </div>';
+    html += '</div>';
 
-    // Responsável: visível apenas para Supervisor/ADM (delegação a um analista).
-    if (isSupervisor) {
-      html += '  <div class="form-row" data-supervisor-only>';
-      html += '    <div class="form-group">';
-      html += '      <label class="form-label" for="campo-responsavel">Responsável (delegar a)</label>';
-      html += '      <select id="campo-responsavel" class="form-control">';
-      html += '        <option value="">Automático (eu mesmo)</option>';
+    // Responsável: visível apenas para Supervisor/ADM (delegação).
+    if (App.isSupervisor()) {
+      html += '<div class="form-row">';
+      html += '  <div class="form-group">';
+      html += '    <label class="form-label" for="campo-responsavel">Responsável (delegar a)</label>';
+      html += '    <select id="campo-responsavel" class="form-control">';
+      html += '      <option value="">Automático (eu mesmo)</option>';
       (dd.responsaveis || []).forEach(function(r) {
-        html += '        <option value="' + App.escapeHtml(r) + '"' + (atd.responsavel === r ? ' selected' : '') + '>' + App.escapeHtml(r) + '</option>';
+        html += '      <option value="' + App.escapeHtml(r) + '"' + (atd.responsavel === r ? ' selected' : '') + '>' + App.escapeHtml(r) + '</option>';
       });
-      html += '      </select>';
-      html += '      <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Supervisores e o ADM podem delegar/reatribuir o atendimento a um analista.</small>';
-      html += '    </div>';
-      html += '    <div class="form-group"></div>';
+      html += '    </select>';
+      html += '    <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Supervisores e o ADM podem delegar/reatribuir o atendimento a um analista.</small>';
       html += '  </div>';
+      html += '  <div class="form-group"></div>';
+      html += '</div>';
     }
 
-    // Botões de ação
+    return html;
+  },
+
+  /**
+   * Preenche o select de categorias conforme o produto escolhido
+   * (usa dropdownData.categoriasPorProduto, calculado no servidor).
+   * @param {string} selecionada - Categoria a manter selecionada.
+   */
+  popularCategorias: function(selecionada) {
+    if (!document.getElementById('campo-categoria')) return;
+    var dd = App.dropdownData || {};
+    var produto = (document.getElementById('campo-produto') || {}).value || '';
+    var porProduto = dd.categoriasPorProduto || {};
+    var lista = (porProduto[produto] || []).concat(porProduto['Geral'] || []);
+    if (!produto) lista = dd.categorias || [];
+    App.fillSelect('campo-categoria', lista, 'Selecione', selecionada || undefined);
+  },
+
+  /**
+   * Liga os eventos de campo do formulário: máscara/validação de CPF,
+   * verificação de protocolo duplicado, produto → categorias e
+   * status → "Aguardando Retorno de" (só aparece quando Pendente).
+   * @param {string} atendimentoId - Id em edição (para ignorar o próprio
+   *   protocolo na checagem de duplicidade) ou '' em criações.
+   */
+  bindFieldEvents: function(atendimentoId) {
+    var self = this;
+
+    var campoCpf = document.getElementById('campo-cpf');
+    if (campoCpf) {
+      campoCpf.addEventListener('input', function() { App.maskCPF(this); });
+      campoCpf.addEventListener('blur', function() { self.validarCPFVisual(this.value); });
+    }
+
+    var campoRA = document.getElementById('campo-ra');
+    if (campoRA) {
+      campoRA.addEventListener('blur', function() {
+        self.verificarDuplicidadeRA(this.value, atendimentoId);
+      });
+    }
+
+    var campoProduto = document.getElementById('campo-produto');
+    if (campoProduto) {
+      campoProduto.addEventListener('change', function() {
+        self.popularCategorias('');
+      });
+    }
+
+    var campoStatus = document.getElementById('campo-status');
+    if (campoStatus) {
+      campoStatus.addEventListener('change', function() {
+        var grupo = document.getElementById('grupo-situacao');
+        if (!grupo) return;
+        if (this.value === 'Pendente') {
+          grupo.style.display = '';
+        } else {
+          grupo.style.display = 'none';
+          var campoSituacao = document.getElementById('campo-situacao');
+          if (campoSituacao) campoSituacao.value = '';
+        }
+      });
+    }
+  },
+
+  /**
+   * Consulta o servidor para avisar, em tempo real, se o protocolo já
+   * existe em alguma das abas de canal.
+   * @param {string} valor - Protocolo digitado.
+   * @param {string} ignorarId - Id do próprio atendimento (edições).
+   */
+  verificarDuplicidadeRA: function(valor, ignorarId) {
+    if (!valor || !valor.trim()) return;
+    var feedback = document.getElementById('ra-feedback');
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (!feedback) return;
+        if (result && result.duplicado) {
+          feedback.style.display = 'block';
+          feedback.style.color = 'var(--warning)';
+          feedback.textContent = '⚠️ Já existe um atendimento com este protocolo.';
+        } else {
+          feedback.style.display = 'none';
+          feedback.textContent = '';
+        }
+      })
+      .withFailureHandler(function() {
+        if (feedback) {
+          feedback.style.display = 'none';
+          feedback.textContent = '';
+        }
+      })
+      .verificarProtocoloDuplicado(valor.trim(), ignorarId || '');
+  },
+
+  /**
+   * Mostra o feedback visual (✅/❌) da validação de CPF abaixo do campo.
+   * @param {string} cpf - CPF digitado.
+   */
+  validarCPFVisual: function(cpf) {
+    var feedback = document.getElementById('cpf-feedback');
+    if (!feedback) return;
+    if (!cpf || !cpf.trim()) {
+      feedback.style.display = 'none';
+      return;
+    }
+    feedback.style.display = 'block';
+    if (App.isValidCPF(cpf)) {
+      feedback.style.color = 'var(--success)';
+      feedback.textContent = '✅ CPF válido.';
+    } else {
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = '❌ CPF inválido.';
+    }
+  },
+
+  /**
+   * Valida os obrigatórios conforme a ConfigCampos + regras fixas do
+   * fluxo (Status e "Aguardando Retorno de" quando Pendente).
+   * @returns {string[]} Lista de mensagens de erro (vazia se tudo ok).
+   */
+  validar: function() {
+    var self = this;
+    var erros = [];
+
+    self.getFields().forEach(function(field) {
+      if (!field.obrigatorio) return;
+      var el = document.getElementById(self.fieldId(field));
+      if (!el || !String(el.value || '').trim()) {
+        erros.push(field.rotulo + ' é obrigatório.');
+      }
+    });
+
+    var status = document.getElementById('campo-status');
+    if (!status || !status.value) {
+      erros.push('Status é obrigatório.');
+    } else if (status.value === 'Pendente') {
+      var situacao = document.getElementById('campo-situacao');
+      if (!situacao || !situacao.value) {
+        erros.push('"Aguardando Retorno de" é obrigatório quando o status é "Pendente".');
+      }
+    }
+
+    var cpf = document.getElementById('campo-cpf');
+    if (cpf && cpf.value.trim() && !App.isValidCPF(cpf.value)) {
+      erros.push('CPF informado é inválido.');
+    }
+
+    return erros;
+  },
+
+  /**
+   * Junta os valores do formulário num objeto para o servidor. Campos
+   * base viram propriedades diretas; campos personalizados vão em
+   * camposExtras (gravados como JSON na coluna CamposExtras).
+   * @returns {Object} Dados prontos para salvar/atualizarAtendimento.
+   */
+  coletar: function() {
+    var self = this;
+    var campoResponsavel = document.getElementById('campo-responsavel');
+    var campoSituacao = document.getElementById('campo-situacao');
+
+    var dados = {
+      numeroRA: '', cliente: '', cpf: '', produto: '', categoria: '',
+      canal: '', observacoes: '', dataAbertura: '',
+      status: (document.getElementById('campo-status') || {}).value || '',
+      motivoPendencia: campoSituacao ? (campoSituacao.value || '') : '',
+      responsavel: campoResponsavel ? (campoResponsavel.value || '') : '',
+      camposExtras: {}
+    };
+
+    self.getFields().forEach(function(field) {
+      var el = document.getElementById(self.fieldId(field));
+      var value = el ? String(el.value || '').trim() : '';
+      if (field.base) {
+        dados[field.campo] = value;
+      } else if (value) {
+        dados.camposExtras[field.campo] = value;
+      }
+    });
+
+    return dados;
+  }
+};
+
+/* ============================================================
+   Pages.novoAtendimento — página de criação/edição em tela cheia.
+   Fluxo: render(id) → _renderForm() → _bindEvents() → _salvar().
+   Toda a lógica de campos vem do AtendimentoForm (acima).
+   ============================================================ */
+Pages.novoAtendimento = {
+  state: {
+    atendimentoId: null,
+    atendimento: null,
+    timeline: [],
+    salvando: false
+  },
+
+  /**
+   * Desenha a página. Com id, carrega o atendimento para edição;
+   * sem id, abre o formulário em branco.
+   * @param {string} [atendimentoId] - Id do atendimento a editar.
+   */
+  render: function(atendimentoId) {
+    var self = this;
+    self.state.atendimentoId = atendimentoId || null;
+    self.state.atendimento = null;
+    self.state.timeline = [];
+    self.state.salvando = false;
+
+    var container = document.getElementById('app');
+    if (!container) return;
+
+    if (atendimentoId) {
+      container.innerHTML = '<div class="card skeleton-loading" style="min-height:320px;"></div>';
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.atendimento) {
+            self.state.atendimento = result.atendimento;
+            self.state.timeline = result.timeline || [];
+            self._renderForm(container);
+          } else {
+            Components.toast('Atendimento não encontrado.', 'danger');
+            App.navigateTo('dashboard');
+          }
+        })
+        .withFailureHandler(function(err) {
+          Components.toast('Erro ao carregar atendimento: ' + err.message, 'danger');
+          App.navigateTo('dashboard');
+        })
+        .getAtendimento(atendimentoId);
+    } else {
+      self._renderForm(container);
+    }
+  },
+
+  // Desenha o formulário (campos do AtendimentoForm + botões da página) e,
+  // em edições, os cards de observação e histórico.
+  _renderForm: function(container) {
+    var self = this;
+    var isEdit = !!self.state.atendimentoId;
+    var atd = self.state.atendimento || {};
+    var dd = App.dropdownData || {};
+
+    var titulo = isEdit ? 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || '') : 'Novo Atendimento';
+
+    var html = '';
+    html += '<div class="page-header">';
+    html += '  <h1 class="page-title">' + titulo + '</h1>';
+    html += '</div>';
+
+    html += '<div class="card">';
+    html += '  <form id="form-atendimento" autocomplete="off">';
+    html += AtendimentoForm.camposHtml(atd, dd);
+
+    // Botões de ação da página
     html += '  <div class="form-actions">';
     html += '    <button type="button" id="btn-salvar-atendimento" class="btn btn-primary">💾 Salvar</button>';
     if (isEdit) {
@@ -276,63 +507,15 @@ Pages.novoAtendimento = {
 
     container.innerHTML = html;
 
-    self._popularCategorias(atd.categoria || '');
+    AtendimentoForm.popularCategorias(atd.categoria || '');
     self._bindEvents();
   },
 
-  // Preenche o select de categorias conforme o produto escolhido
-  // (usa dropdownData.categoriasPorProduto, calculado no servidor).
-  _popularCategorias: function(selecionada) {
-    if (!document.getElementById('campo-categoria')) return;
-    var dd = App.dropdownData || {};
-    var produto = (document.getElementById('campo-produto') || {}).value || '';
-    var porProduto = dd.categoriasPorProduto || {};
-    var lista = (porProduto[produto] || []).concat(porProduto['Geral'] || []);
-    if (!produto) lista = dd.categorias || [];
-    App.fillSelect('campo-categoria', lista, 'Selecione', selecionada || undefined);
-  },
-
+  // Liga os eventos: campos (AtendimentoForm) + botões desta página.
   _bindEvents: function() {
     var self = this;
 
-    // Máscara + validação de CPF
-    var campoCpf = document.getElementById('campo-cpf');
-    if (campoCpf) {
-      campoCpf.addEventListener('input', function() { App.maskCPF(this); });
-      campoCpf.addEventListener('blur', function() { self._validarCPF(this.value); });
-    }
-
-    // Verificar duplicidade do protocolo
-    var campoRA = document.getElementById('campo-ra');
-    if (campoRA) {
-      campoRA.addEventListener('blur', function() {
-        self._verificarDuplicidadeRA(this.value);
-      });
-    }
-
-    // Produto muda → recarrega as categorias do produto
-    var campoProduto = document.getElementById('campo-produto');
-    if (campoProduto) {
-      campoProduto.addEventListener('change', function() {
-        self._popularCategorias('');
-      });
-    }
-
-    // Status muda → mostrar/esconder "Aguardando Retorno de" (só Pendente)
-    var campoStatus = document.getElementById('campo-status');
-    if (campoStatus) {
-      campoStatus.addEventListener('change', function() {
-        var grupo = document.getElementById('grupo-situacao');
-        if (!grupo) return;
-        if (this.value === 'Pendente') {
-          grupo.style.display = '';
-        } else {
-          grupo.style.display = 'none';
-          var campoSituacao = document.getElementById('campo-situacao');
-          if (campoSituacao) campoSituacao.value = '';
-        }
-      });
-    }
+    AtendimentoForm.bindFieldEvents(self.state.atendimentoId || '');
 
     var btnSalvar = document.getElementById('btn-salvar-atendimento');
     if (btnSalvar) btnSalvar.addEventListener('click', function() { self._salvar(); });
@@ -356,109 +539,7 @@ Pages.novoAtendimento = {
     if (btnObservacao) btnObservacao.addEventListener('click', function() { self._adicionarObservacao(); });
   },
 
-  _verificarDuplicidadeRA: function(valor) {
-    if (!valor || !valor.trim()) return;
-    var self = this;
-    var feedback = document.getElementById('ra-feedback');
-
-    google.script.run
-      .withSuccessHandler(function(result) {
-        if (!feedback) return;
-        if (result && result.duplicado) {
-          feedback.style.display = 'block';
-          feedback.style.color = 'var(--warning)';
-          feedback.textContent = '⚠️ Já existe um atendimento com este protocolo.';
-        } else {
-          feedback.style.display = 'none';
-          feedback.textContent = '';
-        }
-      })
-      .withFailureHandler(function() {
-        if (feedback) {
-          feedback.style.display = 'none';
-          feedback.textContent = '';
-        }
-      })
-      .verificarProtocoloDuplicado(valor.trim(), self.state.atendimentoId || '');
-  },
-
-  _validarCPF: function(cpf) {
-    var feedback = document.getElementById('cpf-feedback');
-    if (!feedback) return;
-    if (!cpf || !cpf.trim()) {
-      feedback.style.display = 'none';
-      return;
-    }
-    feedback.style.display = 'block';
-    if (App.isValidCPF(cpf)) {
-      feedback.style.color = 'var(--success)';
-      feedback.textContent = '✅ CPF válido.';
-    } else {
-      feedback.style.color = 'var(--danger)';
-      feedback.textContent = '❌ CPF inválido.';
-    }
-  },
-
-  // Valida os obrigatórios conforme a ConfigCampos + regras fixas do fluxo.
-  _validarFormulario: function() {
-    var self = this;
-    var erros = [];
-
-    self._getFormFields().forEach(function(field) {
-      if (!field.obrigatorio) return;
-      var el = document.getElementById(self._fieldId(field));
-      if (!el || !String(el.value || '').trim()) {
-        erros.push(field.rotulo + ' é obrigatório.');
-      }
-    });
-
-    var status = document.getElementById('campo-status');
-    if (!status || !status.value) {
-      erros.push('Status é obrigatório.');
-    } else if (status.value === 'Pendente') {
-      var situacao = document.getElementById('campo-situacao');
-      if (!situacao || !situacao.value) {
-        erros.push('"Aguardando Retorno de" é obrigatório quando o status é "Pendente".');
-      }
-    }
-
-    var cpf = document.getElementById('campo-cpf');
-    if (cpf && cpf.value.trim() && !App.isValidCPF(cpf.value)) {
-      erros.push('CPF informado é inválido.');
-    }
-
-    return erros;
-  },
-
-  // Junta os valores do formulário num objeto para o servidor. Campos base
-  // viram propriedades diretas; campos personalizados vão em camposExtras.
-  _coletarDados: function() {
-    var self = this;
-    var campoResponsavel = document.getElementById('campo-responsavel');
-    var campoSituacao = document.getElementById('campo-situacao');
-
-    var dados = {
-      numeroRA: '', cliente: '', cpf: '', produto: '', categoria: '',
-      canal: '', observacoes: '', dataAbertura: '',
-      status: (document.getElementById('campo-status') || {}).value || '',
-      motivoPendencia: campoSituacao ? (campoSituacao.value || '') : '',
-      responsavel: campoResponsavel ? (campoResponsavel.value || '') : '',
-      camposExtras: {}
-    };
-
-    self._getFormFields().forEach(function(field) {
-      var el = document.getElementById(self._fieldId(field));
-      var value = el ? String(el.value || '').trim() : '';
-      if (field.base) {
-        dados[field.campo] = value;
-      } else if (value) {
-        dados.camposExtras[field.campo] = value;
-      }
-    });
-
-    return dados;
-  },
-
+  // Habilita/desabilita o botão salvar durante a gravação.
   _setSaving: function(saving) {
     this.state.salvando = saving;
     var btn = document.getElementById('btn-salvar-atendimento');
@@ -468,17 +549,18 @@ Pages.novoAtendimento = {
     }
   },
 
+  // Valida, coleta e grava. Em edições, exige justificativa (auditoria).
   _salvar: function() {
     var self = this;
     if (self.state.salvando) return;
 
-    var erros = self._validarFormulario();
+    var erros = AtendimentoForm.validar();
     if (erros.length > 0) {
       Components.toast(erros.join('\n'), 'danger', 5000);
       return;
     }
 
-    var dados = self._coletarDados();
+    var dados = AtendimentoForm.coletar();
 
     if (self.state.atendimentoId) {
       // Edição: solicitar justificativa antes de salvar.
@@ -491,8 +573,9 @@ Pages.novoAtendimento = {
           var campoJust = document.getElementById('campo-justificativa');
           var justificativa = campoJust ? campoJust.value.trim() : '';
           if (!justificativa) {
+            // return false mantém o modal aberto para o usuário preencher.
             Components.toast('Justificativa é obrigatória para alterações.', 'warning');
-            return;
+            return false;
           }
           self._setSaving(true);
           Components.showLoading('Salvando atendimento...');
@@ -538,6 +621,7 @@ Pages.novoAtendimento = {
     }
   },
 
+  // Exclusão lógica do atendimento em edição.
   _excluir: function() {
     var self = this;
     Components.showLoading('Excluindo atendimento...');
@@ -558,6 +642,7 @@ Pages.novoAtendimento = {
       .excluirAtendimento(self.state.atendimentoId);
   },
 
+  // Adiciona uma observação à timeline do atendimento em edição.
   _adicionarObservacao: function() {
     var self = this;
     var campo = document.getElementById('campo-nova-observacao');
@@ -586,6 +671,7 @@ Pages.novoAtendimento = {
       .adicionarObservacao(self.state.atendimentoId, texto);
   },
 
+  // Recarrega apenas o card de histórico após uma nova observação.
   _recarregarTimeline: function() {
     var self = this;
     google.script.run
@@ -604,6 +690,7 @@ Pages.novoAtendimento = {
       .getTimeline(self.state.atendimentoId);
   },
 
+  // Limpa o formulário de criação (não usado em edições).
   _limparFormulario: function() {
     var form = document.getElementById('form-atendimento');
     if (form) form.reset();
@@ -611,7 +698,7 @@ Pages.novoAtendimento = {
     var campoData = document.getElementById('campo-data-abertura');
     if (campoData) campoData.value = new Date().toISOString().split('T')[0];
 
-    this._popularCategorias('');
+    AtendimentoForm.popularCategorias('');
 
     var grupoSituacao = document.getElementById('grupo-situacao');
     var campoStatus = document.getElementById('campo-status');

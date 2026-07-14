@@ -45,7 +45,9 @@
   /* Surfaces */
   --bg: #F5F7FA;
   --card-bg: #FFFFFF;
+  --input-bg: #FFFFFF;
   --sidebar-bg: #002D72;
+  --sidebar-bg-2: #001A45; /* tom inferior do gradiente da sidebar */
   --sidebar-active: #0046C0;
   --sidebar-text: #FFFFFF;
 
@@ -82,6 +84,73 @@
 
   /* Font */
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+/* ── Sistema de Temas ──
+   O tema Azul é o padrão (:root acima). Cada tema abaixo sobrescreve as
+   variáveis de cor; como todos os componentes usam var(--...), a troca de
+   tema (atributo data-theme no <body>, controlado por App.applyTheme em
+   Scripts.html) atualiza sidebar, cabeçalho, cards, tabelas, botões,
+   modais e inputs de uma só vez. A escolha é persistida em localStorage. */
+
+/* Tema Rosa */
+body[data-theme="rosa"] {
+  --primary-blue: #D81B60;
+  --secondary-blue: #F06292;
+  --dark-blue: #880E4F;
+  --light-blue: #FCE4EC;
+  --sidebar-bg: #880E4F;
+  --sidebar-bg-2: #4A0728;
+  --sidebar-active: #D81B60;
+}
+
+/* Tema Brasil (verde, amarelo e azul) */
+body[data-theme="brasil"] {
+  --primary-blue: #009C3B;
+  --secondary-blue: #FFB300;
+  --dark-blue: #002776;
+  --light-blue: #E8F5E9;
+  --accent-green: #FFDF00;
+  --sidebar-bg: #002776;
+  --sidebar-bg-2: #001542;
+  --sidebar-active: #009C3B;
+}
+
+/* Tema Dark */
+body[data-theme="dark"] {
+  --primary-blue: #3B82F6;
+  --secondary-blue: #60A5FA;
+  --dark-blue: #1E3A8A;
+  --light-blue: #1E3A5F;
+  --bg: #111827;
+  --card-bg: #1F2937;
+  --input-bg: #111827;
+  --sidebar-bg: #0B1220;
+  --sidebar-bg-2: #05080F;
+  --sidebar-active: #2563EB;
+  --text-primary: #F9FAFB;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+  --border: #374151;
+  --border-light: #273244;
+  --divider: #374151;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow: 0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.5), 0 2px 4px -1px rgba(0,0,0,0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -2px rgba(0,0,0,0.4);
+  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.4);
+}
+
+/* Seletor de tema exibido no cabeçalho */
+.theme-select {
+  padding: 6px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--input-bg);
+  outline: none;
+  cursor: pointer;
 }
 
 /* ── 1. Reset & Base ── */
@@ -158,7 +227,9 @@ input, select, textarea, button {
   left: 0;
   width: var(--sidebar-width);
   height: 100vh;
-  background: linear-gradient(180deg, #002D72 0%, #001a45 100%);
+  /* Gradiente baseado nas variáveis do tema (correção: era fixo e a
+     sidebar não acompanhava a troca de temas). */
+  background: linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-2) 100%);
   color: var(--sidebar-text);
   display: flex;
   flex-direction: column;
@@ -812,7 +883,7 @@ input, select, textarea, button {
   border-radius: var(--radius-sm);
   font-size: 13.5px;
   color: var(--text-primary);
-  background: #fff;
+  background: var(--input-bg);
   transition: all var(--transition-fast);
   outline: none;
 }
@@ -948,7 +1019,7 @@ select.form-control {
 }
 
 .btn-secondary {
-  background: #fff;
+  background: var(--input-bg);
   color: var(--text-primary);
   border: 1.5px solid var(--border);
 }
@@ -1019,6 +1090,10 @@ select.form-control {
 }
 
 /* ── 11. Badges / Tags ── */
+/* Correção de bug: o .badge tinha texto branco sem cor de fundo padrão —
+   contadores como o da tabela do Dashboard ficavam invisíveis (branco
+   sobre branco). O fundo padrão agora é a cor primária; os modificadores
+   (.badge-success etc.) e estilos inline continuam sobrescrevendo. */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -1029,6 +1104,7 @@ select.form-control {
   letter-spacing: 0.2px;
   white-space: nowrap;
   color: #fff;
+  background: var(--primary-blue);
 }
 
 .badge-sm {
@@ -1484,7 +1560,7 @@ select.form-control {
   border-radius: var(--radius-sm);
   font-size: 12.5px;
   color: var(--text-primary);
-  background: #fff;
+  background: var(--input-bg);
   outline: none;
   transition: all var(--transition-fast);
   min-width: 120px;
@@ -1792,7 +1868,7 @@ select.form-control {
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 12.5px;
-  background: #fff;
+  background: var(--input-bg);
   transition: border-color var(--transition-fast);
 }
 
@@ -1859,7 +1935,7 @@ select.form-control {
   border-radius: 24px;
   font-size: 13px;
   color: var(--text-primary);
-  background: #fff;
+  background: var(--input-bg);
   width: 280px;
   transition: all var(--transition-fast);
   outline: none;
@@ -2154,5 +2230,41 @@ select.form-control {
   .grid-4 { grid-template-columns: 1fr; }
   .config-form-grid { grid-template-columns: 1fr; }
   .config-form-wide { grid-column: auto; }
+}
+
+/* ── Tela Indicadores (gráficos Chart.js) ──
+   Grade responsiva de cards de gráfico. Cada card contém um <canvas>
+   com altura fixa para o Chart.js não redimensionar indefinidamente. */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.chart-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+}
+
+.chart-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chart-card .chart-canvas-wrap {
+  position: relative;
+  height: 260px;
+}
+
+.chart-card.chart-wide { grid-column: 1 / -1; }
+
+@media (max-width: 768px) {
+  .charts-grid { grid-template-columns: 1fr; }
 }
 </style>

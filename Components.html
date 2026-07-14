@@ -100,11 +100,14 @@ const Components = {
   _modalOnCancel: null,
 
   // Chamada pelo botão de confirmar do modal (ligada via onclick no HTML
-  // gerado acima). Fecha o modal e executa o callback onConfirm informado.
+  // gerado acima). Executa o callback onConfirm ANTES de fechar: se o
+  // callback retornar false (ex.: validação de formulário falhou ou a
+  // gravação continuará de forma assíncrona), o modal permanece aberto e
+  // quem chamou decide quando fechar via Components.closeModal().
   _modalConfirm: function() {
     var cb = this._modalOnConfirm;
+    if (typeof cb === 'function' && cb() === false) return;
     this.closeModal();
-    if (typeof cb === 'function') cb();
   },
 
   // Chamada pelo botão de cancelar do modal. Fecha o modal e executa o
