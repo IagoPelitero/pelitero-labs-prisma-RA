@@ -177,15 +177,6 @@ function toObject(row, columns) {
 // ============================================================================
 
 /**
- * Verifica se uma string está vazia ou contém apenas espaços.
- * @param {*} val - Valor a verificar
- * @returns {boolean} true se vazio
- */
-function isEmpty(val) {
-  return val === null || val === undefined || String(val).trim() === '';
-}
-
-/**
  * Calcula a diferença em horas entre duas datas.
  * @param {Date} startDate - Data inicial
  * @param {Date} endDate - Data final

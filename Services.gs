@@ -13,7 +13,7 @@
  * GUIA PARA QUEM ESTÁ COMEÇANDO
  * ------------------------------------------------------------------------
  * Convenção de nomes:
- *   - Funções SEM "_" no final (ex: getAtendimentos) → podem ser chamadas
+ *   - Funções SEM "_" no final (ex: getDashboardData) → podem ser chamadas
  *     pelo frontend via google.script.run.
  *   - Funções COM "_" no final (ex: validateAtendimentoInput_) → internas.
  *
@@ -118,29 +118,6 @@ function activeSorted_(sheetName) {
 // ============================================================================
 // ATENDIMENTOS - CONSULTAS
 // ============================================================================
-
-/**
- * Lista os atendimentos visíveis para o usuário logado, com filtros,
- * ordenação e paginação. Analista recebe apenas os próprios registros.
- * @param {Object} filtros - Filtros opcionais (status, canal, período...).
- * @param {number} pagina - Página atual (1-indexed).
- * @param {Object} ordenacao - { campo, direcao } para ordenação.
- * @returns {Object} { dados, total, totalPaginas, pagina }.
- */
-function getAtendimentos(filtros, pagina, ordenacao) {
-  ensureDatabaseReady();
-  const actor = getActor_();
-  const records = applyAtendimentoFilters_(restrictToOwnerIfNeeded_(getActiveAtendimentos_(), actor), filtros || {});
-  const clientRecords = decorateAtendimentos_(records);
-  sortClientRecords_(clientRecords, ordenacao || {});
-
-  return {
-    dados: clientRecords,
-    total: clientRecords.length,
-    totalPaginas: Math.max(1, Math.ceil(clientRecords.length / CONFIG.PAGE_SIZE)),
-    pagina: Math.max(1, Number(pagina || 1))
-  };
-}
 
 /**
  * Carrega um atendimento e sua timeline, respeitando as permissões

@@ -190,9 +190,6 @@ Pages.indicadores = {
   _ehPendente: function(item) {
     return String(item.status || '').toLowerCase() === 'pendente';
   },
-  _ehEmAnalise: function(item) {
-    return !this._ehConcluido(item) && !this._ehPendente(item);
-  },
 
   /**
    * Cards de resumo: Total, Pendentes, Em análise, Concluídos,
