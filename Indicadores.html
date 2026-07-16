@@ -266,6 +266,47 @@ Pages.indicadores = {
   },
 
   /**
+   * Trunca um rótulo de eixo com reticências.
+   * Usado nos gráficos de barras (Produto, Categoria, Responsável), onde
+   * nomes longos poluíam a visualização. O nome COMPLETO permanece
+   * disponível no tooltip do gráfico (o Chart.js usa o label original).
+   * @param {string} texto - Rótulo original.
+   * @param {number} max - Nº máximo de caracteres exibidos.
+   * @returns {string} Rótulo truncado com "…" quando necessário.
+   */
+  _truncarLabel: function(texto, max) {
+    texto = String(texto === undefined || texto === null ? '' : texto);
+    max = max || 16;
+    return texto.length > max ? texto.slice(0, max - 1) + '…' : texto;
+  },
+
+  /**
+   * Configuração de eixo com rótulos truncados para gráficos de barras.
+   * A rotação é limitada a 45° e só é aplicada pelo Chart.js quando
+   * realmente necessário (comportamento padrão do autoSkip).
+   * @param {string} eixo - 'x' (barras verticais) ou 'y' (horizontais).
+   * @returns {Object} Objeto "scales" para as options do Chart.js.
+   */
+  _escalaComTruncamento: function(eixo) {
+    var self = this;
+    var config = {
+      ticks: {
+        // O callback recebe o índice do tick; getLabelForValue devolve o
+        // rótulo original, que truncamos apenas para EXIBIÇÃO no eixo.
+        callback: function(value) {
+          return self._truncarLabel(this.getLabelForValue(value), 16);
+        },
+        maxRotation: 45,
+        minRotation: 0,
+        autoSkip: true
+      }
+    };
+    var scales = {};
+    scales[eixo] = config;
+    return scales;
+  },
+
+  /**
    * Destrói o gráfico anterior do canvas (se houver) e cria um novo.
    * Sem isso o Chart.js acumularia instâncias a cada atualização.
    * @param {string} canvasId - Id do canvas.
@@ -316,6 +357,7 @@ Pages.indicadores = {
     });
 
     // ── Por Produto (barras) ──
+    // Rótulos longos são truncados com "…" no eixo (nome completo no tooltip).
     var porProduto = self._agruparPor('produto');
     self._criarChart('ind-chart-produto', {
       type: 'bar',
@@ -323,10 +365,17 @@ Pages.indicadores = {
         labels: porProduto.labels,
         datasets: [{ label: 'Atendimentos', data: porProduto.valores, backgroundColor: self._cores[0] }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: self._escalaComTruncamento('x')
+      }
     });
 
     // ── Por Categoria (barras) ──
+    // Categorias longas prejudicavam a leitura: o eixo exibe o texto
+    // truncado com "…" e o tooltip mostra o nome completo.
     var porCategoria = self._agruparPor('categoria');
     self._criarChart('ind-chart-categoria', {
       type: 'bar',
@@ -334,7 +383,12 @@ Pages.indicadores = {
         labels: porCategoria.labels,
         datasets: [{ label: 'Atendimentos', data: porCategoria.valores, backgroundColor: self._cores[1] }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: self._escalaComTruncamento('x')
+      }
     });
 
     // ── Por Canal (pizza) ──
@@ -360,7 +414,9 @@ Pages.indicadores = {
         indexAxis: 'y', // barras horizontais
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } }
+        plugins: { legend: { display: false } },
+        // Nomes longos truncados no eixo Y (nome completo no tooltip).
+        scales: self._escalaComTruncamento('y')
       }
     });
 

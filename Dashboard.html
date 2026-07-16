@@ -30,9 +30,41 @@ Pages.dashboard = {
   state: {
     atendimentos: [],
     filtrados: [],
-    termoBusca: '',
+    termoBusca: '',   // pesquisa rápida (qualquer informação visível)
+    filtros: {},      // filtros individuais combináveis (data, produto, etc.)
     pagina: 1,
     porPagina: 25
+  },
+
+  // Mapeamento filtro → id do input na tela. As chaves de select/data são
+  // comparadas de forma exata; as de texto, por conteúdo parcial.
+  _filtroIds: {
+    dataInicio: 'dash-f-data-inicio',
+    dataFim: 'dash-f-data-fim',
+    protocolo: 'dash-f-protocolo',
+    cliente: 'dash-f-cliente',
+    cpf: 'dash-f-cpf',
+    produto: 'dash-f-produto',
+    categoria: 'dash-f-categoria',
+    canal: 'dash-f-canal',
+    status: 'dash-f-status',
+    situacao: 'dash-f-situacao',
+    responsavel: 'dash-f-responsavel'
+  },
+
+  // Rótulos exibidos nos "chips" de filtros ativos (mesmos nomes das labels).
+  _filtroLabels: {
+    dataInicio: 'Data Inicial',
+    dataFim: 'Data Final',
+    protocolo: 'Protocolo',
+    cliente: 'Cliente',
+    cpf: 'CPF',
+    produto: 'Produto',
+    categoria: 'Categoria',
+    canal: 'Canal',
+    status: 'Status',
+    situacao: 'Aguardando Retorno',
+    responsavel: 'Responsável'
   },
 
   /**
@@ -41,6 +73,15 @@ Pages.dashboard = {
    * @param {HTMLElement} container - <main id="app">.
    */
   render: function(container) {
+    // Correção de bug (item "cache de filtros"): o objeto state persiste
+    // entre navegações da SPA, mas os inputs renascem vazios a cada
+    // render. Sem este reset, ao sair e voltar para o Dashboard a tabela
+    // continuava filtrada pela última pesquisa, com os campos em branco.
+    this.state.termoBusca = '';
+    this.state.filtros = {};
+    this.state.pagina = 1;
+
+    var dd = App.dropdownData || {};
     var html = '';
 
     html += '<div class="page-header">';
@@ -60,11 +101,48 @@ Pages.dashboard = {
     // Indicadores consolidados por canal (ReclameAqui, ChatPrivadoRA, SACPreventivo).
     html += '<div id="dashboard-canais" style="margin-top:24px;"></div>';
 
+    // ── Painel de filtros individuais (recolhível) ──
+    // Padrão de UI de sistema: o painel inicia RECOLHIDO (não rouba espaço
+    // da tabela); o cabeçalho mostra um contador de filtros ativos e os
+    // filtros aplicados aparecem como "chips" removíveis individualmente,
+    // visíveis mesmo com o painel fechado. Todos os filtros são
+    // combináveis (E lógico) e aplicados sobre a lista já carregada —
+    // sem novas chamadas ao servidor (performance).
+    html += '<div class="card" style="margin-top:24px;">';
+    html += '  <div class="filtros-header" id="dashboard-filtros-toggle" title="Mostrar/ocultar filtros">';
+    html += '    <div style="display:flex;align-items:center;gap:10px;">';
+    html += '      <h2 style="margin:0;font-size:1.05rem;font-weight:600;">🔍 Filtros</h2>';
+    html += '      <span id="dashboard-filtros-badge" class="filtros-badge" style="display:none;">0</span>';
+    html += '    </div>';
+    html += '    <div style="display:flex;align-items:center;gap:10px;">';
+    html += '      <button class="btn btn-secondary" id="dashboard-limpar-filtros" style="display:none;">🗑️ Limpar Filtros</button>';
+    html += '      <span class="material-icons filtros-caret">expand_more</span>';
+    html += '    </div>';
+    html += '  </div>';
+    // Chips dos filtros ativos (cada um removível pelo "x").
+    html += '  <div id="dashboard-filtros-chips" class="filter-chips"></div>';
+    html += '  <div id="dashboard-filtros-wrap" class="filtros-wrap">';
+    html += '  <div class="dashboard-filtros">';
+    html += '    <div class="form-group"><label class="form-label">Data Inicial</label><input type="date" id="dash-f-data-inicio" class="form-control"></div>';
+    html += '    <div class="form-group"><label class="form-label">Data Final</label><input type="date" id="dash-f-data-fim" class="form-control"></div>';
+    html += '    <div class="form-group"><label class="form-label">Protocolo</label><input type="text" id="dash-f-protocolo" class="form-control" placeholder="Nº do protocolo"></div>';
+    html += '    <div class="form-group"><label class="form-label">Cliente</label><input type="text" id="dash-f-cliente" class="form-control" placeholder="Nome do cliente"></div>';
+    html += '    <div class="form-group"><label class="form-label">CPF</label><input type="text" id="dash-f-cpf" class="form-control" placeholder="CPF"></div>';
+    html += '    <div class="form-group"><label class="form-label">Produto</label><select id="dash-f-produto" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Categoria</label><select id="dash-f-categoria" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Canal</label><select id="dash-f-canal" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Status</label><select id="dash-f-status" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Aguardando Retorno</label><select id="dash-f-situacao" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Responsável</label><select id="dash-f-responsavel" class="form-control"></select></div>';
+    html += '  </div>';
+    html += '  </div>'; // fecha filtros-wrap (área recolhível)
+    html += '</div>';
+
     html += '<div class="card" style="margin-top: 24px;">';
     html += '  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">';
     html += '    <h2 style="margin:0;font-size:1.15rem;font-weight:600;">Atendimentos <span id="dashboard-contagem" class="badge" style="font-size:13px;vertical-align:middle;">0</span></h2>';
     html += '    <div class="search-box" style="max-width:340px;flex:1;">';
-    html += '      <input type="text" id="dashboard-busca" class="form-control" placeholder="🔍 Buscar por protocolo, cliente, produto...">';
+    html += '      <input type="text" id="dashboard-busca" class="form-control" placeholder="🔍 Pesquisa rápida em qualquer campo...">';
     html += '    </div>';
     html += '  </div>';
     html += '  <div id="dashboard-tabela">' + Components.emptyState('sync', 'Carregando atendimentos...') + '</div>';
@@ -73,12 +151,59 @@ Pages.dashboard = {
 
     container.innerHTML = html;
 
+    // Preenche os selects dos filtros com as listas do bootstrap.
+    App.fillSelect('dash-f-produto', dd.produtos || [], 'Todos');
+    App.fillSelect('dash-f-categoria', dd.categorias || [], 'Todas');
+    App.fillSelect('dash-f-canal', dd.canais || [], 'Todos');
+    App.fillSelect('dash-f-status', dd.status || [], 'Todos');
+    App.fillSelect('dash-f-situacao', dd.situacoesPendencia || [], 'Todas');
+    App.fillSelect('dash-f-responsavel', dd.responsaveis || [], 'Todos');
+
+    this._bindFiltros();
+    this.carregarDados();
+  },
+
+  /**
+   * Liga os eventos do painel de filtros e da pesquisa rápida.
+   * Selects e datas aplicam na hora; campos de texto usam debounce para
+   * não refiltar a cada tecla. Tudo é local (sem chamadas ao servidor).
+   */
+  _bindFiltros: function() {
     var self = this;
-    // Busca local com debounce: filtra a lista já carregada sem nova
-    // chamada ao servidor.
+    var timer = null;
+
+    // Aplica os filtros atuais: lê os inputs, volta para a página 1 e
+    // redesenha a tabela.
+    var aplicar = function() {
+      self._lerFiltros();
+      self.state.pagina = 1;
+      self.filtrarLocal();
+      self.renderizarTabela();
+      self._renderChips(); // atualiza chips + contador de filtros ativos
+    };
+    var aplicarComDebounce = function() {
+      clearTimeout(timer);
+      timer = setTimeout(aplicar, 300);
+    };
+
+    Object.keys(self._filtroIds).forEach(function(key) {
+      var el = document.getElementById(self._filtroIds[key]);
+      if (!el) return;
+      if (el.tagName === 'SELECT' || el.type === 'date') {
+        el.addEventListener('change', aplicar);
+      } else {
+        el.addEventListener('input', aplicarComDebounce);
+      }
+    });
+
+    // Máscara de CPF no filtro (mesma máscara do formulário).
+    var cpf = document.getElementById('dash-f-cpf');
+    if (cpf) cpf.addEventListener('input', function() { App.maskCPF(this); });
+
+    // Pesquisa rápida: localiza por QUALQUER informação visível na tabela
+    // (campos base, status, canal, observações e campos personalizados).
     var busca = document.getElementById('dashboard-busca');
     if (busca) {
-      var timer = null;
       busca.addEventListener('input', function() {
         clearTimeout(timer);
         var termo = this.value;
@@ -91,7 +216,96 @@ Pages.dashboard = {
       });
     }
 
-    this.carregarDados();
+    // Abre/recolhe o painel ao clicar no cabeçalho (o botão Limpar não
+    // alterna o painel — stopPropagation via verificação do alvo).
+    var header = document.getElementById('dashboard-filtros-toggle');
+    var wrap = document.getElementById('dashboard-filtros-wrap');
+    if (header && wrap) {
+      header.addEventListener('click', function(e) {
+        if (e.target.closest('#dashboard-limpar-filtros')) return;
+        var aberto = wrap.classList.toggle('open');
+        header.classList.toggle('open', aberto);
+      });
+    }
+
+    // Limpar Filtros: zera TODOS os campos e o estado interno, devolvendo
+    // a tabela ao estado original (correção do bug de pesquisa retida).
+    var limpar = document.getElementById('dashboard-limpar-filtros');
+    if (limpar) {
+      limpar.addEventListener('click', function() {
+        Object.keys(self._filtroIds).forEach(function(key) {
+          var el = document.getElementById(self._filtroIds[key]);
+          if (el) el.value = '';
+        });
+        var buscaEl = document.getElementById('dashboard-busca');
+        if (buscaEl) buscaEl.value = '';
+        self.state.termoBusca = '';
+        self.state.filtros = {};
+        self.state.pagina = 1;
+        self.filtrarLocal();
+        self.renderizarTabela();
+        self._renderChips();
+      });
+    }
+  },
+
+  /**
+   * Desenha os "chips" dos filtros ativos abaixo do cabeçalho do painel
+   * (visíveis mesmo com o painel recolhido) e atualiza o contador e a
+   * visibilidade do botão Limpar Filtros. Cada chip pode ser removido
+   * individualmente pelo "x", sem abrir o painel.
+   */
+  _renderChips: function() {
+    var self = this;
+    var container = document.getElementById('dashboard-filtros-chips');
+    var badge = document.getElementById('dashboard-filtros-badge');
+    var limpar = document.getElementById('dashboard-limpar-filtros');
+    if (!container) return;
+
+    var f = self.state.filtros || {};
+    var ativos = Object.keys(self._filtroIds).filter(function(key) { return f[key]; });
+
+    container.innerHTML = ativos.map(function(key) {
+      var valor = f[key];
+      // Datas são exibidas no padrão brasileiro dentro do chip.
+      if (key === 'dataInicio' || key === 'dataFim') valor = App.formatDateBR(valor);
+      return '<span class="filter-chip">' + self._filtroLabels[key] + ': ' +
+        '<strong>' + App.escapeHtml(valor) + '</strong>' +
+        '<span class="material-icons" title="Remover este filtro" ' +
+        'onclick="Pages.dashboard._removerFiltro(\'' + key + '\')">close</span></span>';
+    }).join('');
+
+    if (badge) {
+      badge.textContent = ativos.length;
+      badge.style.display = ativos.length ? '' : 'none';
+    }
+    if (limpar) limpar.style.display = ativos.length ? '' : 'none';
+  },
+
+  /**
+   * Remove UM filtro específico (clique no "x" do chip): limpa o input
+   * correspondente e refiltra a tabela na hora.
+   * @param {string} key - Chave do filtro em _filtroIds.
+   */
+  _removerFiltro: function(key) {
+    var el = document.getElementById(this._filtroIds[key]);
+    if (el) el.value = '';
+    this._lerFiltros();
+    this.state.pagina = 1;
+    this.filtrarLocal();
+    this.renderizarTabela();
+    this._renderChips();
+  },
+
+  /** Lê os valores atuais dos inputs de filtro para o estado da página. */
+  _lerFiltros: function() {
+    var self = this;
+    var filtros = {};
+    Object.keys(self._filtroIds).forEach(function(key) {
+      var el = document.getElementById(self._filtroIds[key]);
+      filtros[key] = el ? String(el.value || '').trim() : '';
+    });
+    self.state.filtros = filtros;
   },
 
   /**
@@ -209,26 +423,66 @@ Pages.dashboard = {
   },
 
   /**
-   * Filtra a lista carregada pelo termo de busca (client-side).
-   * A busca cobre os campos base, o status/aguardando e também os
-   * campos personalizados (camposExtras).
+   * Filtra a lista carregada combinando (E lógico) os filtros individuais
+   * do painel com a pesquisa rápida — tudo client-side, sobre os dados já
+   * carregados (nenhuma leitura extra da planilha).
+   *
+   * Regras de negócio:
+   *  - Data Inicial/Final: comparadas com a data de abertura (inclusivas);
+   *  - Produto, Categoria, Canal, Status, Aguardando Retorno e
+   *    Responsável: comparação exata (selects);
+   *  - Protocolo e Cliente: comparação parcial (contém);
+   *  - CPF: comparado apenas pelos dígitos (ignora pontuação);
+   *  - Pesquisa rápida: localiza o termo em QUALQUER informação visível
+   *    (campos base + campos personalizados da ConfigCampos).
    */
   filtrarLocal: function() {
+    var f = this.state.filtros || {};
     var termo = (this.state.termoBusca || '').toLowerCase().trim();
-    if (!termo) {
-      this.state.filtrados = this.state.atendimentos.slice();
-    } else {
-      this.state.filtrados = this.state.atendimentos.filter(function(item) {
+
+    // Normalizações calculadas uma única vez (fora do loop) por performance.
+    var norm = function(v) { return String(v === undefined || v === null ? '' : v).toLowerCase().trim(); };
+    var dataInicio = f.dataInicio ? App.parseDate(f.dataInicio) : null;
+    var dataFim = f.dataFim ? App.parseDate(f.dataFim) : null;
+    if (dataFim) dataFim.setHours(23, 59, 59, 999); // fim do dia (inclusivo)
+    var cpfFiltro = f.cpf ? String(f.cpf).replace(/\D/g, '') : '';
+
+    this.state.filtrados = this.state.atendimentos.filter(function(item) {
+      // ── Período (data de abertura) ──
+      if (dataInicio || dataFim) {
+        var aberta = App.parseDate(item.dataAbertura);
+        if (dataInicio && (!aberta || aberta < dataInicio)) return false;
+        if (dataFim && (!aberta || aberta > dataFim)) return false;
+      }
+
+      // ── Filtros exatos (selects) ──
+      if (f.produto && norm(item.produto) !== norm(f.produto)) return false;
+      if (f.categoria && norm(item.categoria) !== norm(f.categoria)) return false;
+      if (f.canal && norm(item.canal) !== norm(f.canal)) return false;
+      if (f.status && norm(item.status) !== norm(f.status)) return false;
+      if (f.situacao && norm(item.situacaoPendencia) !== norm(f.situacao)) return false;
+      if (f.responsavel && norm(item.responsavel) !== norm(f.responsavel)) return false;
+
+      // ── Filtros parciais (texto) ──
+      if (f.protocolo && norm(item.numeroRA).indexOf(norm(f.protocolo)) === -1) return false;
+      if (f.cliente && norm(item.cliente).indexOf(norm(f.cliente)) === -1) return false;
+      if (cpfFiltro && String(item.cpf || '').replace(/\D/g, '').indexOf(cpfFiltro) === -1) return false;
+
+      // ── Pesquisa rápida (qualquer informação visível) ──
+      if (termo) {
         var campos = [item.numeroRA, item.cliente, item.cpf, item.produto, item.categoria,
           item.status, item.situacaoPendencia, item.responsavel, item.canal, item.observacoes];
         // Inclui os valores dos campos personalizados na busca.
         var extras = item.camposExtras || {};
         Object.keys(extras).forEach(function(key) { campos.push(extras[key]); });
-        return campos.some(function(campo) {
+        var achou = campos.some(function(campo) {
           return campo && String(campo).toLowerCase().indexOf(termo) !== -1;
         });
-      });
-    }
+        if (!achou) return false;
+      }
+
+      return true;
+    });
 
     var badge = document.getElementById('dashboard-contagem');
     if (badge) badge.textContent = App.formatNumber(this.state.filtrados.length);
@@ -286,11 +540,12 @@ Pages.dashboard = {
 
     var valor = col.base ? item[col.campo] : (item.camposExtras || {})[col.campo];
     valor = valor === undefined || valor === null ? '' : String(valor);
-    // Textos longos (ex.: observações) são truncados para não quebrar o layout.
-    if (valor.length > 40) {
-      return '<span title="' + App.escapeHtml(valor) + '">' + App.escapeHtml(valor.slice(0, 40)) + '…</span>';
-    }
-    return App.escapeHtml(valor || '—');
+    if (!valor) return '—';
+    // Textos longos (ex.: assunto/observações): a célula mostra os
+    // primeiros 40 caracteres com "…"; o clique abre um modal com o
+    // conteúdo COMPLETO, selecionável e com botão de copiar
+    // (Components.longText — mesmo comportamento em todas as tabelas).
+    return Components.longText(valor, 40);
   },
 
   /**
@@ -358,12 +613,22 @@ Pages.dashboard = {
     });
 
     if (paginacao) {
-      paginacao.innerHTML = totalPaginas > 1
-        ? Components.pagination(self.state.pagina, totalPaginas, function(pagina) {
-            self.state.pagina = pagina;
-            self.renderizarTabela();
-          })
-        : '';
+      // Barra completa: seletor 10/25/50/100, navegação Primeira/Anterior/
+      // Próxima/Última e o resumo "Exibindo X até Y de Z registros".
+      paginacao.innerHTML = Components.paginationBar({
+        pagina: self.state.pagina,
+        porPagina: self.state.porPagina,
+        total: dados.length,
+        onPageChange: function(pagina) {
+          self.state.pagina = pagina;
+          self.renderizarTabela();
+        },
+        onPageSizeChange: function(tamanho) {
+          self.state.porPagina = tamanho;
+          self.state.pagina = 1; // volta ao início ao mudar o tamanho
+          self.renderizarTabela();
+        }
+      });
     }
   },
 

@@ -776,10 +776,42 @@ input, select, textarea, button {
 }
 
 /* ── 8. Tables ── */
+/* A rolagem (vertical E horizontal) acontece DENTRO do container da
+   tabela: o cabeçalho permanece fixo (position: sticky no thead) e a
+   barra horizontal fica sempre visível na base do container — o usuário
+   não precisa rolar até o fim da janela para alcançá-la. */
 .table-container {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 65vh; /* altura máxima: acima disso, rolagem interna */
   border-radius: var(--radius);
   border: 1px solid var(--border);
+}
+
+/* Barras de rolagem do container da tabela: maiores e sempre visíveis,
+   facilitando o uso com grandes volumes de registros. */
+.table-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: var(--border-light, #ECEFF1);
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: #9AA1AC;
+  border-radius: 8px;
+  border: 2px solid var(--border-light, #ECEFF1);
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: #7B828D;
+}
+
+/* Firefox: barra padrão (sempre visível) apenas dentro da tabela. */
+.table-container {
+  scrollbar-width: auto;
+  scrollbar-color: #9AA1AC var(--border-light, #ECEFF1);
 }
 
 .data-table {
@@ -846,6 +878,192 @@ input, select, textarea, button {
   padding: 12px 16px;
   color: var(--text-primary);
   vertical-align: middle;
+  /* Textos longos quebram linha dentro da célula (sem estourar a
+     largura) e continuam selecionáveis para cópia. */
+  max-width: 340px;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* ── Texto longo truncado em célula (Components.longText) ──
+   O trecho visível termina em "…" e o clique abre um modal com o
+   conteúdo completo, selecionável e com botão de copiar. */
+.cell-longtext {
+  cursor: pointer;
+  border-bottom: 1px dashed var(--text-muted, #9AA1AC);
+}
+
+.cell-longtext:hover {
+  color: var(--primary-blue, #0046C0);
+  border-bottom-color: var(--primary-blue, #0046C0);
+}
+
+.cell-longtext-icon {
+  font-size: 12px !important;
+  vertical-align: middle;
+  margin-left: 4px;
+  opacity: 0.55;
+}
+
+/* Conteúdo completo exibido no modal do longText: preserva quebras de
+   linha e permite seleção/cópia integral do texto. */
+.longtext-full {
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  background: var(--bg, #F5F7FA);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  max-height: 55vh;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+/* ── Barra de paginação completa (Components.paginationBar) ── */
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap; /* empilha em telas estreitas */
+  padding: 12px 4px 0 4px;
+}
+
+.pagination-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pagination-size {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-right: 8px;
+}
+
+.pagination-size select {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pagination-current {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+/* ── Painel de filtros do Dashboard ──
+   Grade responsiva: os filtros se reorganizam conforme a largura da
+   tela (desktop, notebook e widescreen). */
+.dashboard-filtros {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 16px;
+}
+
+.dashboard-filtros .form-group {
+  margin-bottom: 0;
+}
+
+/* Cabeçalho clicável do painel de filtros (abre/recolhe). */
+.filtros-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Seta indicadora: gira 180° quando o painel está aberto. */
+.filtros-caret {
+  color: var(--text-secondary);
+  transition: transform 0.25s ease;
+}
+
+.filtros-header.open .filtros-caret {
+  transform: rotate(180deg);
+}
+
+/* Contador de filtros ativos ao lado do título. */
+.filtros-badge {
+  background: var(--primary-blue, #0046C0);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 9px;
+  line-height: 1.6;
+}
+
+/* Área recolhível dos filtros: fechada por padrão, expande com
+   animação suave ao clicar no cabeçalho. */
+.filtros-wrap {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.25s ease, margin-top 0.3s ease;
+}
+
+.filtros-wrap.open {
+  max-height: 640px; /* comporta as 3 linhas da grade em telas estreitas */
+  opacity: 1;
+  margin-top: 14px;
+}
+
+/* ── Chips de filtros ativos ──
+   Mostram o que está aplicado mesmo com o painel recolhido; o "x"
+   remove o filtro individualmente. */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.filter-chips:empty {
+  display: none;
+  margin: 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--light-blue, #E8F0FE);
+  color: var(--primary-blue, #0046C0);
+  border: 1px solid color-mix(in srgb, var(--primary-blue, #0046C0) 25%, transparent);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  animation: fadeIn 0.2s ease;
+}
+
+.filter-chip .material-icons {
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity var(--transition-fast, 0.15s);
+}
+
+.filter-chip .material-icons:hover {
+  opacity: 1;
 }
 
 .data-table tbody td.actions {

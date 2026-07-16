@@ -373,6 +373,166 @@ const Components = {
   },
 
   /* ──────────────────────────────────────────────
+     Barra de Paginação Completa
+     Paginação com seletor de tamanho de página e navegação
+     Primeira / Anterior / Próxima / Última, além do resumo
+     "Exibindo X até Y de Z registros".
+
+     options: {
+       pagina:     número da página atual (1-based),
+       porPagina:  registros por página (10 | 25 | 50 | 100),
+       total:      total de registros após filtros,
+       onPageChange:  function(novaPagina) — chamada ao navegar,
+       onPageSizeChange: function(novoTamanho) — chamada ao trocar o
+                         tamanho da página (a página volta para 1)
+     }
+     Retorna o HTML pronto; os cliques são resolvidos via registry
+     interno (_pageBarRegistry), no mesmo padrão de dataTable().
+  ────────────────────────────────────────────── */
+  _pageBarCounter: 0,
+  _pageBarRegistry: {},
+
+  paginationBar: function(options) {
+    var opts = options || {};
+    var total = Number(opts.total || 0);
+    var porPagina = Number(opts.porPagina || 25);
+    var totalPaginas = Math.max(1, Math.ceil(total / porPagina));
+    var pagina = Math.min(Math.max(1, Number(opts.pagina || 1)), totalPaginas);
+
+    // Registra os callbacks para os onclick do HTML gerado.
+    this._pageBarCounter++;
+    var barId = 'pagebar-' + this._pageBarCounter;
+    this._pageBarRegistry[barId] = {
+      onPageChange: opts.onPageChange,
+      onPageSizeChange: opts.onPageSizeChange
+    };
+
+    // Intervalo exibido: "Exibindo X até Y de Z registros".
+    var inicio = total === 0 ? 0 : (pagina - 1) * porPagina + 1;
+    var fim = Math.min(pagina * porPagina, total);
+
+    var tamanhos = [10, 25, 50, 100];
+    var selectHtml = '<label class="pagination-size">Exibir ' +
+      '<select onchange="Components._pageBarSize(\'' + barId + '\', this.value)">';
+    tamanhos.forEach(function(t) {
+      selectHtml += '<option value="' + t + '"' + (t === porPagina ? ' selected' : '') + '>' + t + '</option>';
+    });
+    selectHtml += '</select> registros</label>';
+
+    // Botões de navegação (desabilitados nas extremidades).
+    var btn = function(icone, titulo, paginaDestino, desabilitado) {
+      return '<button class="pagination-btn" title="' + titulo + '"' +
+        (desabilitado ? ' disabled' : ' onclick="Components._pageBarGo(\'' + barId + '\',' + paginaDestino + ')"') +
+        '><span class="material-icons" style="font-size:18px">' + icone + '</span></button>';
+    };
+
+    var html = '<div class="pagination-bar">';
+    html += '<div class="pagination-summary">Exibindo ' + App.formatNumber(inicio) + ' até ' +
+      App.formatNumber(fim) + ' de ' + App.formatNumber(total) + ' registros</div>';
+    html += '<div class="pagination-controls">';
+    html += selectHtml;
+    html += btn('first_page', 'Primeira página', 1, pagina <= 1);
+    html += btn('chevron_left', 'Página anterior', pagina - 1, pagina <= 1);
+    html += '<span class="pagination-current">Página ' + pagina + ' de ' + totalPaginas + '</span>';
+    html += btn('chevron_right', 'Próxima página', pagina + 1, pagina >= totalPaginas);
+    html += btn('last_page', 'Última página', totalPaginas, pagina >= totalPaginas);
+    html += '</div></div>';
+    return html;
+  },
+
+  // Navegação da barra de paginação (chamada pelos botões acima).
+  _pageBarGo: function(id, pagina) {
+    var config = this._pageBarRegistry[id];
+    if (config && typeof config.onPageChange === 'function') config.onPageChange(pagina);
+  },
+
+  // Troca do tamanho de página (chamada pelo <select> acima).
+  _pageBarSize: function(id, tamanho) {
+    var config = this._pageBarRegistry[id];
+    if (config && typeof config.onPageSizeChange === 'function') config.onPageSizeChange(Number(tamanho));
+  },
+
+  /* ──────────────────────────────────────────────
+     Texto Longo em Célula de Tabela
+     Trunca o texto no limite informado e permite ver o conteúdo
+     COMPLETO (selecionável e copiável) em um modal, além do
+     tooltip nativo. Uso: Components.longText(valor, 40).
+
+     - valor:  texto da célula (será escapado — seguro contra XSS);
+     - limite: nº máximo de caracteres exibidos (padrão 40).
+     Retorna HTML seguro pronto para o <td>.
+  ────────────────────────────────────────────── */
+  _longTextCounter: 0,
+  _longTextRegistry: {},
+
+  longText: function(valor, limite) {
+    valor = valor === undefined || valor === null ? '' : String(valor);
+    limite = limite || 40;
+    if (!valor) return '—';
+    if (valor.length <= limite) return App.escapeHtml(valor);
+
+    // Guarda o texto completo no registry (evita problemas de escape em
+    // atributos HTML) e limita o crescimento da memória.
+    this._longTextCounter++;
+    if (this._longTextCounter > 2000) {
+      this._longTextRegistry = {};
+      this._longTextCounter = 1;
+    }
+    var id = 'lt-' + this._longTextCounter;
+    this._longTextRegistry[id] = valor;
+
+    return '<span class="cell-longtext" title="Clique para ver o texto completo" ' +
+      'onclick="Components._showLongText(\'' + id + '\')">' +
+      App.escapeHtml(valor.slice(0, limite)) + '…' +
+      '<span class="material-icons cell-longtext-icon">open_in_full</span></span>';
+  },
+
+  // Abre o modal com o texto completo (selecionável) e botão de copiar.
+  _showLongText: function(id) {
+    var texto = this._longTextRegistry[id];
+    if (texto === undefined) return;
+    var body = '<div class="longtext-full" id="longtext-conteudo">' + App.escapeHtml(texto) + '</div>' +
+      '<div style="margin-top:12px;text-align:right;">' +
+      '<button class="btn btn-secondary" onclick="Components._copyLongText(\'' + id + '\')">' +
+      '<span class="material-icons" style="font-size:16px;vertical-align:middle;">content_copy</span> Copiar texto</button></div>';
+    this.modal({
+      title: 'Conteúdo completo',
+      body: body,
+      icon: 'notes',
+      confirmText: 'Fechar',
+      hideCancel: true
+    });
+  },
+
+  // Copia o texto completo para a área de transferência, com fallback
+  // para navegadores/iframes sem suporte à API navigator.clipboard.
+  _copyLongText: function(id) {
+    var texto = this._longTextRegistry[id];
+    if (texto === undefined) return;
+    var aviso = function() { Components.toast('Texto copiado!', 'success', 2500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(texto).then(aviso, function() {
+        Components._copyLongTextFallback(texto); aviso();
+      });
+    } else {
+      this._copyLongTextFallback(texto);
+      aviso();
+    }
+  },
+
+  // Fallback de cópia: textarea temporário + document.execCommand.
+  _copyLongTextFallback: function(texto) {
+    var ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  },
+
+  /* ──────────────────────────────────────────────
      Empty State
   ────────────────────────────────────────────── */
   emptyState: function(icon, message, subtitle) {

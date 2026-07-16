@@ -16,6 +16,8 @@
 Pages.relatorios = {
   _reportData: [],
   _sorted: { field: null, dir: 'asc' },
+  _pagina: 1,      // página atual da tabela do relatório
+  _porPagina: 25,  // registros por página (10 | 25 | 50 | 100)
 
   render: function () {
     var dd = App.dropdownData || {};
@@ -117,6 +119,7 @@ Pages.relatorios = {
     html += '      <span id="rel-total-registros" style="color:var(--text-secondary);font-size:13px;"></span>';
     html += '    </div>';
     html += '    <div id="rel-tabela" class="table-responsive"></div>';
+    html += '    <div id="rel-paginacao" style="padding:0 20px 16px 20px;"></div>';
     html += '  </div>';
 
     html += '  <div class="card">';
@@ -166,12 +169,25 @@ Pages.relatorios = {
     return result;
   },
 
+  /**
+   * Limpa TODOS os filtros e o resultado anterior.
+   * Correção de bug: antes só os inputs eram limpos — o relatório da
+   * última pesquisa continuava na tela e em memória (_reportData). Agora
+   * o estado interno é zerado e a área de resultados é ocultada, sem
+   * nenhuma pesquisa retida indevidamente.
+   */
   limparFiltros: function () {
     var ids = this._filtroIds;
     Object.keys(ids).forEach(function(key) {
       var el = document.getElementById(ids[key]);
       if (el) el.value = '';
     });
+    // Zera o resultado retido em memória e volta a tela ao estado original.
+    this._reportData = [];
+    this._sorted = { field: null, dir: 'asc' };
+    this._pagina = 1;
+    var resultados = document.getElementById('rel-resultados');
+    if (resultados) resultados.style.display = 'none';
   },
 
   gerarRelatorio: function () {
@@ -187,6 +203,7 @@ Pages.relatorios = {
         }
         Pages.relatorios._reportData = dados;
         Pages.relatorios._sorted = { field: null, dir: 'asc' };
+        Pages.relatorios._pagina = 1; // novo relatório começa na 1ª página
         document.getElementById('rel-resultados').style.display = 'block';
         Pages.relatorios.renderKPIs(dados);
         Pages.relatorios.renderTabela(dados);
@@ -254,19 +271,30 @@ Pages.relatorios = {
       });
     }
 
+    // ── Paginação client-side ──
+    // Apenas a página atual vira HTML (evita renderizar centenas de
+    // linhas de uma vez — performance). A exportação continua usando o
+    // conjunto COMPLETO (_reportData), sem perda de dados.
+    var totalPaginas = Math.max(1, Math.ceil(sortedData.length / self._porPagina));
+    if (self._pagina > totalPaginas) self._pagina = totalPaginas;
+    var inicio = (self._pagina - 1) * self._porPagina;
+    var paginados = sortedData.slice(inicio, inicio + self._porPagina);
+
     var rows = [];
-    for (var i = 0; i < sortedData.length; i++) {
-      var d = sortedData[i];
+    for (var i = 0; i < paginados.length; i++) {
+      var d = paginados[i];
       rows.push([
         App.escapeHtml(d.numeroRA || '-'),
-        App.escapeHtml(d.cliente || '-'),
+        // Textos potencialmente longos usam Components.longText: célula
+        // truncada com "…" e modal com o conteúdo completo (copiável).
+        Components.longText(d.cliente || '-', 40),
         App.escapeHtml(d.cpf || '-'),
-        App.escapeHtml(d.produto || '-'),
-        App.escapeHtml(d.categoria || '-'),
+        Components.longText(d.produto || '-', 40),
+        Components.longText(d.categoria || '-', 40),
         d.status ? Components.statusBadge(d.status, d.statusCor || '') : '-',
         App.escapeHtml(d.situacaoPendencia || '-'),
-        App.escapeHtml(d.canal || '-'),
-        App.escapeHtml(d.responsavel || '-'),
+        Components.longText(d.canal || '-', 40),
+        Components.longText(d.responsavel || '-', 40),
         App.formatDateBR(d.dataAbertura),
         App.formatDateBR(d.dataConclusao),
         d.tempoResolucao !== '' && d.tempoResolucao !== undefined && d.tempoResolucao !== null ? d.tempoResolucao + 'h' : '-'
@@ -284,6 +312,7 @@ Pages.relatorios = {
           self._sorted.field = field;
           self._sorted.dir = 'asc';
         }
+        self._pagina = 1; // ordenação nova volta à primeira página
         self.renderTabela(self._reportData);
       },
       sortField: self._sorted.field,
@@ -292,6 +321,26 @@ Pages.relatorios = {
 
     document.getElementById('rel-tabela').innerHTML = tableHtml;
     document.getElementById('rel-total-registros').textContent = dados.length + ' registro(s) encontrado(s)';
+
+    // Barra de paginação: 10/25/50/100 + Primeira/Anterior/Próxima/Última
+    // + "Exibindo X até Y de Z registros".
+    var paginacao = document.getElementById('rel-paginacao');
+    if (paginacao) {
+      paginacao.innerHTML = Components.paginationBar({
+        pagina: self._pagina,
+        porPagina: self._porPagina,
+        total: sortedData.length,
+        onPageChange: function(pagina) {
+          self._pagina = pagina;
+          self.renderTabela(self._reportData);
+        },
+        onPageSizeChange: function(tamanho) {
+          self._porPagina = tamanho;
+          self._pagina = 1;
+          self.renderTabela(self._reportData);
+        }
+      });
+    }
   },
 
   renderProdutividade: function (dados) {

@@ -239,8 +239,24 @@ Indicadores consolidados das três abas de canal, em uma única chamada ao servi
 - **Tabela dinâmica**: as colunas seguem sempre a ordem Data, Cliente, CPF, Produto,
   Categoria, Responsável e, na sequência, os demais campos visíveis da ConfigCampos
   (status, aguardando retorno, protocolo, canal, observações e campos criados pelo
-  ADM) — com Ações sempre por último. A busca local também cobre os campos
-  personalizados;
+  ADM) — com Ações sempre por último;
+- **Filtros individuais combináveis** em painel **recolhível**: Data Inicial/Final,
+  Protocolo, Cliente, CPF, Produto, Categoria, Canal, Status, Aguardando Retorno e
+  Responsável, aplicados em conjunto (E lógico) sobre os dados já carregados — sem
+  novas chamadas ao servidor. O cabeçalho exibe um **contador de filtros ativos** e
+  os filtros aplicados aparecem como **chips removíveis** individualmente, visíveis
+  mesmo com o painel fechado. A **pesquisa rápida** localiza registros por qualquer
+  informação visível na tabela, inclusive campos personalizados. "Limpar Filtros"
+  devolve a tabela ao estado original;
+- **Textos longos**: células com mais de 40 caracteres (ex.: Assunto, Observações)
+  são truncadas com "…" — o clique abre um modal com o conteúdo completo,
+  selecionável e com botão de copiar;
+- **Paginação completa**: 10/25/50/100 registros por página, navegação
+  Primeira/Anterior/Próxima/Última e resumo "Exibindo X até Y de Z registros".
+  Apenas a página atual é renderizada (performance com grandes volumes);
+- **Rolagem confortável**: a tabela rola dentro do próprio card (altura máxima de
+  65% da janela) com cabeçalho fixo; as barras de rolagem ficam sempre visíveis e
+  ao alcance, sem precisar ir até a extremidade da janela;
 - **Edição em modal**: o botão Editar abre um modal com o formulário completo
   (mesmo `AtendimentoForm` da tela Novo Atendimento), exige justificativa, salva sem
   recarregar a página e atualiza a tabela mantendo o usuário no Dashboard.
@@ -355,7 +371,19 @@ pelitero-labs-prisma-RA/
 - Refatoração DRY: módulo `AtendimentoForm` compartilhado entre a página Novo
   Atendimento e o modal de edição (uma única fonte da verdade para o formulário);
 - Modais com suporte a validação (`onConfirm` pode manter o modal aberto);
-- Busca do Dashboard passou a cobrir também os campos personalizados.
+- Busca do Dashboard passou a cobrir também os campos personalizados;
+- **Filtros individuais no Dashboard** (11 filtros combináveis + pesquisa rápida),
+  aplicados client-side sobre os dados já carregados;
+- **`Components.longText`**: célula truncada com "…" + modal com o texto completo
+  (selecionável e copiável) — comportamento consistente em todas as tabelas;
+- **`Components.paginationBar`**: paginação reutilizável com 10/25/50/100 por
+  página, Primeira/Anterior/Próxima/Última e "Exibindo X até Y de Z registros",
+  usada no Dashboard e nos Relatórios (o relatório renderiza apenas a página
+  atual; as exportações continuam usando o conjunto completo);
+- **Tabelas com rolagem interna**: cabeçalho fixo (sticky) e barras de rolagem
+  sempre visíveis dentro do container da tabela;
+- **Indicadores**: rótulos longos dos gráficos de Produto, Categoria e Responsável
+  truncados com "…" nos eixos, mantendo o nome completo no tooltip.
 
 ## Correções realizadas
 
@@ -371,7 +399,15 @@ pelitero-labs-prisma-RA/
 - **Sidebar não acompanhava o tema**: o gradiente era fixo no CSS; passou a usar as
   variáveis do tema;
 - **Lógica duplicada removida**: escape de HTML centralizado em `App.escapeHtml` e
-  resquícios de migrações da marca anterior eliminados.
+  resquícios de migrações da marca anterior eliminados;
+- **Filtro retido ao voltar para o Dashboard**: o estado da página (SPA) persiste
+  entre navegações, mas os campos de filtro renascem vazios — ao sair e voltar, a
+  tabela continuava filtrada pela última pesquisa. O estado agora é zerado a cada
+  render;
+- **"Limpar Filtros" dos Relatórios não limpava o resultado**: apenas os inputs
+  eram esvaziados; o relatório anterior permanecia na tela e em memória
+  (`_reportData`). Agora o estado interno é zerado e a área de resultados é
+  ocultada.
 
 ## Próximas evoluções
 
