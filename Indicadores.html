@@ -604,19 +604,16 @@ Pages.indicadores = {
     });
 
     // ── Por Categoria (barras) ──
-    // Cada categoria exibe QUANTIDADE e PERCENTUAL (calculado sobre o
-    // total de atendimentos filtrados) em TRÊS lugares:
-    //   1) acima da barra — "58" e "(34,5%)" (plugin _pluginValoresBarras);
-    //   2) na LEGENDA — "Contestação — 58 (34,5%)", uma entrada por
-    //      categoria, com a cor da barra correspondente;
-    //   3) no TOOLTIP — "58 (34,5%)" ao passar o mouse.
-    // Para a legenda fazer sentido, cada barra recebe uma cor da paleta.
+    // SEM legenda adicional (removida a pedido da operação): cada
+    // categoria mostra tudo diretamente no gráfico —
+    //   - nome da categoria no eixo (truncado com "…", completo no tooltip);
+    //   - QUANTIDADE acima da barra e PERCENTUAL logo abaixo, entre
+    //     parênteses ("58" / "(34,5%)"), via plugin _pluginValoresBarras;
+    //   - tooltip com categoria, quantidade e percentual: "58 (34,5%)".
+    // O percentual é calculado sobre o total de atendimentos filtrados.
     var porCategoria = self._agruparPor('categoria');
     var totalCategorias = 0;
     porCategoria.valores.forEach(function(v) { totalCategorias += Number(v) || 0; });
-    var coresCategoria = porCategoria.labels.map(function(label, i) {
-      return self._cores[i % self._cores.length];
-    });
     var escalaCategoria = self._escalaComTruncamento('x');
     escalaCategoria.y = { grace: '15%' };
     self._criarChart('ind-chart-categoria', {
@@ -624,41 +621,17 @@ Pages.indicadores = {
       plugins: [self._pluginValoresBarras],
       data: {
         labels: porCategoria.labels,
-        datasets: [{ label: 'Atendimentos', data: porCategoria.valores, backgroundColor: coresCategoria }]
+        datasets: [{ label: 'Atendimentos', data: porCategoria.valores, backgroundColor: self._cores[1] }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: {
-            display: true,
-            position: 'bottom',
-            // Uma entrada de legenda POR CATEGORIA (em vez de uma única
-            // entrada do dataset), com quantidade e percentual visíveis
-            // sem depender do mouse: "Contestação — 58 (34,5%)".
-            labels: {
-              generateLabels: function(chart) {
-                var ds = chart.data.datasets[0] || { data: [] };
-                return chart.data.labels.map(function(label, i) {
-                  var v = Number(ds.data[i]) || 0;
-                  return {
-                    text: label + ' — ' + App.formatNumber(v) +
-                      ' (' + self._fmtPct(v, totalCategorias) + ')',
-                    fillStyle: coresCategoria[i],
-                    strokeStyle: coresCategoria[i],
-                    fontColor: Chart.defaults.color,
-                    index: i
-                  };
-                });
-              }
-            },
-            // Clique na legenda desabilitado: os itens representam barras
-            // individuais (não datasets) e o toggle padrão não se aplica.
-            onClick: function() {}
-          },
+          legend: { display: false }, // sem legenda: valores ficam nas barras
           tooltip: {
             callbacks: {
               // Tooltip com quantidade e percentual: "58 (34,5%)".
+              // O título (nome da categoria) é o padrão do Chart.js.
               label: function(context) {
                 var v = Number(context.parsed.y) || 0;
                 return ' ' + App.formatNumber(v) + ' (' + self._fmtPct(v, totalCategorias) + ')';

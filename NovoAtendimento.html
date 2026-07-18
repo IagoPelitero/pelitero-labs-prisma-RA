@@ -104,7 +104,10 @@ var AtendimentoForm = {
     var html = '<div class="form-group">' + label;
 
     if (field.campo === 'dataAbertura') {
-      var hoje = new Date().toISOString().split('T')[0];
+      // Correção de bug: toISOString() usa UTC — no fuso do Brasil, após
+      // as 21h o formulário abria com a data de AMANHÃ. App.toInputDate
+      // monta AAAA-MM-DD com a data local.
+      var hoje = App.toInputDate(new Date());
       var dataAbertura = atd.dataAbertura ? App.toInputDate(atd.dataAbertura) : hoje;
       html += '<input type="date" id="' + id + '" class="form-control" value="' + dataAbertura + '">';
     } else if (field.campo === 'numeroRA') {
@@ -242,10 +245,24 @@ var AtendimentoForm = {
   bindFieldEvents: function(atendimentoId) {
     var self = this;
 
+    // Cada formulário recém-aberto pode avisar de novo sobre o mesmo CPF.
+    self._ultimoCpfAvisado = '';
+
     var campoCpf = document.getElementById('campo-cpf');
     if (campoCpf) {
-      campoCpf.addEventListener('input', function() { App.maskCPF(this); });
-      campoCpf.addEventListener('blur', function() { self.validarCPFVisual(this.value); });
+      campoCpf.addEventListener('input', function() {
+        App.maskCPF(this);
+        // Assim que o CPF fica completo (11 dígitos — digitado ou colado),
+        // a consulta de duplicidade dispara imediatamente, sem esperar o
+        // usuário sair do campo.
+        if (this.value.replace(/\D/g, '').length === 11) {
+          self.verificarCpfDuplicado(this.value, atendimentoId);
+        }
+      });
+      campoCpf.addEventListener('blur', function() {
+        self.validarCPFVisual(this.value);
+        self.verificarCpfDuplicado(this.value, atendimentoId);
+      });
     }
 
     var campoRA = document.getElementById('campo-ra');
@@ -307,6 +324,55 @@ var AtendimentoForm = {
         }
       })
       .verificarProtocoloDuplicado(valor.trim(), ignorarId || '');
+  },
+
+  // Último CPF já avisado como duplicado nesta edição do formulário —
+  // evita reabrir o popup várias vezes para o MESMO valor (ex.: blur
+  // repetido no campo). Um CPF diferente volta a ser consultado.
+  _ultimoCpfAvisado: '',
+
+  /**
+   * Alerta informativo de CPF duplicado: consulta o servidor assim que o
+   * CPF fica completo e, se o cliente já possui atendimento registrado,
+   * abre um popup com CPF, analista do PRIMEIRO cadastro e a data do
+   * registro. O aviso NÃO bloqueia o cadastro — o mesmo cliente pode ter
+   * atendimentos diferentes.
+   * @param {string} valor - CPF digitado (com ou sem máscara).
+   * @param {string} ignorarId - Id do próprio atendimento (em edições).
+   */
+  verificarCpfDuplicado: function(valor, ignorarId) {
+    var self = this;
+    var digitos = String(valor || '').replace(/\D/g, '');
+    // Só consulta CPFs completos e válidos (evita chamadas desnecessárias
+    // ao servidor durante a digitação).
+    if (digitos.length !== 11 || !App.isValidCPF(digitos)) return;
+    if (digitos === self._ultimoCpfAvisado) return; // já avisado nesta edição
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (!result || !result.duplicado) return;
+        self._ultimoCpfAvisado = digitos;
+        // Popup apenas informativo: CPF, analista do primeiro cadastro e
+        // data do registro. "Entendi" fecha e o cadastro segue normalmente.
+        var body =
+          '<p style="font-size:14px;margin-bottom:14px;">Este CPF já possui um atendimento registrado.</p>' +
+          '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13.5px;">' +
+          '<strong>CPF:</strong><span>' + App.escapeHtml(result.cpf || '') + '</span>' +
+          '<strong>Analista:</strong><span>' + App.escapeHtml(result.analista || '—') + '</span>' +
+          '<strong>Data do Registro:</strong><span>' + App.formatDateBR(result.dataRegistro) + '</span>' +
+          '</div>' +
+          '<p style="font-size:12.5px;color:var(--text-secondary);margin-top:14px;">' +
+          'Este aviso é apenas informativo. Caso seja um novo assunto, o atendimento poderá ser registrado normalmente.</p>';
+        Components.modal({
+          title: 'CPF já cadastrado',
+          body: body,
+          icon: 'contact_page',
+          confirmText: 'Entendi',
+          hideCancel: true
+        });
+      })
+      .withFailureHandler(function() { /* silencioso: aviso é opcional */ })
+      .verificarCpfDuplicado(digitos, ignorarId || '');
   },
 
   /**
@@ -696,7 +762,8 @@ Pages.novoAtendimento = {
     if (form) form.reset();
 
     var campoData = document.getElementById('campo-data-abertura');
-    if (campoData) campoData.value = new Date().toISOString().split('T')[0];
+    // Data local (não UTC) — mesma correção de fuso aplicada em fieldHtml.
+    if (campoData) campoData.value = App.toInputDate(new Date());
 
     AtendimentoForm.popularCategorias('');
 

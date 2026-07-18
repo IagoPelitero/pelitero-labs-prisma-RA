@@ -67,7 +67,8 @@ const CONFIG = {
 const PROPERTY_KEYS = {
   SPREADSHEET_ID: 'PRISMA_RA_SPREADSHEET_ID',
   SCHEMA_VERSION: 'PRISMA_RA_SCHEMA_VERSION',
-  CATALOG_VERSION: 'PRISMA_RA_CATALOG_VERSION',
+  // v4.3: CATALOG_VERSION removida — o "reseed" do catálogo foi extinto
+  // (política de não sobrescrita: dados padrão só em abas vazias).
   CANAL_MIGRATION: 'PRISMA_RA_CANAL_MIGRATION',
   // v4.2: migração única que move a aba ChatPrivadoRA para ReclameAqui.
   CHAT_PRIVADO_MIGRATION: 'PRISMA_RA_CHAT_PRIVADO_MIGRATION'
@@ -222,10 +223,10 @@ const CANAL_SHEETS = [
 
 /**
  * Produtos atendidos pela célula de exemplo: Cartão de Crédito e
- * Conta Digital. Estas listas também são usadas pela migração
- * (migrateLegacyData_ em Database.gs) para substituir os produtos e
- * categorias antigos de instalações existentes. O catálogo é administrável
- * pela tela de Configurações após a primeira criação.
+ * Conta Digital. v4.3 — política de não sobrescrita: estas listas são
+ * gravadas APENAS quando a aba está vazia (primeira criação). O sistema
+ * nunca substitui o que já foi escrito ou editado manualmente na
+ * planilha; o catálogo é administrável pela tela de Configurações.
  */
 const DEFAULT_PRODUTOS = [
   { Id: 'PD001', Nome: 'Cartão de Crédito', Descricao: 'Atendimentos do produto cartão de crédito', Ativo: true, Ordem: 1 },

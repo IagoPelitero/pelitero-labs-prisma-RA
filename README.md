@@ -41,12 +41,60 @@ de auditoria completa.
   exclusão de canais segue a mesma regra, com guarda para o sistema nunca ficar sem
   canal ativo;
 - **Indicadores → Atendimentos por Categoria**: cada categoria exibe quantidade e
-  percentual — ex.: `58 (34,5%)` — nas barras, na legenda e no tooltip, calculados
-  sobre o total de atendimentos filtrados;
+  percentual — ex.: `58 (34,5%)` — diretamente nas barras e no tooltip, calculados
+  sobre o total de atendimentos filtrados *(ajustado na v4.3: a legenda adicional
+  foi removida — os valores ficam apenas no próprio gráfico)*;
 - **Correção do tema Dark**: a zebra da tabela de atendimentos (e superfícies
   correlatas) usava a cor fixa `#FAFBFC`, gerando faixas brancas e pretas alternadas
   no tema escuro; agora a cor vem da variável de tema `--surface-muted`, com
   contraste adequado em todos os temas.
+
+### Novidades da v4.3
+
+- **Política de não sobrescrita dos dados do Sheets**: o sistema **nunca
+  sobrescreve dados já existentes na planilha**. Os dados padrão (produtos,
+  categorias, canais, campos do formulário) são gravados **apenas quando a aba
+  está vazia** (primeira criação); o que o usuário escreveu ou editou manualmente
+  no Google Sheets é sempre preservado. O antigo "reseed" do catálogo — que
+  limpava as abas Produtos/Categorias e regravava os padrões a cada versão — e a
+  normalização automática de nomes de produto em atendimentos foram removidos;
+
+- **Gráfico "Atendimentos por Categoria" refinado**: a legenda adicional criada na
+  v4.2 foi removida. Cada categoria mostra tudo diretamente no gráfico — o nome no
+  eixo, a **quantidade acima da barra** e o **percentual logo abaixo, entre
+  parênteses** (`58` / `(34,5%)`); o tooltip continua exibindo categoria,
+  quantidade e percentual;
+- **Card "Em análise" com descrição**: o card do Dashboard agora traz o texto
+  *"Casos atualmente em tratamento pelo analista responsável."* — o status
+  **Em análise** significa exclusivamente que o analista assumiu o caso e está
+  trabalhando nele. Os status são **mutuamente exclusivos** (um atendimento tem
+  sempre um único status): ao mudar para **Pendente**, a marcação "Em análise"
+  deixa de existir automaticamente. Não há cards duplicados;
+- **Alerta de CPF duplicado**: assim que o CPF é digitado ou colado por completo no
+  formulário de atendimento, o sistema consulta a base em tempo real; se o cliente
+  já possui atendimento, um popup **apenas informativo** mostra o CPF, o analista
+  do primeiro cadastro e a data do registro — sem impedir o novo cadastro (o mesmo
+  cliente pode ter atendimentos diferentes). A consulta usa os dados já em cache
+  (nenhuma leitura extra da planilha);
+- **Configurações → Banco de Dados** *(exclusivo do ADM)*: nova seção que exibe o
+  nome e o **link da planilha Google Sheets** usada como base do sistema, com botão
+  para abri-la em nova aba e editá-la manualmente quando necessário. O servidor
+  revalida o perfil (`requireAdmin_`) — Analistas e Supervisores não têm acesso;
+- **Correções de bugs da auditoria v4.3**:
+  - Variáveis CSS `--danger`, `--warning`, `--success` e `--surface` eram usadas
+    mas nunca definidas — asteriscos de campos obrigatórios e feedbacks de CPF
+    ficavam sem cor e alguns controles caíam em fallback branco no tema Dark.
+    Criados aliases que acompanham o tema ativo;
+  - A data do formulário de Novo Atendimento usava `toISOString()` (UTC): após as
+    21h no fuso do Brasil o campo abria com a data do dia seguinte. Corrigido para
+    data local (`App.toInputDate`);
+  - A classe `skeleton-loading` (telas de carregamento) não tinha estilo — o efeito
+    nunca aparecia. Estilizada, com variante escura para o tema Dark;
+  - Resíduos do tema Dark: `.timeline-changes`, campos desabilitados e os overlays
+    de carregamento usavam fundos claros fixos — agora seguem variáveis de tema
+    (`--surface-muted`, `--overlay-bg`);
+  - Timeline do atendimento passou a escapar todo o conteúdo com `App.escapeHtml`
+    (defesa em profundidade contra XSS).
 
 ### Tecnologias utilizadas
 
@@ -161,8 +209,13 @@ O navegador **nunca** acessa o Google Sheets diretamente.
 - Armazenamento **separado por canal** com consulta consolidada e transparente;
 - Alteração rápida de status direto na tabela do Dashboard;
 - Delegação/reatribuição de atendimentos entre analistas (Supervisor/ADM);
-- Verificação de protocolo duplicado em tempo real (nas três abas);
+- Verificação de protocolo duplicado em tempo real (em todas as abas de canal);
 - Validação de CPF no cliente e no servidor;
+- **Alerta informativo de CPF duplicado** em tempo real: ao completar o CPF no
+  formulário, um popup mostra o analista do primeiro cadastro e a data do registro,
+  sem impedir o novo atendimento;
+- **Seção Banco de Dados** em Configurações (só ADM): link direto para a planilha
+  Google Sheets do sistema;
 - Timeline por atendimento e histórico imutável de alterações com justificativa;
 - Dashboard com KPIs e gráficos por canal;
 - Relatórios com filtros combinados, exportação Excel/CSV/PDF e ranking de produtividade;
@@ -174,6 +227,15 @@ O navegador **nunca** acessa o Google Sheets diretamente.
 ## Fluxo do atendimento
 
 Status fixos do fluxo: **Pendente → Em análise → Concluído**.
+
+Os status são **mutuamente exclusivos** — um atendimento tem sempre um único
+status. **Em análise** significa exclusivamente que o analista responsável já
+assumiu o atendimento e está trabalhando nele (o card do Dashboard traz essa
+descrição); ao mudar para **Pendente**, a marcação "Em análise" deixa de existir.
+Os status permanecem fixos por regra de negócio: o fluxo tem semântica acoplada
+(data/tempo de resolução em **Concluído**, "Aguardando Retorno de" obrigatório em
+**Pendente**) — por isso não são cadastráveis pela tela de Configurações, ao
+contrário de canais, produtos e categorias, que são 100% dinâmicos.
 
 1. **Cadastro** — o formulário é montado conforme a ConfigCampos; o registro é gravado
    na aba do canal selecionado. Analista é definido automaticamente como responsável;
@@ -208,6 +270,8 @@ cruzado com a aba **Usuários**. Não há tela de login. Todas as regras são ap
 | Administrar produtos/categorias | ✅ | ✅ | ❌ |
 | **Gerenciar usuários** | ✅ | ❌ | ❌ |
 | **Configurar campos do formulário** | ✅ | ❌ | ❌ |
+| **Gerenciar canais** | ✅ | ❌ | ❌ |
+| **Ver link da base de dados (Banco de Dados)** | ✅ | ❌ | ❌ |
 
 O primeiro usuário é criado automaticamente como **ADM** e o sistema impede a
 desativação/demoção do último ADM ativo.
@@ -231,11 +295,16 @@ das definições de colunas em Config.gs.
 
 **Migrações automáticas** (executadas uma única vez, controladas por Script
 Properties versionadas): estrutura das abas (`SCHEMA_VERSION`), movimentação dos
-atendimentos legados para as abas por canal, normalização de status e catálogo,
-migração das chaves de propriedades de versões anteriores do produto e, na v4.2, a
-descontinuação do canal *Chat Privado* — os atendimentos da aba `ChatPrivadoRA` são
-movidos para `ReclameAqui` (com `Canal = "Reclame Aqui"`) e a aba antiga é removida,
-sem perda de nenhum registro.
+atendimentos legados para as abas por canal, normalização de status legados e, na
+v4.2, a descontinuação do canal *Chat Privado* — os atendimentos da aba
+`ChatPrivadoRA` são movidos para `ReclameAqui` (com `Canal = "Reclame Aqui"`) e a
+aba antiga é removida, sem perda de nenhum registro.
+
+**Política de não sobrescrita (v4.3)**: nenhuma rotina automática regrava dados já
+existentes nas abas. Dados padrão entram somente em abas vazias; as migrações acima
+apenas **movem** registros entre abas ou ajustam valores legados uma única vez —
+nunca substituem conteúdo editado pelo usuário. O antigo "reseed" do catálogo foi
+removido nesta versão.
 
 ---
 

@@ -174,6 +174,47 @@ function verificarProtocoloDuplicado(protocolo, ignorarId) {
 }
 
 /**
+ * Verifica se o CPF informado já possui atendimento registrado.
+ * Usada pelo alerta informativo do formulário: assim que o usuário
+ * termina de digitar/colar o CPF, o frontend consulta esta função e, se
+ * houver registro anterior, mostra um popup com o analista do PRIMEIRO
+ * cadastro e a data. A consulta usa getActiveAtendimentos_ (dados já em
+ * cache — nenhuma leitura extra da planilha) e NUNCA bloqueia o cadastro:
+ * o mesmo cliente pode ter vários atendimentos.
+ * @param {string} cpf - CPF digitado (com ou sem máscara).
+ * @param {string} ignorarId - Id do próprio atendimento (em edições).
+ * @returns {Object} { duplicado } ou
+ *   { duplicado: true, cpf, analista, dataRegistro (ISO) }.
+ */
+function verificarCpfDuplicado(cpf, ignorarId) {
+  ensureDatabaseReady();
+  const digitos = String(cpf || '').replace(/\D/g, '');
+  if (digitos.length !== 11) return { duplicado: false };
+  const safeId = sanitizeInput(ignorarId);
+
+  // Localiza o PRIMEIRO cadastro do CPF (menor data de criação/abertura).
+  let primeiro = null;
+  let primeiraData = null;
+  getActiveAtendimentos_().forEach(function(record) {
+    if (String(record.Id) === String(safeId || '')) return;
+    if (String(record.CPF || '').replace(/\D/g, '') !== digitos) return;
+    const data = asDate_(record.DataCriacao) || asDate_(record.DataAbertura);
+    if (!primeiro || (data && (!primeiraData || data < primeiraData))) {
+      primeiro = record;
+      primeiraData = data;
+    }
+  });
+
+  if (!primeiro) return { duplicado: false };
+  return {
+    duplicado: true,
+    cpf: formatCPF(digitos),
+    analista: String(primeiro.CriadoPor || primeiro.Responsavel || ''),
+    dataRegistro: toIso_(primeiraData)
+  };
+}
+
+/**
  * Nomes das abas de atendimento (uma por canal).
  */
 function getAtendimentoSheetNames_() {
@@ -1174,6 +1215,21 @@ function excluirConfiguracao(entidade, id) {
   invalidateAllCache();
   SERVICE_CONTEXT_ = {};
   return { success: true };
+}
+
+/**
+ * Informações da base de dados (planilha Google Sheets) para a seção
+ * "Banco de Dados" da tela de Configurações — EXCLUSIVA do ADM
+ * (requireAdmin_ revalida o perfil no servidor; esconder no frontend
+ * nunca é a única barreira). Permite ao administrador abrir a planilha
+ * diretamente para manutenção manual quando necessário.
+ * @returns {Object} { nome, url } da planilha vinculada ao sistema.
+ */
+function getDatabaseInfo() {
+  ensureDatabaseReady();
+  requireAdmin_();
+  const ss = getSpreadsheet();
+  return { nome: ss.getName(), url: ss.getUrl() };
 }
 
 /**

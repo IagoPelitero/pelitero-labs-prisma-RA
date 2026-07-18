@@ -15,6 +15,8 @@
    Indicadores e os filtros refletem automaticamente cada alteração.
    v4.2: excluir uma CATEGORIA ou um CANAL agora remove DEFINITIVAMENTE a
    linha da aba correspondente do Google Sheets (após confirmação).
+   v4.3: nova seção "Banco de Dados" (só ADM) exibe o link da planilha
+   Google Sheets do sistema para manutenção manual quando necessária.
 
    "metadata" (logo abaixo) descreve, para cada tipo de cadastro, quais
    campos existem no formulário (nome, tipo de campo, se é obrigatório).
@@ -83,8 +85,22 @@ Pages.configuracoes = {
         { key: 'Obrigatorio', label: 'Obrigatório', type: 'checkbox', defaultValue: false, trueLabel: 'Obrigatório', falseLabel: 'Opcional' },
         { key: 'Ordem', label: 'Ordem', type: 'number' }
       ]
+    },
+    // Seção "Banco de Dados" (EXCLUSIVA do ADM): não é uma lista
+    // cadastrável — exibe o link da planilha Google Sheets usada como
+    // base do sistema, para o administrador abrir/editar manualmente
+    // quando necessário. O servidor revalida o perfil (getDatabaseInfo
+    // usa requireAdmin_); Analistas e Supervisores não veem esta seção.
+    bancoDados: {
+      label: 'Banco de Dados', icon: 'storage', adminOnly: true,
+      custom: true, fields: []
     }
   },
+
+  // Informações da planilha (nome + URL), carregadas sob demanda na
+  // primeira abertura da seção Banco de Dados e reutilizadas depois
+  // (evita chamadas repetidas ao servidor).
+  _dbInfo: null,
 
   // Entidades visíveis para o usuário logado: gestão de usuários e dos
   // campos do formulário são exclusivas do ADM.
@@ -120,19 +136,25 @@ Pages.configuracoes = {
 
   renderShell: function() {
     var container = document.getElementById('app');
-    var html = '<div class="page-header"><div><h1 class="page-title">Configurações</h1>' +
-      '<p class="page-subtitle">Produtos, categorias e acessos da operação.</p></div>' +
-      '<button class="btn btn-primary" onclick="Pages.configuracoes.openForm()">+ Novo registro</button></div>';
-    html += '<div class="config-layout"><aside class="config-nav">';
     var self = this;
     var visible = this.visibleEntities();
     if (visible.indexOf(this.active) === -1) this.active = visible[0] || 'produtos';
+    // Seções "custom" (ex.: Banco de Dados) não são listas cadastráveis:
+    // o botão "+ Novo registro" não se aplica e fica oculto.
+    var isCustom = !!(this.metadata[this.active] || {}).custom;
+    var html = '<div class="page-header"><div><h1 class="page-title">Configurações</h1>' +
+      '<p class="page-subtitle">Produtos, categorias e acessos da operação.</p></div>' +
+      (isCustom ? '' : '<button class="btn btn-primary" onclick="Pages.configuracoes.openForm()">+ Novo registro</button>') +
+      '</div>';
+    html += '<div class="config-layout"><aside class="config-nav">';
     visible.forEach(function(key) {
       var meta = self.metadata[key];
+      // Seções custom não têm contador de registros.
+      var count = meta.custom ? '' : '<span class="config-count">' + ((self.data[key] || []).length) + '</span>';
       html += '<button class="config-nav-item' + (self.active === key ? ' active' : '') +
         '" onclick="Pages.configuracoes.switchEntity(\'' + key + '\')">' +
         '<span class="material-icons">' + meta.icon + '</span><span>' + meta.label + '</span>' +
-        '<span class="config-count">' + ((self.data[key] || []).length) + '</span></button>';
+        count + '</button>';
     });
     html += '</aside><section class="card config-content"><div id="config-table"></div></section></div>';
     container.innerHTML = html;
@@ -147,6 +169,11 @@ Pages.configuracoes = {
   renderTable: function() {
     var container = document.getElementById('config-table');
     var meta = this.metadata[this.active];
+    // Seções custom têm renderização própria (não são tabelas de registros).
+    if (meta.custom) {
+      this.renderDatabasePanel(container);
+      return;
+    }
     var rows = this.data[this.active] || [];
     var html = '<div class="card-header"><div class="card-title"><span class="material-icons">' +
       meta.icon + '</span>' + meta.label + '</div><span class="badge">' + rows.length + ' registro(s)</span></div>';
@@ -179,6 +206,55 @@ Pages.configuracoes = {
     container.innerHTML = html;
   },
 
+  /**
+   * Painel "Banco de Dados" (exclusivo do ADM): mostra o nome e o link da
+   * planilha Google Sheets do sistema, com botão para abri-la em nova
+   * aba. As informações vêm de getDatabaseInfo (Services.gs), que
+   * revalida o perfil ADM no servidor, e são cacheadas em _dbInfo para
+   * não repetir a chamada a cada troca de seção.
+   * @param {HTMLElement} container - <div id="config-table">.
+   */
+  renderDatabasePanel: function(container) {
+    var self = this;
+
+    var desenhar = function(info) {
+      var html = '<div class="card-header"><div class="card-title">' +
+        '<span class="material-icons">storage</span>Banco de Dados</div></div>';
+      html += '<p style="font-size:13.5px;color:var(--text-secondary);margin-bottom:16px;">' +
+        'Planilha Google Sheets utilizada como base de dados do sistema. ' +
+        'Use o link abaixo para abri-la e editá-la manualmente quando necessário. ' +
+        'Seção visível apenas para o perfil ADM.</p>';
+      html += '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px;align-items:center;">';
+      html += '<strong>Planilha:</strong><span>' + App.escapeHtml(info.nome || '—') + '</span>';
+      html += '<strong>Link:</strong><span style="word-break:break-all;">' +
+        '<a href="' + App.escapeHtml(info.url || '#') + '" target="_blank" rel="noopener">' +
+        App.escapeHtml(info.url || '—') + '</a></span>';
+      html += '</div>';
+      html += '<div style="margin-top:18px;">' +
+        '<a class="btn btn-primary" href="' + App.escapeHtml(info.url || '#') + '" target="_blank" rel="noopener">' +
+        '<span class="material-icons">open_in_new</span> Abrir planilha</a></div>';
+      container.innerHTML = html;
+    };
+
+    // Reutiliza a resposta anterior (menos idas ao servidor).
+    if (self._dbInfo) {
+      desenhar(self._dbInfo);
+      return;
+    }
+
+    container.innerHTML = Components.emptyState('storage', 'Carregando informações da base de dados...');
+    google.script.run
+      .withSuccessHandler(function(info) {
+        self._dbInfo = info || {};
+        desenhar(self._dbInfo);
+      })
+      .withFailureHandler(function(error) {
+        container.innerHTML = Components.emptyState('error_outline',
+          'Não foi possível carregar as informações da base.', error.message);
+      })
+      .getDatabaseInfo();
+  },
+
   formatCell: function(value, field) {
     if (field.type === 'checkbox') {
       return value === true || String(value).toLowerCase() === 'true'
@@ -206,6 +282,7 @@ Pages.configuracoes = {
 
   openForm: function(index) {
     var meta = this.metadata[this.active];
+    if (meta.custom) return; // seções custom não têm formulário de registro
     var record = typeof index === 'number' ? (this.data[this.active] || [])[index] : {};
     var body = '<div class="config-form-grid">';
     var self = this;

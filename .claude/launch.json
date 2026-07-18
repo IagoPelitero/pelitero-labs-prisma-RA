@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tom-ai",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8123", "--directory", "C:/Users/iago2/OneDrive/Desktop/Tom-AI"],
+      "port": 8123
+    },
+    {
+      "name": "prisma-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8124", "--directory", "C:/Users/iago2/AppData/Local/Temp/claude/C--Users-iago2-OneDrive-Desktop-pelitero-labs-prisma-RA/3d2bec43-4a0b-4833-89e1-534f87aee413/scratchpad"],
+      "port": 8124
+    }
+  ]
+}

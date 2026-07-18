@@ -369,8 +369,14 @@ Pages.dashboard = {
       "Pages.dashboard.filtrarPorKpi('')");
     html += Components.kpiCard('hourglass_empty', App.formatNumber(cards.pendentes || 0), 'Pendentes', '#FF9800', null,
       "Pages.dashboard.filtrarPorKpi('Pendente')");
+    // O card "Em análise" traz uma descrição curta para eliminar dúvidas
+    // sobre o significado do status: o analista responsável já assumiu o
+    // atendimento e está trabalhando nele. Os status são mutuamente
+    // exclusivos (um atendimento tem sempre UM único status): ao mudar
+    // para Pendente, a marcação "Em análise" deixa de existir.
     html += Components.kpiCard('person_search', App.formatNumber(cards.emAnalise || 0), 'Em análise', '#2196F3', null,
-      "Pages.dashboard.filtrarPorKpi('Em análise')");
+      "Pages.dashboard.filtrarPorKpi('Em análise')",
+      'Casos atualmente em tratamento pelo analista responsável.');
     html += Components.kpiCard('check_circle', App.formatNumber(cards.concluidos || 0), 'Concluídos', '#43A047', null,
       "Pages.dashboard.filtrarPorKpi('Concluído')");
 

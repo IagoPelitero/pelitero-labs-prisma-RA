@@ -42,6 +42,17 @@
   --success-green: #43A047;
   --info-blue: #2196F3;
 
+  /* Aliases semânticos (correção de bug): o código das páginas usa
+     var(--danger), var(--warning), var(--success) e var(--surface), mas
+     essas variáveis nunca haviam sido definidas — asteriscos de campos
+     obrigatórios e feedbacks de CPF ficavam sem cor e botões caíam no
+     fallback branco no tema Dark. Os aliases apontam para as variáveis
+     reais e acompanham automaticamente a troca de temas. */
+  --danger: var(--error-red);
+  --warning: var(--warning-orange);
+  --success: var(--success-green);
+  --surface: var(--card-bg);
+
   /* Surfaces */
   --bg: #F5F7FA;
   --card-bg: #FFFFFF;
@@ -66,6 +77,10 @@
      fundo escuro (linhas alternadas preto/branco na tabela de
      atendimentos). Cada tema define o próprio valor. */
   --surface-muted: #FAFBFC;
+
+  /* Fundo dos overlays de carregamento (correção do tema Dark: o valor
+     era branco fixo e causava um "flash" claro sobre o fundo escuro). */
+  --overlay-bg: rgba(255, 255, 255, 0.88);
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
@@ -143,6 +158,8 @@ body[data-theme="dark"] {
   /* Zebra/superfícies sutis no Dark: tom levemente mais claro que o
      card (#1F2937), mantendo contraste confortável com o texto claro. */
   --surface-muted: #263243;
+  /* Overlay de carregamento escuro (sem flash branco no tema Dark). */
+  --overlay-bg: rgba(17, 24, 39, 0.88);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
   --shadow: 0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.4);
   --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.5), 0 2px 4px -1px rgba(0,0,0,0.4);
@@ -672,6 +689,17 @@ input, select, textarea, button {
   margin-top: 4px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
+}
+
+/* Descrição curta opcional exibida sob o rótulo de um KPI (ex.: card
+   "Em análise" do Dashboard — explica o significado do status). */
+.kpi-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .kpi-trend {
@@ -1211,7 +1239,7 @@ input, select, textarea, button {
 }
 
 .form-control:disabled {
-  background: #F9FAFB;
+  background: var(--surface-muted, #F9FAFB); /* acompanha o tema Dark */
   color: var(--text-muted);
   cursor: not-allowed;
 }
@@ -1649,7 +1677,7 @@ select.form-control {
 .loading-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(255,255,255,0.85);
+  background: var(--overlay-bg, rgba(255,255,255,0.85)); /* acompanha o tema Dark */
   backdrop-filter: blur(2px);
   display: flex;
   flex-direction: column;
@@ -1662,7 +1690,7 @@ select.form-control {
 .loading-overlay.global-loading {
   position: fixed;
   z-index: 99998;
-  background: rgba(255,255,255,0.9);
+  background: var(--overlay-bg, rgba(255,255,255,0.9)); /* acompanha o tema Dark */
 }
 
 .spinner {
@@ -1776,7 +1804,7 @@ select.form-control {
   margin-top: 8px;
   font-size: 12px;
   color: var(--text-secondary);
-  background: #F9FAFB;
+  background: var(--surface-muted, #F9FAFB); /* acompanha o tema Dark */
   padding: 8px 12px;
   border-radius: var(--radius-sm);
 }
@@ -2324,12 +2352,23 @@ select.form-control {
   margin-top: 2px;
 }
 
-/* Skeleton loading */
-.skeleton {
+/* Skeleton loading.
+   Correção de bug: as páginas usam a classe "skeleton-loading" (Dashboard,
+   Scripts, NovoAtendimento), mas só ".skeleton" estava estilizada — o
+   efeito de carregamento nunca aparecia. As duas classes agora compartilham
+   o mesmo estilo, com variante escura para o tema Dark. */
+.skeleton,
+.skeleton-loading {
   background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: var(--radius-sm);
+}
+
+body[data-theme="dark"] .skeleton,
+body[data-theme="dark"] .skeleton-loading {
+  background: linear-gradient(90deg, #1F2937 25%, #273244 50%, #1F2937 75%);
+  background-size: 200% 100%;
 }
 
 .skeleton-text {

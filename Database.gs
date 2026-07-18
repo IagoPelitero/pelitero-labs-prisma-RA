@@ -193,8 +193,13 @@ function migrateLegacyData_(ss) {
     }
   });
 
-  // 2) Ressemeia o catálogo de Produtos/Categorias (uma única vez por versão).
-  reseedCatalog_(ss);
+  // 2) POLÍTICA DE NÃO SOBRESCRITA (v4.3): o antigo "reseed" do catálogo
+  //    (que limpava as abas Produtos/Categorias e regravava os padrões a
+  //    cada versão) foi REMOVIDO. O sistema nunca sobrescreve dados já
+  //    existentes na planilha: os dados padrão (DEFAULT_*) são inseridos
+  //    por initializeSheets SOMENTE quando a aba está vazia. O que o
+  //    usuário escreveu ou editou manualmente no Google Sheets é sempre
+  //    preservado.
 
   // 3) Move os atendimentos legados para as abas por canal e normaliza status.
   migrateAtendimentosPorCanal_(ss);
@@ -436,78 +441,15 @@ function promoteFirstAdmin_() {
   }
 }
 
-/**
- * Substitui, uma única vez por versão de catálogo, o conteúdo das abas
- * Produtos e Categorias pelos padrões atuais (DEFAULT_PRODUTOS e
- * DEFAULT_CATEGORIAS em Config.gs) e normaliza os nomes de produto dos
- * atendimentos já gravados para o catálogo atual.
- * @param {Spreadsheet} ss - Planilha principal do sistema.
+/*
+ * v4.3 — funções reseedCatalog_ e normalizeProdutosAtendimentos_ REMOVIDAS.
+ * Elas limpavam as abas Produtos/Categorias (regravando os padrões a cada
+ * versão de catálogo) e reescreviam o nome do produto de atendimentos já
+ * gravados — ou seja, sobrescreviam dados que o usuário escreveu/editou
+ * manualmente no Google Sheets. Pela política de não sobrescrita, os dados
+ * padrão são gravados apenas em abas VAZIAS (initializeSheets) e nenhum
+ * conteúdo existente é alterado por rotinas automáticas de catálogo.
  */
-function reseedCatalog_(ss) {
-  const properties = PropertiesService.getScriptProperties();
-  const CATALOG_VERSION = '4.1.0';
-  if (properties.getProperty(PROPERTY_KEYS.CATALOG_VERSION) === CATALOG_VERSION) return;
-
-  const targets = [
-    { name: CONFIG.SHEET_NAMES.PRODUTOS,   columns: COLUMNS.PRODUTOS,   defaults: DEFAULT_PRODUTOS },
-    { name: CONFIG.SHEET_NAMES.CATEGORIAS, columns: COLUMNS.CATEGORIAS, defaults: DEFAULT_CATEGORIAS }
-  ];
-
-  targets.forEach(function(cfg) {
-    const sheet = ss.getSheetByName(cfg.name);
-    if (!sheet) return;
-    if (sheet.getLastRow() > 1) {
-      sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
-    }
-    const rows = cfg.defaults.map(function(item) {
-      return toRowArray(item, cfg.columns);
-    });
-    sheet.getRange(2, 1, rows.length, cfg.columns.length).setValues(rows);
-    invalidateCache(cfg.name);
-    Logger.log('Catálogo ressemeado: ' + cfg.name + ' (' + rows.length + ' registros)');
-  });
-
-  normalizeProdutosAtendimentos_(ss);
-  properties.setProperty(PROPERTY_KEYS.CATALOG_VERSION, CATALOG_VERSION);
-}
-
-/**
- * Ajusta os nomes de produto dos atendimentos existentes (nas abas por
- * canal) para o catálogo atual — ex.: nomes legados de "Conta Digital"
- * gravados antes do rebranding.
- * @param {Spreadsheet} ss - Planilha principal do sistema.
- */
-function normalizeProdutosAtendimentos_(ss) {
-  const contaNames = ['conta', 'conta digital'];
-  const cartaoNames = ['cartao', 'cartao de credito'];
-  const produtoIndex = COLUMNS.ATENDIMENTOS.indexOf('Produto');
-
-  CANAL_SHEETS.forEach(function(item) {
-    const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES[item.sheetKey]);
-    if (!sheet || sheet.getLastRow() <= 1) return;
-    const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
-    const rows = range.getValues();
-    let changed = false;
-
-    rows.forEach(function(row) {
-      const produto = normalizeText_(row[produtoIndex]);
-      if (!produto) return;
-      if (contaNames.indexOf(produto) !== -1 && row[produtoIndex] !== 'Conta Digital') {
-        row[produtoIndex] = 'Conta Digital';
-        changed = true;
-      } else if (cartaoNames.indexOf(produto) !== -1 && row[produtoIndex] !== 'Cartão de Crédito') {
-        row[produtoIndex] = 'Cartão de Crédito';
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      range.setValues(rows);
-      invalidateCache(sheet.getName());
-      Logger.log('Produtos normalizados em ' + sheet.getName() + ' para o catálogo atual.');
-    }
-  });
-}
 
 /**
  * Atualiza o esquema de uma aba preservando os dados pelas chaves do cabeçalho.
