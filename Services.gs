@@ -37,6 +37,57 @@
 var SERVICE_CONTEXT_ = {};
 
 // ============================================================================
+// AUTENTICAÇÃO POR E-MAIL (v4.5 — sem login/senha)
+// ============================================================================
+/*
+ * Por que existe: o Web App é implantado como "Executar como: eu" para a
+ * planilha permanecer privada do dono. Nesse modo o Google normalmente não
+ * revela a identidade dos visitantes — mas, para este sistema, a implantação
+ * exige que o próprio usuário conceda acesso (executar como usuário
+ * acessando), então Session.getActiveUser() sempre traz o e-mail de quem
+ * está usando o app. requireAuth_ cruza esse e-mail com a aba Usuários:
+ * se existir um cadastro ATIVO, o acesso é liberado e nome/perfil/equipe
+ * são carregados automaticamente; caso contrário, o acesso é bloqueado.
+ * Não há login, senha, hash ou token de sessão — a identidade é sempre a
+ * da conta Google autenticada.
+ */
+
+/**
+ * Barreira de autenticação de TODAS as funções públicas: resolve o usuário
+ * pelo e-mail da conta Google autenticada, consultando a aba Usuários.
+ * Sem e-mail cadastrado e ativo, a execução é interrompida. O ator
+ * resolvido fica em SERVICE_CONTEXT_ e passa a ser retornado por
+ * getActor_ no restante da execução.
+ * @returns {Object} Ator autenticado { id, email, nome, perfil, equipe }.
+ * @throws {Error} 'AUTH: ...' quando o e-mail não está cadastrado/ativo.
+ */
+function requireAuth_() {
+  ensureDatabaseReady();
+  if (SERVICE_CONTEXT_.actor && SERVICE_CONTEXT_.authenticated) return SERVICE_CONTEXT_.actor;
+
+  let email = '';
+  try { email = Session.getActiveUser().getEmail() || ''; } catch (e) { email = ''; }
+
+  const user = email ? getAll(CONFIG.SHEET_NAMES.USUARIOS).find(function(item) {
+    return normalizeText_(item.Email) === normalizeText_(email) && isTrue_(item.Ativo);
+  }) : null;
+
+  if (!user) {
+    throw new Error('AUTH: este e-mail não está autorizado a utilizar o sistema. Peça ao administrador para cadastrá-lo em Configurações > Usuários.');
+  }
+
+  SERVICE_CONTEXT_.actor = {
+    id: String(user.Id || ''),
+    email: String(user.Email || email || ''),
+    nome: String(user.Nome || ''),
+    perfil: String(user.Perfil || 'Analista'),
+    equipe: String(user.Equipe || '')
+  };
+  SERVICE_CONTEXT_.authenticated = true;
+  return SERVICE_CONTEXT_.actor;
+}
+
+// ============================================================================
 // INICIALIZAÇÃO E DADOS DE APOIO
 // ============================================================================
 
@@ -47,7 +98,7 @@ var SERVICE_CONTEXT_ = {};
  * CANAIS (v4.2 — administráveis pelo ADM) vêm da planilha.
  */
 function getBootstrapData() {
-  ensureDatabaseReady();
+  requireAuth_();
 
   const produtos = activeSorted_(CONFIG.SHEET_NAMES.PRODUTOS);
   const categorias = activeSorted_(CONFIG.SHEET_NAMES.CATEGORIAS);
@@ -142,14 +193,14 @@ function getCanaisAtivos_() {
  * @returns {Object|null} { atendimento, timeline } ou null.
  */
 function getAtendimento(id) {
-  ensureDatabaseReady();
+  requireAuth_();
   const found = findAtendimento_(sanitizeInput(id));
   if (!found || isTrue_(found.record.Excluido)) return null;
   if (!canAccessAtendimento_(found.record, getActor_())) return null;
 
   return {
     atendimento: toClientAtendimento_(found.record, getStatusColorMap_()),
-    timeline: getTimeline(id)
+    timeline: getTimelineInterna_(id)
   };
 }
 
@@ -162,7 +213,7 @@ function getAtendimento(id) {
  * @returns {Object} { duplicado: boolean }.
  */
 function verificarProtocoloDuplicado(protocolo, ignorarId) {
-  ensureDatabaseReady();
+  requireAuth_();
   const normalized = normalizeText_(protocolo);
   if (!normalized) return { duplicado: false };
   const safeId = sanitizeInput(ignorarId);
@@ -187,7 +238,7 @@ function verificarProtocoloDuplicado(protocolo, ignorarId) {
  *   { duplicado: true, cpf, analista, dataRegistro (ISO) }.
  */
 function verificarCpfDuplicado(cpf, ignorarId) {
-  ensureDatabaseReady();
+  requireAuth_();
   const digitos = String(cpf || '').replace(/\D/g, '');
   if (digitos.length !== 11) return { duplicado: false };
   const safeId = sanitizeInput(ignorarId);
@@ -328,7 +379,7 @@ function sortClientRecords_(records, order) {
  * @returns {Object} { success, id } do atendimento criado.
  */
 function salvarAtendimento(dados) {
-  ensureDatabaseReady();
+  requireAuth_();
   const input = validateAtendimentoInput_(dados || {});
 
   const actor = getActor_();
@@ -388,7 +439,7 @@ function salvarAtendimento(dados) {
  * @returns {Object} { success, id }.
  */
 function atualizarAtendimento(id, dados, justificativa) {
-  ensureDatabaseReady();
+  requireAuth_();
   const safeId = sanitizeInput(id);
   const found = findAtendimento_(safeId);
   if (!found || isTrue_(found.record.Excluido)) throw new Error('Atendimento não encontrado.');
@@ -467,7 +518,7 @@ function atualizarAtendimento(id, dados, justificativa) {
  * Supervisor). Não exige justificativa e altera apenas Status + Situação.
  */
 function alterarStatusAtendimento(id, status, situacao) {
-  ensureDatabaseReady();
+  requireAuth_();
   const safeId = sanitizeInput(id);
   const found = findAtendimento_(safeId);
   if (!found || isTrue_(found.record.Excluido)) throw new Error('Atendimento não encontrado.');
@@ -515,7 +566,7 @@ function alterarStatusAtendimento(id, status, situacao) {
  * @returns {Object} { success } ou { success: false, message }.
  */
 function excluirAtendimento(id) {
-  ensureDatabaseReady();
+  requireAuth_();
   const safeId = sanitizeInput(id);
   const found = findAtendimento_(safeId);
   if (!found || isTrue_(found.record.Excluido)) return { success: false, message: 'Atendimento não encontrado.' };
@@ -559,7 +610,7 @@ function excluirAtendimento(id) {
  * @returns {Object} { success }.
  */
 function adicionarObservacao(atendimentoId, texto) {
-  ensureDatabaseReady();
+  requireAuth_();
   const id = sanitizeInput(atendimentoId);
   const observation = sanitizeInput(texto);
   if (!observation) throw new Error('A observação não pode ficar vazia.');
@@ -854,7 +905,18 @@ function getStatusColorMap_() {
  * @returns {Object[]} Eventos da timeline.
  */
 function getTimeline(atendimentoId) {
-  ensureDatabaseReady();
+  requireAuth_();
+  return getTimelineInterna_(atendimentoId);
+}
+
+/**
+ * Implementação da consulta de timeline, compartilhada entre a função
+ * pública getTimeline (com autenticação) e chamadas internas do servidor
+ * (ex.: getAtendimento, que já autenticou o usuário).
+ * @param {string} atendimentoId - Id do atendimento.
+ * @returns {Object[]} Eventos da timeline.
+ */
+function getTimelineInterna_(atendimentoId) {
   const id = sanitizeInput(atendimentoId);
   return getByField(CONFIG.SHEET_NAMES.TIMELINE, 'AtendimentoId', id)
     .sort(function(a, b) {
@@ -945,7 +1007,7 @@ function buildChangeHistory_(atendimentoId, oldRecord, updates, userName, justif
  * carregamento em sequência.
  */
 function getDashboardData() {
-  ensureDatabaseReady();
+  requireAuth_();
   const actor = getActor_();
   const raw = restrictToOwnerIfNeeded_(getActiveAtendimentos_(), actor);
   const records = decorateAtendimentos_(raw);
@@ -1019,7 +1081,7 @@ function getDashboardData() {
  * @returns {Object[]} Atendimentos no formato do frontend.
  */
 function getRelatorio(filtros) {
-  ensureDatabaseReady();
+  requireAuth_();
   const actor = getActor_();
   return decorateAtendimentos_(
     applyAtendimentoFilters_(restrictToOwnerIfNeeded_(getActiveAtendimentos_(), actor), filtros || {})
@@ -1036,7 +1098,7 @@ function getRelatorio(filtros) {
  * @returns {Object} { entities, user }.
  */
 function getConfiguracoes() {
-  ensureDatabaseReady();
+  requireAuth_();
   requireSupervisor_();
   const isAdmin = isAdminProfile_(getActor_().perfil);
   const entities = getConfigurationEntities_();
@@ -1044,7 +1106,9 @@ function getConfiguracoes() {
   Object.keys(entities).forEach(function(key) {
     // Gestão de usuários e dos campos do formulário são exclusivas do ADM.
     if (entities[key].adminOnly && !isAdmin) return;
-    result[key] = getAll(entities[key].sheet).map(serializeRecord_);
+    result[key] = getAll(entities[key].sheet).map(function(row) {
+      return serializeRecord_(row);
+    });
   });
   return { entities: result, user: getActor_() };
 }
@@ -1059,7 +1123,7 @@ function getConfiguracoes() {
  * @returns {Object} { success, id }.
  */
 function salvarConfiguracao(entidade, dados, id) {
-  ensureDatabaseReady();
+  requireAuth_();
   requireSupervisor_();
   const entities = getConfigurationEntities_();
   const meta = entities[sanitizeInput(entidade)];
@@ -1085,8 +1149,14 @@ function salvarConfiguracao(entidade, dados, id) {
   } else if (!record.Nome) {
     throw new Error('Nome é obrigatório.');
   }
-  if (meta.key === 'usuarios' && record.Email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.Email)) {
-    throw new Error('E-mail inválido.');
+  // v4.5: o e-mail é a única credencial de acesso (requireAuth_ cruza a
+  // conta Google autenticada com este campo) — precisa existir, ter
+  // formato válido e ser único entre os usuários ativos.
+  if (meta.key === 'usuarios') {
+    if (!record.Email) throw new Error('E-mail é obrigatório.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.Email)) {
+      throw new Error('E-mail inválido.');
+    }
   }
   if (meta.key === 'usuarios' && ['Analista', 'Supervisor', 'ADM'].indexOf(record.Perfil) === -1) {
     throw new Error('Perfil de usuário inválido.');
@@ -1120,6 +1190,17 @@ function salvarConfiguracao(entidade, dados, id) {
       normalizeText_(exists.Perfil) === 'adm' &&
       (!isTrue_(record.Ativo) || normalizeText_(record.Perfil) !== 'adm')) {
     assertAnotherAdmin_(recordId);
+  }
+  // v4.5: e-mail único entre os usuários ATIVOS — evita ambiguidade na
+  // autenticação (requireAuth_ resolve o ator pelo e-mail da conta Google).
+  if (meta.key === 'usuarios' && record.Email && isTrue_(record.Ativo)) {
+    const emailNormalizado = normalizeText_(record.Email);
+    const emailDuplicado = getAll(CONFIG.SHEET_NAMES.USUARIOS).some(function(user) {
+      return String(user.Id) !== String(recordId || '') &&
+        isTrue_(user.Ativo) &&
+        normalizeText_(user.Email) === emailNormalizado;
+    });
+    if (emailDuplicado) throw new Error('Já existe um usuário ativo com este e-mail.');
   }
   if (meta.key === 'camposFormulario') {
     if (exists) {
@@ -1171,7 +1252,7 @@ function salvarConfiguracao(entidade, dados, id) {
  * @returns {Object} { success }.
  */
 function excluirConfiguracao(entidade, id) {
-  ensureDatabaseReady();
+  requireAuth_();
   requireSupervisor_();
   const entities = getConfigurationEntities_();
   const meta = entities[sanitizeInput(entidade)];
@@ -1226,7 +1307,7 @@ function excluirConfiguracao(entidade, id) {
  * @returns {Object} { nome, url } da planilha vinculada ao sistema.
  */
 function getDatabaseInfo() {
-  ensureDatabaseReady();
+  requireAuth_();
   requireAdmin_();
   const ss = getSpreadsheet();
   return { nome: ss.getName(), url: ss.getUrl() };
@@ -1405,21 +1486,26 @@ function getActor_() {
   if (SERVICE_CONTEXT_.actor) return SERVICE_CONTEXT_.actor;
   let email = '';
   try {
-    email = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || '';
+    // Identidade SOMENTE pelo usuário que está acessando. O antigo
+    // complemento com getEffectiveUser() foi removido de propósito: em
+    // implantações "Executar como: eu", ele devolve o e-mail do DONO do
+    // script para qualquer visitante — inclusive anônimos com o link —
+    // fazendo qualquer pessoa ser tratada como o ADM.
+    email = Session.getActiveUser().getEmail() || '';
   } catch (e) {
     email = '';
   }
   const users = getAll(CONFIG.SHEET_NAMES.USUARIOS);
-  let user = users.find(function(item) {
+  const user = users.find(function(item) {
     return normalizeText_(item.Email) === normalizeText_(email) && isTrue_(item.Ativo);
   });
-  if (!user && !email) {
-    user = users.find(function(item) { return isTrue_(item.Ativo); });
-  }
+  // Quem não foi identificado (ou não está na aba Usuários) NUNCA assume
+  // um usuário real da base: entra como Visitante sem privilégios — não
+  // enxerga atendimentos de terceiros nem acessa Configurações.
   SERVICE_CONTEXT_.actor = {
     id: user ? String(user.Id || '') : '',
     email: email,
-    nome: user ? String(user.Nome || '') : (email ? email.split('@')[0] : 'Usuário'),
+    nome: user ? String(user.Nome || '') : (email ? email.split('@')[0] : 'Visitante'),
     perfil: user ? String(user.Perfil || 'Analista') : 'Analista',
     equipe: user ? String(user.Equipe || '') : ''
   };

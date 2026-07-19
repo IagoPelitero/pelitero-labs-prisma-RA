@@ -1151,6 +1151,24 @@ input, select, textarea, button {
   color: #B3261E;
 }
 
+/* Variantes Dark dos chips de idade: os fundos pastéis claros acima viram
+   manchas brancas sobre a tabela escura; aqui usam tons escuros da mesma
+   família, mantendo a leitura semafórica (neutro / atenção / crítico). */
+body[data-theme="dark"] .idade-recente {
+  background: #2A3441;
+  color: #B7C0CC;
+}
+
+body[data-theme="dark"] .idade-atencao {
+  background: #3D2E12;
+  color: #FFB74D;
+}
+
+body[data-theme="dark"] .idade-critica {
+  background: #3E1F1D;
+  color: #EF9A9A;
+}
+
 /* ── KPI clicável ──
    Indica interatividade (cursor + leve elevação no hover). */
 .kpi-card.kpi-clickable {
@@ -2477,7 +2495,7 @@ body[data-theme="dark"] .skeleton-loading {
 
 .btn-action:hover {
   background: var(--light-blue);
-  border-color: #b9d8ff;
+  border-color: var(--secondary-blue);
   transform: translateY(-1px);
 }
 
@@ -2522,6 +2540,56 @@ body[data-theme="dark"] .skeleton-loading {
 
 .config-nav-item:hover { background: var(--light-blue); color: var(--primary-blue); }
 .config-nav-item.active { background: var(--primary-blue); color: #fff; }
+
+/* ── Tela de bloqueio de acesso (v4.5 — autenticação por e-mail) ──
+   Cobre a aplicação inteira quando o e-mail da conta Google não está
+   cadastrado/ativo na aba Usuários. Usa apenas variáveis de tema, então
+   funciona nos quatro temas (inclusive Dark). */
+.access-denied-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.access-denied-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  padding: 34px 32px;
+  width: min(92vw, 380px);
+  text-align: center;
+}
+
+.access-denied-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: var(--sidebar-bg);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 19px;
+  margin: 0 auto 14px;
+}
+
+.access-denied-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.access-denied-message {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
 .config-nav-item .material-icons { font-size: 19px; }
 
 .config-count {

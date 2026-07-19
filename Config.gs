@@ -33,7 +33,7 @@
 // CONFIGURAÇÕES GERAIS DO SISTEMA
 // ============================================================================
 const CONFIG = {
-  SCHEMA_VERSION: '4.2.0',
+  SCHEMA_VERSION: '4.4.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
   SHEET_NAMES: {
     // Abas de atendimento separadas por canal. A aba legada "Atendimentos"

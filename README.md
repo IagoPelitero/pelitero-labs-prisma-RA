@@ -49,6 +49,50 @@ de auditoria completa.
   no tema escuro; agora a cor vem da variável de tema `--surface-muted`, com
   contraste adequado em todos os temas.
 
+### Novidades da v4.5
+
+- **Autenticação simplificada: somente e-mail, sem login nem senha**. A tela de
+  login própria (e-mail + senha) introduzida na v4.4 foi **removida**: o sistema
+  não pede mais senha em nenhum momento. O acesso é resolvido automaticamente
+  a partir do e-mail da conta Google que abriu o Web App
+  (`Session.getActiveUser()`), cruzado com a aba **Usuários**. Se o e-mail
+  estiver cadastrado e **Ativo**, o acesso é liberado e nome, perfil e equipe
+  são carregados automaticamente; caso contrário, o sistema bloqueia o acesso e
+  mostra uma tela informando que o e-mail não está autorizado. Veja a seção
+  [Controle de usuários](#controle-de-usuários) para o fluxo completo;
+- **Limpeza de código morto da v4.4**: removidas as funções `login()` e
+  `logout()`, o hash de senha (`hashSenha_`), a coluna `SenhaHash` da aba
+  Usuários, o token de sessão no `CacheService`, o bloqueio por tentativas de
+  login e todo o HTML/CSS/JS da tela de login e do botão "Sair" (não há mais
+  sessão local para encerrar — o acesso segue sempre a conta Google atual);
+  o campo **E-mail** da aba Usuários passou a ser **obrigatório e único** entre
+  usuários ativos, já que é a única credencial de acesso;
+- O **controle de permissões por perfil (ADM/Supervisor/Analista) não foi
+  alterado** — apenas a forma de identificar o usuário mudou.
+
+### Novidades da v4.4 *(login por senha — removido na v4.5)*
+
+- **Login próprio com senha (proteção contra visitantes com o link)**: o sistema
+  agora possui **tela de login** (e-mail + senha) validada contra a aba Usuários.
+  O ADM define/troca a senha de cada usuário em **Configurações → Usuários**
+  (campo "Senha de acesso"); a planilha guarda apenas o **hash SHA-256 com salt**
+  (coluna `SenhaHash`), nunca a senha em texto. O login emite um **token de sessão**
+  (CacheService, 6h renováveis a cada uso) enviado em **todas** as chamadas ao
+  servidor — quem tem apenas o link não passa da tela de login, e chamadas
+  diretas às funções do servidor também são bloqueadas (`requireAuth_`).
+  Proteções extras: bloqueio temporário após 8 tentativas de login em 15 minutos,
+  botão **Sair** no cabeçalho e sessão encerrada quando o usuário é desativado.
+  Quem o Google já identifica (o dono do script ou o menu da planilha) entra
+  automaticamente, sem senha. A planilha **não precisa ser compartilhada** com os
+  usuários — o app continua implantado como "Executar como: eu";
+- **Correção de segurança (identidade)**: visitantes não identificados deixaram de
+  herdar o e-mail do dono (`getEffectiveUser`) ou o primeiro usuário ativo da aba
+  Usuários — sem sessão válida, nada é acessível;
+- **Tema Dark consistente**: os gráficos dos Indicadores são redesenhados na troca
+  de tema (sem sair da tela), os chips de idade do atendimento ganharam variantes
+  escuras e o hover dos botões de ação usa cor da paleta do tema.
+
+
 ### Novidades da v4.3
 
 - **Política de não sobrescrita dos dados do Sheets**: o sistema **nunca
@@ -256,9 +300,80 @@ justificativa obrigatória em edições pelo formulário.
 
 ## Controle de usuários
 
-A identificação é automática: o e-mail da sessão Google (`Session.getActiveUser()`) é
-cruzado com a aba **Usuários**. Não há tela de login. Todas as regras são aplicadas
-**no backend**, não apenas escondidas na interface.
+### Fluxo de autenticação (exclusivamente por e-mail)
+
+Não existe tela de login, campo de senha ou qualquer credencial digitada pelo
+usuário. Todo acesso é resolvido automaticamente pelo servidor, a cada chamada:
+
+1. O usuário abre a URL do Web App logado com sua conta Google;
+2. O servidor obtém esse e-mail com `Session.getActiveUser().getEmail()`
+   (função `requireAuth_`, em [Services.gs](Services.gs));
+3. O e-mail é comparado (sem diferenciar maiúsculas/acentos) com a coluna
+   `Email` da aba **Usuários**;
+4. **Se existir um cadastro com esse e-mail e `Ativo = Verdadeiro`**: o acesso é
+   liberado e o sistema carrega automaticamente **Nome**, **Perfil** e
+   **Equipe** desse usuário (`getActor_`), aplicando as permissões do perfil
+   em todas as telas e funções;
+5. **Se não existir cadastro (ou o usuário estiver inativo)**: o acesso é
+   **bloqueado** — a interface nunca chega a ser desenhada e o sistema exibe a
+   tela "Acesso não autorizado", informando que o e-mail precisa ser cadastrado
+   pelo administrador.
+
+Essa barreira (`requireAuth_`) é aplicada em **todas** as funções públicas do
+servidor, não apenas na tela inicial: mesmo uma chamada direta a uma função do
+backend (fora da interface) é bloqueada para quem não está cadastrado/ativo.
+
+### Requisitos para acessar o sistema
+
+- Ter uma conta Google válida (a mesma usada para abrir a URL do Web App);
+- Essa conta precisar estar **cadastrada na aba Usuários** com o e-mail exato;
+- O cadastro precisa estar com **Ativo = Verdadeiro**;
+- O Web App precisa estar implantado com **"Executar como: usuário que
+  acessa"** (veja [Como executar](#como-executar)) — é isso que permite ao
+  servidor identificar o e-mail de cada visitante.
+
+### Como cadastrar um novo usuário
+
+1. Entrar no sistema com uma conta **ADM**;
+2. Abrir **Configurações → Usuários e responsáveis**;
+3. Clicar em **"+ Novo registro"** e preencher:
+   - **Nome** (obrigatório);
+   - **E-mail** (obrigatório e único entre usuários ativos — é a credencial de
+     acesso);
+   - **Perfil**: Analista, Supervisor ou ADM (obrigatório);
+   - **Equipe** (opcional, informativo);
+   - **Ativo**: marcado para liberar o acesso imediatamente;
+4. Salvar. A partir desse momento, a pessoa dona daquele e-mail já consegue
+   abrir o sistema com sua própria conta Google — sem nenhuma senha a definir.
+
+### Como alterar permissões (perfil) de um usuário
+
+1. Entrar como **ADM** e abrir **Configurações → Usuários e responsáveis**;
+2. Clicar em **Editar** (✏️) no usuário desejado;
+3. Alterar o campo **Perfil** para o novo nível de acesso e salvar;
+4. A alteração vale imediatamente na próxima ação do usuário (o sistema
+   revalida o perfil a cada chamada ao servidor, nunca confia em um valor
+   antigo guardado no navegador).
+
+Para **revogar o acesso** de alguém, basta desmarcar **Ativo** — é esse campo
+que efetivamente bloqueia o acesso, independentemente do Perfil configurado.
+O sistema impede desativar/rebaixar o **último ADM ativo**, para nunca ficar
+sem administrador.
+
+### Estrutura da planilha (aba Usuários)
+
+| Coluna | Obrigatório | Descrição |
+| --- | :-: | --- |
+| `Id` | automático | Identificador único gerado pelo sistema. |
+| `Nome` | ✅ | Nome exibido no cabeçalho e nas listas de responsáveis. |
+| `Email` | ✅ (único entre ativos) | **Única credencial de acesso** — precisa ser idêntico ao e-mail da conta Google do usuário. |
+| `Perfil` | ✅ | `Analista`, `Supervisor` ou `ADM`. |
+| `Equipe` | opcional | Campo informativo (não afeta permissões). |
+| `Ativo` | ✅ | `Verdadeiro`/`Falso` — controla se o e-mail consegue acessar o sistema. |
+| `DataCadastro` | automático | Data de criação do registro. |
+| `UltimoAcesso` | automático | Não é mais atualizada (não há sessão a registrar); mantida por compatibilidade com instalações antigas. |
+
+### Perfis disponíveis e o que cada um acessa
 
 | Capacidade | ADM | Supervisor | Analista |
 | --- | :-: | :-: | :-: |
@@ -274,7 +389,9 @@ cruzado com a aba **Usuários**. Não há tela de login. Todas as regras são ap
 | **Ver link da base de dados (Banco de Dados)** | ✅ | ❌ | ❌ |
 
 O primeiro usuário é criado automaticamente como **ADM** e o sistema impede a
-desativação/demoção do último ADM ativo.
+desativação/demoção do último ADM ativo. Todas as regras acima são aplicadas
+**no backend** (`getActor_`, `canAccessAtendimento_`, `requireSupervisor_`,
+`requireAdmin_`) — esconder um botão na interface nunca é a única barreira.
 
 ---
 
@@ -310,6 +427,10 @@ removido nesta versão.
 
 ## Segurança
 
+- **Autenticação por e-mail (`requireAuth_`)**: toda função pública exige um
+  e-mail cadastrado e ativo na aba Usuários — sem cadastro, a execução é
+  interrompida antes de tocar em qualquer dado (veja
+  [Controle de usuários](#controle-de-usuários));
 - **Permissões no servidor**: toda função pública de `Services.gs` revalida o perfil do
   usuário (`getActor_`, `canAccessAtendimento_`, `requireSupervisor_`, `requireAdmin_`)
   — esconder um botão no frontend nunca é a única barreira;

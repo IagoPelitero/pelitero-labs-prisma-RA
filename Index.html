@@ -101,6 +101,21 @@
     </div>
   </div>
 
+  <!-- v4.5: tela de bloqueio exibida quando o e-mail da conta Google que
+       acessa o sistema não está cadastrado (ou não está ativo) na aba
+       Usuários. Não há login nem senha — o acesso é liberado ou negado
+       automaticamente a partir do e-mail autenticado pelo Google. -->
+  <div id="access-denied-overlay" class="access-denied-overlay" style="display:none;">
+    <div class="access-denied-card">
+      <div class="access-denied-logo">RA</div>
+      <div class="access-denied-title">Acesso não autorizado</div>
+      <p class="access-denied-message" id="access-denied-message">
+        Este e-mail não possui autorização para utilizar o sistema. Peça ao
+        administrador para cadastrá-lo em Configurações &gt; Usuários.
+      </p>
+    </div>
+  </div>
+
   <div id="modal-container"></div>
   <div id="toast-container" class="toast-container"></div>
   <div id="global-loading" class="loading-overlay global-loading" style="display:none;">

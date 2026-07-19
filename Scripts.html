@@ -57,6 +57,13 @@ var App = {
       if (!Pages[initial] && initial !== 'novoAtendimento') initial = 'dashboard';
       App.navigateTo(initial, {}, true);
     }, function(error) {
+      // v4.5: e-mail não cadastrado/ativo na aba Usuários — o sistema não
+      // inicia e mostra a mensagem de acesso não autorizado no lugar do
+      // erro genérico (requireAuth_ lança 'AUTH: ...' em Services.gs).
+      if (App.isAuthError(error)) {
+        App.showAccessDenied(error && error.message);
+        return;
+      }
       var container = document.getElementById('app');
       container.innerHTML = Components.emptyState(
         'error_outline',
@@ -87,7 +94,11 @@ var App = {
   },
 
   // Liga (uma única vez) os cliques da "casca" fixa: menu lateral e resize.
+  // O guarda _shellBound evita listeners duplicados caso App.init seja
+  // chamado mais de uma vez na mesma sessão do navegador.
   bindShell: function() {
+    if (this._shellBound) return;
+    this._shellBound = true;
     var sidebar = document.getElementById('sidebar');
     if (sidebar) {
       sidebar.addEventListener('click', function(event) {
@@ -202,6 +213,30 @@ var App = {
     } catch (e) {}
   },
 
+  // ── Autenticação por e-mail (v4.5 — sem login/senha) ──
+  // A identidade do usuário vem sempre da conta Google autenticada
+  // (Session.getActiveUser() no servidor); não há token, sessão local
+  // nem tela de login. requireAuth_ (Services.gs) barra toda função
+  // pública quando o e-mail não está cadastrado/ativo na aba Usuários,
+  // lançando um erro com o prefixo "AUTH:".
+  isAuthError: function(error) {
+    return /AUTH:/.test(String((error && error.message) || error || ''));
+  },
+
+  // Mostra a tela de acesso não autorizado e limpa o conteúdo por trás
+  // (nada fica visível para quem não está cadastrado no sistema).
+  showAccessDenied: function(message) {
+    var overlay = document.getElementById('access-denied-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    var app = document.getElementById('app');
+    if (app) app.innerHTML = '';
+    var feedback = document.getElementById('access-denied-message');
+    if (feedback) {
+      feedback.textContent = message || 'Este e-mail não possui autorização para utilizar o sistema.';
+    }
+  },
+
   // ── Sistema de Temas ──
   // Temas disponíveis (definidos em Styles.html via body[data-theme=...]).
   // O tema "azul" é o padrão e não usa atributo.
@@ -222,6 +257,13 @@ var App = {
     try { localStorage.setItem('prisma-ra-theme', theme); } catch (e) {}
     var select = document.getElementById('theme-select');
     if (select && select.value !== theme) select.value = theme;
+    // Gráficos já desenhados guardam as cores do tema anterior; se a tela
+    // de Indicadores estiver aberta, redesenha para acompanhar o novo tema
+    // (renderCharts relê as variáveis CSS atuais).
+    if (window.Pages && Pages.indicadores && Pages.indicadores.state &&
+        Object.keys(Pages.indicadores.state.charts || {}).length > 0) {
+      try { Pages.indicadores.renderCharts(); } catch (e) {}
+    }
   },
 
   // Restaura o último tema utilizado (padrão: azul) e liga o seletor
@@ -247,7 +289,11 @@ var App = {
   },
 
   // Relógio/data do cabeçalho, atualizado a cada 30 segundos.
+  // O guarda _clockStarted evita intervalos duplicados quando App.init
+  // roda de novo após o login (v4.4).
   startClock: function() {
+    if (this._clockStarted) return;
+    this._clockStarted = true;
     var update = function() {
       var now = new Date();
       var date = document.getElementById('header-date');

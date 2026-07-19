@@ -70,7 +70,10 @@ Pages.configuracoes = {
       label: 'Usuários e responsáveis', icon: 'group', adminOnly: true,
       fields: [
         { key: 'Nome', label: 'Nome', required: true },
-        { key: 'Email', label: 'E-mail', type: 'email' },
+        // v4.5: o e-mail é a ÚNICA credencial de acesso — sem login/senha,
+        // o sistema autentica quem acessa cruzando a conta Google com este
+        // campo (requireAuth_ em Services.gs). Por isso é obrigatório.
+        { key: 'Email', label: 'E-mail', type: 'email', required: true },
         { key: 'Perfil', label: 'Perfil', type: 'select', options: ['Analista', 'Supervisor', 'ADM'], required: true },
         { key: 'Equipe', label: 'Equipe' },
         { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true }
@@ -338,6 +341,7 @@ Pages.configuracoes = {
     }
     var type = field.type || 'text';
     return '<input class="form-control" id="cfg-' + field.key + '" type="' + type + '" value="' + safeValue + '"' +
+      (field.placeholder ? ' placeholder="' + field.placeholder + '"' : '') +
       (field.step ? ' step="' + field.step + '"' : '') + (field.required ? ' required' : '') + '>';
   },
 
