@@ -33,7 +33,12 @@
 // CONFIGURAÇÕES GERAIS DO SISTEMA
 // ============================================================================
 const CONFIG = {
-  SCHEMA_VERSION: '4.4.0',
+  // v4.6: Subcategorias (nova aba + coluna Subcategoria nos atendimentos +
+  // campo no formulário). O bump de versão dispara a migração automática de
+  // esquema (ensureSheetSchema_/migrateLegacyData_), que PRESERVA todos os
+  // dados existentes: valores são remapeados pelo NOME do cabeçalho e a
+  // coluna nova nasce vazia nos registros antigos.
+  SCHEMA_VERSION: '4.6.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
   SHEET_NAMES: {
     // Abas de atendimento separadas por canal. A aba legada "Atendimentos"
@@ -49,7 +54,10 @@ const CONFIG = {
     HISTORICO: 'Histórico',
     USUARIOS: 'Usuários',
     PRODUTOS: 'Produtos',
-    CATEGORIAS: 'Categorias'
+    CATEGORIAS: 'Categorias',
+    // v4.6: subcategorias vinculadas às categorias (Produto → Categoria →
+    // Subcategoria), administráveis pela tela de Configurações.
+    SUBCATEGORIAS: 'Subcategorias'
   },
   // Nome da aba legada (pré-v4), usada apenas pela migração.
   LEGACY_ATENDIMENTOS_SHEET: 'Atendimentos',
@@ -88,6 +96,7 @@ const COLUMNS = {
     'CPF',
     'Produto',
     'Categoria',
+    'Subcategoria',      // v4.6: novo nível de classificação (vazio nos registros antigos)
     'Status',            // Pendente | Concluído
     'MotivoPendencia',   // Situação da pendência (apenas quando Pendente)
     'Responsavel',
@@ -112,7 +121,8 @@ const COLUMNS = {
     'Obrigatorio',  // Sim/Não
     'Ordem',
     'Base',         // true = mapeia coluna fixa; false = gravado em CamposExtras
-    'Bloqueado'     // true = não pode ser ocultado nem tornado opcional (ex: Canal)
+    'Bloqueado',    // true = não pode ser ocultado nem tornado opcional (ex: Canal)
+    'Opcoes'        // v4.6: opções dos seletores personalizados (separadas por ";")
   ],
   TIMELINE: [
     'Id',
@@ -165,6 +175,16 @@ const COLUMNS = {
     'ProdutoId',
     'Nome',
     'Descricao',
+    'Ativo',
+    'Ordem'
+  ],
+  // v4.6: subcategorias vinculadas a uma categoria (CategoriaId), fechando a
+  // hierarquia Produto → Categoria → Subcategoria. Mesmo padrão Id/Nome/
+  // Ativo/Ordem das demais entidades administráveis.
+  SUBCATEGORIAS: [
+    'Id',
+    'CategoriaId',
+    'Nome',
     'Ativo',
     'Ordem'
   ]
@@ -255,15 +275,18 @@ const DEFAULT_CANAIS = [
  * o atendimento é gravado, por isso é sempre obrigatório).
  */
 const DEFAULT_CONFIG_CAMPOS = [
-  { Id: 'FC001', Campo: 'dataAbertura', Rotulo: 'Data',            Tipo: 'date',     Exibir: true,  Obrigatorio: true,  Ordem: 1, Base: true,  Bloqueado: false },
-  { Id: 'FC002', Campo: 'numeroRA',     Rotulo: 'Protocolo',       Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 2, Base: true,  Bloqueado: false },
-  { Id: 'FC003', Campo: 'cliente',      Rotulo: 'Nome do cliente', Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 3, Base: true,  Bloqueado: false },
-  { Id: 'FC004', Campo: 'cpf',          Rotulo: 'CPF',             Tipo: 'cpf',      Exibir: true,  Obrigatorio: true,  Ordem: 4, Base: true,  Bloqueado: false },
-  { Id: 'FC005', Campo: 'produto',      Rotulo: 'Produto',         Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 5, Base: true,  Bloqueado: false },
-  { Id: 'FC006', Campo: 'categoria',    Rotulo: 'Categoria',       Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 6, Base: true,  Bloqueado: false },
-  { Id: 'FC007', Campo: 'canal',        Rotulo: 'Canal',           Tipo: 'select',   Exibir: true,  Obrigatorio: true,  Ordem: 7, Base: true,  Bloqueado: true },
-  { Id: 'FC008', Campo: 'observacoes',  Rotulo: 'Observações',     Tipo: 'textarea', Exibir: true,  Obrigatorio: false, Ordem: 8, Base: true,  Bloqueado: false },
-  { Id: 'FC009', Campo: 'agencia',      Rotulo: 'Agência',         Tipo: 'text',     Exibir: false, Obrigatorio: false, Ordem: 9, Base: false, Bloqueado: false }
+  { Id: 'FC001', Campo: 'dataAbertura', Rotulo: 'Data',            Tipo: 'date',     Exibir: true,  Obrigatorio: true,  Ordem: 1,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC002', Campo: 'numeroRA',     Rotulo: 'Protocolo',       Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 2,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC003', Campo: 'cliente',      Rotulo: 'Nome do cliente', Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 3,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC004', Campo: 'cpf',          Rotulo: 'CPF',             Tipo: 'cpf',      Exibir: true,  Obrigatorio: true,  Ordem: 4,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC005', Campo: 'produto',      Rotulo: 'Produto',         Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 5,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC006', Campo: 'categoria',    Rotulo: 'Categoria',       Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 6,  Base: true,  Bloqueado: false, Opcoes: '' },
+  // v4.6: Subcategoria — terceiro nível da classificação, carregado em
+  // cascata a partir da Categoria selecionada. Opcional por padrão.
+  { Id: 'FC010', Campo: 'subcategoria', Rotulo: 'Subcategoria',    Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 7,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC007', Campo: 'canal',        Rotulo: 'Canal',           Tipo: 'select',   Exibir: true,  Obrigatorio: true,  Ordem: 8,  Base: true,  Bloqueado: true,  Opcoes: '' },
+  { Id: 'FC008', Campo: 'observacoes',  Rotulo: 'Observações',     Tipo: 'textarea', Exibir: true,  Obrigatorio: false, Ordem: 9,  Base: true,  Bloqueado: false, Opcoes: '' },
+  { Id: 'FC009', Campo: 'agencia',      Rotulo: 'Agência',         Tipo: 'text',     Exibir: false, Obrigatorio: false, Ordem: 10, Base: false, Bloqueado: false, Opcoes: '' }
 ];
 
 /**

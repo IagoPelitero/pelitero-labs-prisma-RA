@@ -46,6 +46,7 @@ Pages.dashboard = {
     cpf: 'dash-f-cpf',
     produto: 'dash-f-produto',
     categoria: 'dash-f-categoria',
+    subcategoria: 'dash-f-subcategoria', // v4.6
     canal: 'dash-f-canal',
     status: 'dash-f-status',
     situacao: 'dash-f-situacao',
@@ -61,6 +62,7 @@ Pages.dashboard = {
     cpf: 'CPF',
     produto: 'Produto',
     categoria: 'Categoria',
+    subcategoria: 'Subcategoria', // v4.6
     canal: 'Canal',
     status: 'Status',
     situacao: 'Aguardando Retorno',
@@ -130,6 +132,7 @@ Pages.dashboard = {
     html += '    <div class="form-group"><label class="form-label">CPF</label><input type="text" id="dash-f-cpf" class="form-control" placeholder="CPF"></div>';
     html += '    <div class="form-group"><label class="form-label">Produto</label><select id="dash-f-produto" class="form-control"></select></div>';
     html += '    <div class="form-group"><label class="form-label">Categoria</label><select id="dash-f-categoria" class="form-control"></select></div>';
+    html += '    <div class="form-group"><label class="form-label">Subcategoria</label><select id="dash-f-subcategoria" class="form-control"></select></div>';
     html += '    <div class="form-group"><label class="form-label">Canal</label><select id="dash-f-canal" class="form-control"></select></div>';
     html += '    <div class="form-group"><label class="form-label">Status</label><select id="dash-f-status" class="form-control"></select></div>';
     html += '    <div class="form-group"><label class="form-label">Aguardando Retorno</label><select id="dash-f-situacao" class="form-control"></select></div>';
@@ -168,6 +171,7 @@ Pages.dashboard = {
     // Preenche os selects dos filtros com as listas do bootstrap.
     App.fillSelect('dash-f-produto', dd.produtos || [], 'Todos');
     App.fillSelect('dash-f-categoria', dd.categorias || [], 'Todas');
+    App.fillSelect('dash-f-subcategoria', dd.subcategorias || [], 'Todas'); // v4.6
     App.fillSelect('dash-f-canal', dd.canais || [], 'Todos');
     App.fillSelect('dash-f-status', dd.status || [], 'Todos');
     App.fillSelect('dash-f-situacao', dd.situacoesPendencia || [], 'Todas');
@@ -486,6 +490,9 @@ Pages.dashboard = {
       // ── Filtros exatos (selects) ──
       if (f.produto && norm(item.produto) !== norm(f.produto)) return false;
       if (f.categoria && norm(item.categoria) !== norm(f.categoria)) return false;
+      // v4.6: atendimentos antigos têm subcategoria vazia — só são
+      // descartados quando o filtro de subcategoria está ativo.
+      if (f.subcategoria && norm(item.subcategoria) !== norm(f.subcategoria)) return false;
       if (f.canal && norm(item.canal) !== norm(f.canal)) return false;
       if (f.status && norm(item.status) !== norm(f.status)) return false;
       if (f.situacao && norm(item.situacaoPendencia) !== norm(f.situacao)) return false;
@@ -499,6 +506,7 @@ Pages.dashboard = {
       // ── Pesquisa rápida (qualquer informação visível) ──
       if (termo) {
         var campos = [item.numeroRA, item.cliente, item.cpf, item.produto, item.categoria,
+          item.subcategoria, // v4.6
           item.status, item.situacaoPendencia, item.responsavel, item.canal, item.observacoes];
         // Inclui os valores dos campos personalizados na busca.
         var extras = item.camposExtras || {};
@@ -807,6 +815,7 @@ Pages.dashboard = {
 
     // O formulário só existe no DOM depois que o modal foi desenhado.
     AtendimentoForm.popularCategorias(atd.categoria || '');
+    AtendimentoForm.popularSubcategorias(atd.subcategoria || ''); // v4.6
     AtendimentoForm.bindFieldEvents(atd.id);
   },
 

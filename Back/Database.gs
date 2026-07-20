@@ -117,7 +117,10 @@ function initializeSheets() {
       { name: CONFIG.SHEET_NAMES.HISTORICO,      columns: COLUMNS.HISTORICO,     defaults: [] },
       { name: CONFIG.SHEET_NAMES.USUARIOS,       columns: COLUMNS.USUARIOS,      defaults: [] },
       { name: CONFIG.SHEET_NAMES.PRODUTOS,       columns: COLUMNS.PRODUTOS,      defaults: DEFAULT_PRODUTOS },
-      { name: CONFIG.SHEET_NAMES.CATEGORIAS,     columns: COLUMNS.CATEGORIAS,    defaults: DEFAULT_CATEGORIAS }
+      { name: CONFIG.SHEET_NAMES.CATEGORIAS,     columns: COLUMNS.CATEGORIAS,    defaults: DEFAULT_CATEGORIAS },
+      // v4.6: subcategorias (Produto → Categoria → Subcategoria). Sem dados
+      // padrão: o cadastro é feito manualmente pela tela de Configurações.
+      { name: CONFIG.SHEET_NAMES.SUBCATEGORIAS,  columns: COLUMNS.SUBCATEGORIAS, defaults: [] }
     ];
     
     sheetsConfig.forEach(function(cfg) {
@@ -210,6 +213,43 @@ function migrateLegacyData_(ss) {
 
   // 5) Garante um usuário ADM (instalações antigas só tinham Supervisor).
   promoteFirstAdmin_();
+
+  // 6) v4.6: garante o campo "Subcategoria" no formulário (ConfigCampos)
+  //    de instalações existentes, sem tocar nos demais campos.
+  ensureSubcategoriaFormField_();
+}
+
+/**
+ * Migração v4.6 — campo Subcategoria no formulário dinâmico.
+ * Em instalações existentes a aba ConfigCampos já está populada e a
+ * política de não sobrescrita impede regravar os padrões; esta função
+ * apenas ACRESCENTA o registro do campo "subcategoria" quando ele ainda
+ * não existe (idempotente — nada é alterado nas demais linhas).
+ * Instalações novas já o recebem via DEFAULT_CONFIG_CAMPOS.
+ * Ordem 6.5: posiciona o campo logo após Categoria (6) e antes do
+ * Canal (7) sem renumerar os campos já configurados pelo ADM.
+ */
+function ensureSubcategoriaFormField_() {
+  const existentes = getAll(CONFIG.SHEET_NAMES.CONFIG_CAMPOS);
+  if (existentes.length === 0) return; // aba vazia: DEFAULT_CONFIG_CAMPOS cobre
+  const jaExiste = existentes.some(function(item) {
+    return normalizeText_(item.Campo) === 'subcategoria';
+  });
+  if (jaExiste) return;
+
+  insert(CONFIG.SHEET_NAMES.CONFIG_CAMPOS, {
+    Id: generateId('FC'),
+    Campo: 'subcategoria',
+    Rotulo: 'Subcategoria',
+    Tipo: 'select',
+    Exibir: true,
+    Obrigatorio: false,
+    Ordem: 6.5,
+    Base: true,
+    Bloqueado: false,
+    Opcoes: ''
+  });
+  Logger.log('Migração v4.6: campo "subcategoria" adicionado à ConfigCampos.');
 }
 
 /**
@@ -991,6 +1031,7 @@ function getColumnsForSheet(sheetName) {
   mapping[CONFIG.SHEET_NAMES.USUARIOS]       = COLUMNS.USUARIOS;
   mapping[CONFIG.SHEET_NAMES.PRODUTOS]       = COLUMNS.PRODUTOS;
   mapping[CONFIG.SHEET_NAMES.CATEGORIAS]     = COLUMNS.CATEGORIAS;
+  mapping[CONFIG.SHEET_NAMES.SUBCATEGORIAS]  = COLUMNS.SUBCATEGORIAS; // v4.6
 
   return mapping[sheetName] || [];
 }

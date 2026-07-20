@@ -59,6 +59,16 @@ Pages.relatorios = {
     html += '    </div>';
     html += '  </div>';
 
+    // v4.6: Subcategoria (terceiro nível da classificação). Atendimentos
+    // anteriores à v4.6 têm o campo vazio e só são excluídos do resultado
+    // quando este filtro é utilizado.
+    html += '  <div class="form-row">';
+    html += '    <div class="form-group">';
+    html += '      <label class="form-label">Subcategoria</label>';
+    html += '      <select id="rel-subcategoria" class="form-control"></select>';
+    html += '    </div>';
+    html += '  </div>';
+
     // Row 2: Analista + Status + Situação + Canal
     html += '  <div class="form-row">';
     html += '    <div class="form-group">';
@@ -136,6 +146,7 @@ Pages.relatorios = {
     // Preenche os selects com as listas do bootstrap.
     App.fillSelect('rel-produto', dd.produtos || [], 'Todos');
     App.fillSelect('rel-categoria', dd.categorias || [], 'Todas');
+    App.fillSelect('rel-subcategoria', dd.subcategorias || [], 'Todas'); // v4.6
     App.fillSelect('rel-analista', dd.responsaveis || [], 'Todos');
     App.fillSelect('rel-status', dd.status || [], 'Todos');
     App.fillSelect('rel-situacao', dd.situacoesPendencia || [], 'Todas');
@@ -150,6 +161,7 @@ Pages.relatorios = {
     dataFim: 'rel-data-fim',
     produto: 'rel-produto',
     categoria: 'rel-categoria',
+    subcategoria: 'rel-subcategoria', // v4.6
     analista: 'rel-analista',
     status: 'rel-status',
     situacao: 'rel-situacao',
@@ -250,6 +262,7 @@ Pages.relatorios = {
       { key: 'cpf', label: 'CPF' },
       { key: 'produto', label: 'Produto' },
       { key: 'categoria', label: 'Categoria' },
+      { key: 'subcategoria', label: 'Subcategoria' }, // v4.6 (vazio nos registros antigos)
       { key: 'status', label: 'Status' },
       { key: 'situacaoPendencia', label: 'Aguardando Retorno' },
       { key: 'canal', label: 'Canal' },
@@ -291,6 +304,7 @@ Pages.relatorios = {
         App.escapeHtml(d.cpf || '-'),
         Components.longText(d.produto || '-', 40),
         Components.longText(d.categoria || '-', 40),
+        Components.longText(d.subcategoria || '-', 40), // v4.6
         d.status ? Components.statusBadge(d.status, d.statusCor || '') : '-',
         App.escapeHtml(d.situacaoPendencia || '-'),
         Components.longText(d.canal || '-', 40),
@@ -406,6 +420,7 @@ Pages.relatorios = {
         'CPF': d.cpf || '',
         'Produto': d.produto || '',
         'Categoria': d.categoria || '',
+        'Subcategoria': d.subcategoria || '', // v4.6
         'Status': d.status || '',
         'Aguardando Retorno de': d.situacaoPendencia || '',
         'Canal': d.canal || '',
@@ -494,7 +509,7 @@ Pages.relatorios = {
       doc.text('Pendentes: ' + r.pendentes, 160, 45);
       doc.text('Tempo Médio: ' + r.tempoMedio + 'h', 220, 45);
 
-      var cabecalhos = ['Protocolo', 'Cliente', 'CPF', 'Produto', 'Categoria', 'Status', 'Aguardando', 'Canal', 'Responsável', 'Dt Abertura', 'Dt Conclusão', 'Tempo'];
+      var cabecalhos = ['Protocolo', 'Cliente', 'CPF', 'Produto', 'Categoria', 'Subcategoria', 'Status', 'Aguardando', 'Canal', 'Responsável', 'Dt Abertura', 'Dt Conclusão', 'Tempo'];
       var linhasTabela = dados.map(function(d) {
         return [
           String(d.numeroRA || ''),
@@ -502,6 +517,7 @@ Pages.relatorios = {
           String(d.cpf || ''),
           String(d.produto || ''),
           String(d.categoria || ''),
+          String(d.subcategoria || ''), // v4.6
           String(d.status || ''),
           String(d.situacaoPendencia || ''),
           String(d.canal || ''),

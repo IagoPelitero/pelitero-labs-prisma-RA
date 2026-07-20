@@ -113,6 +113,31 @@ function getBootstrapData() {
     categoriasPorProduto[nomeProduto].push(String(categoria.Nome || ''));
   });
 
+  // v4.6: subcategorias agrupadas por Produto → Categoria (nomes), para a
+  // cascata do formulário. O agrupamento inclui o produto porque categorias
+  // de produtos diferentes podem ter o MESMO nome (ex.: "Cobrança indevida")
+  // — a chave composta evita misturar as subcategorias delas. Categorias sem
+  // produto entram no grupo 'Geral' (mesma convenção de categoriasPorProduto).
+  // Subcategorias de categorias inativas/excluídas não aparecem (a lista
+  // "categorias" acima já vem filtrada por Ativo).
+  const categoriaPorId = indexBy_(categorias, 'Id');
+  const subcategorias = activeSorted_(CONFIG.SHEET_NAMES.SUBCATEGORIAS);
+  const subcategoriasPorProdutoCategoria = {};
+  subcategorias.forEach(function(sub) {
+    const categoria = categoriaPorId[String(sub.CategoriaId || '')];
+    if (!categoria) return; // vínculo órfão: não oferece no formulário
+    const produto = produtoPorId[String(categoria.ProdutoId || '')];
+    const nomeProduto = produto ? produto.Nome : 'Geral';
+    const nomeCategoria = String(categoria.Nome || '');
+    if (!subcategoriasPorProdutoCategoria[nomeProduto]) {
+      subcategoriasPorProdutoCategoria[nomeProduto] = {};
+    }
+    if (!subcategoriasPorProdutoCategoria[nomeProduto][nomeCategoria]) {
+      subcategoriasPorProdutoCategoria[nomeProduto][nomeCategoria] = [];
+    }
+    subcategoriasPorProdutoCategoria[nomeProduto][nomeCategoria].push(String(sub.Nome || ''));
+  });
+
   return {
     user: getActor_(),
     formConfig: getFormConfig_(),
@@ -120,6 +145,13 @@ function getBootstrapData() {
       produtos: pluck_(produtos, 'Nome'),
       categorias: pluck_(categorias, 'Nome'),
       categoriasPorProduto: categoriasPorProduto,
+      subcategoriasPorProdutoCategoria: subcategoriasPorProdutoCategoria, // v4.6
+      // v4.6: lista plana e sem repetições das subcategorias ativas, usada
+      // pelos FILTROS (Dashboard e Relatórios), onde não há produto/categoria
+      // escolhidos para restringir a cascata.
+      subcategorias: pluck_(subcategorias, 'Nome').filter(function(nome, i, lista) {
+        return nome && lista.indexOf(nome) === i;
+      }),
       status: STATUS_LIST.map(function(item) { return item.Nome; }),
       situacoesPendencia: SITUACOES_PENDENCIA.slice(),
       canais: getCanaisAtivos_(), // v4.2: lista dinâmica (aba Canais)
@@ -147,7 +179,13 @@ function getFormConfig_() {
         obrigatorio: isTrue_(item.Obrigatorio),
         ordem: Number(item.Ordem || 9999),
         base: isTrue_(item.Base),
-        bloqueado: isTrue_(item.Bloqueado)
+        bloqueado: isTrue_(item.Bloqueado),
+        // v4.6: opções dos seletores personalizados (coluna Opcoes,
+        // separadas por ";"). Campos base ignoram esta lista — produto,
+        // categoria, subcategoria e canal têm fontes próprias.
+        opcoes: String(item.Opcoes || '').split(';').map(function(opcao) {
+          return opcao.trim();
+        }).filter(function(opcao) { return opcao !== ''; })
       };
     })
     .sort(function(a, b) { return a.ordem - b.ordem; });
@@ -317,6 +355,7 @@ function applyAtendimentoFilters_(records, filtros) {
   const exactFields = {
     produto: 'Produto',
     categoria: 'Categoria',
+    subcategoria: 'Subcategoria', // v4.6: suportado pelo servidor
     status: 'Status',
     situacao: 'MotivoPendencia',
     canal: 'Canal',
@@ -402,6 +441,7 @@ function salvarAtendimento(dados) {
     CPF: input.cpf,
     Produto: input.produto,
     Categoria: input.categoria,
+    Subcategoria: input.subcategoria, // v4.6
     Status: input.status,
     MotivoPendencia: input.motivoPendencia,
     Responsavel: input.responsavel,
@@ -475,6 +515,7 @@ function atualizarAtendimento(id, dados, justificativa) {
     CPF: input.cpf,
     Produto: input.produto,
     Categoria: input.categoria,
+    Subcategoria: input.subcategoria, // v4.6
     Status: input.status,
     MotivoPendencia: input.motivoPendencia,
     Responsavel: input.responsavel,
@@ -646,6 +687,7 @@ function validateAtendimentoInput_(dados) {
     cpf: sanitizeInput(dados.cpf),
     produto: sanitizeInput(dados.produto),
     categoria: sanitizeInput(dados.categoria),
+    subcategoria: sanitizeInput(dados.subcategoria), // v4.6: sempre opcional
     canal: sanitizeInput(dados.canal),
     responsavel: sanitizeInput(dados.responsavel),
     status: sanitizeInput(dados.status),
@@ -707,6 +749,7 @@ function preserveHiddenFields_(input, oldRecord) {
   const columnByField = {
     numeroRA: 'NumeroRA', dataAbertura: 'DataAbertura', cliente: 'Cliente',
     cpf: 'CPF', produto: 'Produto', categoria: 'Categoria',
+    subcategoria: 'Subcategoria', // v4.6
     canal: 'Canal', observacoes: 'Observacoes'
   };
   const hiddenExtras = {};
@@ -1169,6 +1212,23 @@ function salvarConfiguracao(entidade, dados, id) {
   let recordId = sanitizeInput(id);
   const exists = recordId ? getById(meta.sheet, recordId) : null;
 
+  // v4.6: regras das subcategorias (Produto → Categoria → Subcategoria).
+  if (meta.key === 'subcategorias') {
+    // O vínculo com uma categoria existente é obrigatório — é ele que fecha
+    // a hierarquia (a categoria, por sua vez, aponta o produto).
+    if (!record.CategoriaId || !getById(CONFIG.SHEET_NAMES.CATEGORIAS, record.CategoriaId)) {
+      throw new Error('Selecione a categoria à qual a subcategoria pertence.');
+    }
+    // Nome único DENTRO da mesma categoria (comparação sem acentos/caixa).
+    const nomeSubNormalizado = normalizeText_(record.Nome);
+    const subDuplicada = getAll(CONFIG.SHEET_NAMES.SUBCATEGORIAS).some(function(sub) {
+      return String(sub.Id) !== String(recordId || '') &&
+        String(sub.CategoriaId) === String(record.CategoriaId) &&
+        normalizeText_(sub.Nome) === nomeSubNormalizado;
+    });
+    if (subDuplicada) throw new Error('Já existe uma subcategoria com este nome nesta categoria.');
+  }
+
   // v4.2: regras dos canais administráveis.
   if (meta.key === 'canais') {
     // Nome único (comparação sem acentos/caixa).
@@ -1226,6 +1286,14 @@ function salvarConfiguracao(entidade, dados, id) {
       record.Bloqueado = false;
       if (!record.Tipo) record.Tipo = 'text';
     }
+    // v4.6 (Seletores Dinâmicos): campos personalizados do tipo "select"
+    // precisam da lista de opções (coluna Opcoes, separadas por ";").
+    // Campos base não usam Opcoes — Produto, Categoria, Subcategoria e
+    // Canal têm fontes próprias, administradas nas demais seções.
+    const ehCampoBase = exists ? isTrue_(exists.Base) : false;
+    if (!ehCampoBase && normalizeText_(record.Tipo) === 'select' && !record.Opcoes) {
+      throw new Error('Informe as opções do seletor, separadas por ponto e vírgula (;).');
+    }
   }
   if (exists) {
     update(meta.sheet, recordId, record);
@@ -1282,6 +1350,11 @@ function excluirConfiguracao(entidade, id) {
     // e indicadores são atualizados via invalidateAllCache + reload do
     // bootstrap no frontend.
     remove(meta.sheet, safeId);
+  } else if (meta.key === 'subcategorias') {
+    // v4.6: exclusão DEFINITIVA de subcategorias (mesma regra das
+    // categorias). Atendimentos antigos que usaram o nome permanecem
+    // válidos — a coluna Subcategoria guarda o texto, não o Id.
+    remove(meta.sheet, safeId);
   } else if (meta.key === 'canais') {
     // v4.2: exclusão DEFINITIVA de canais, com guarda para o sistema
     // nunca ficar sem canal ativo.
@@ -1291,7 +1364,7 @@ function excluirConfiguracao(entidade, id) {
     // Desativação lógica preserva o histórico dos atendimentos já vinculados.
     update(meta.sheet, safeId, { Ativo: false });
   }
-  const acoesDefinitivas = ['camposFormulario', 'categorias', 'canais'];
+  const acoesDefinitivas = ['camposFormulario', 'categorias', 'subcategorias', 'canais'];
   auditConfiguration_(acoesDefinitivas.indexOf(meta.key) !== -1 ? 'Exclusão' : 'Desativação', meta.label, safeId, existing);
   invalidateAllCache();
   SERVICE_CONTEXT_ = {};
@@ -1327,6 +1400,12 @@ function getConfigurationEntities_() {
     categorias: {
       key: 'categorias', label: 'Categorias', sheet: CONFIG.SHEET_NAMES.CATEGORIAS,
       columns: COLUMNS.CATEGORIAS, prefix: 'CT'
+    },
+    // v4.6: subcategorias (Produto → Categoria → Subcategoria). Administráveis
+    // por Supervisor e ADM (mesmo nível de acesso de produtos/categorias).
+    subcategorias: {
+      key: 'subcategorias', label: 'Subcategorias', sheet: CONFIG.SHEET_NAMES.SUBCATEGORIAS,
+      columns: COLUMNS.SUBCATEGORIAS, prefix: 'SC'
     },
     // v4.2: canais de entrada administráveis (exclusivo do ADM).
     canais: {
@@ -1446,6 +1525,7 @@ function toClientAtendimento_(record, colorMap) {
     cpf: String(record.CPF || ''),
     produto: String(record.Produto || ''),
     categoria: String(record.Categoria || ''),
+    subcategoria: String(record.Subcategoria || ''), // v4.6: '' nos registros antigos
     status: String(record.Status || ''),
     statusCor: colorMap[String(record.Status || '')] || '',
     situacaoPendencia: String(record.MotivoPendencia || ''),

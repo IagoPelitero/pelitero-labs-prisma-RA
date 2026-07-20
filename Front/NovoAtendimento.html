@@ -42,6 +42,7 @@ var AtendimentoForm = {
     cpf: 'campo-cpf',
     produto: 'campo-produto',
     categoria: 'campo-categoria',
+    subcategoria: 'campo-subcategoria', // v4.6
     canal: 'campo-canal',
     observacoes: 'campo-observacoes'
   },
@@ -64,6 +65,7 @@ var AtendimentoForm = {
       { campo: 'cpf', rotulo: 'CPF', tipo: 'cpf', obrigatorio: true, base: true },
       { campo: 'produto', rotulo: 'Produto', tipo: 'select', obrigatorio: false, base: true },
       { campo: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false, base: true },
+      { campo: 'subcategoria', rotulo: 'Subcategoria', tipo: 'select', obrigatorio: false, base: true }, // v4.6
       { campo: 'canal', rotulo: 'Canal', tipo: 'select', obrigatorio: true, base: true },
       { campo: 'observacoes', rotulo: 'Observações', tipo: 'textarea', obrigatorio: false, base: true }
     ];
@@ -124,10 +126,25 @@ var AtendimentoForm = {
       html += '</select>';
     } else if (field.campo === 'categoria') {
       html += '<select id="' + id + '" class="form-control"></select>';
+    } else if (field.campo === 'subcategoria') {
+      // v4.6: preenchido em cascata por popularSubcategorias (Produto →
+      // Categoria → Subcategoria). Sempre opcional; sem subcategorias
+      // cadastradas, fica vazio e o atendimento salva normalmente.
+      html += '<select id="' + id + '" class="form-control"></select>';
     } else if (field.campo === 'canal') {
       html += '<select id="' + id + '" class="form-control"><option value="">Selecione</option>';
       (dd.canais || []).forEach(function(c) {
         html += '<option value="' + App.escapeHtml(c) + '"' + (value === c ? ' selected' : '') + '>' + App.escapeHtml(c) + '</option>';
+      });
+      html += '</select>';
+    } else if (field.tipo === 'select') {
+      // v4.6 (Seletores Dinâmicos): campos personalizados do tipo "select"
+      // criados pelo ADM em Configurações > Campos e Seletores. As opções
+      // vêm da coluna Opcoes da ConfigCampos (field.opcoes). Antes desta
+      // versão, um campo personalizado "select" era exibido como texto.
+      html += '<select id="' + id + '" class="form-control"><option value="">Selecione</option>';
+      (field.opcoes || []).forEach(function(opcao) {
+        html += '<option value="' + App.escapeHtml(opcao) + '"' + (value === opcao ? ' selected' : '') + '>' + App.escapeHtml(opcao) + '</option>';
       });
       html += '</select>';
     } else if (field.tipo === 'textarea') {
@@ -236,6 +253,44 @@ var AtendimentoForm = {
   },
 
   /**
+   * v4.6 — Preenche o select de subcategorias conforme o produto E a
+   * categoria escolhidos (dropdownData.subcategoriasPorProdutoCategoria,
+   * calculado no servidor). O agrupamento considera o produto porque
+   * categorias de produtos diferentes podem ter o mesmo nome. Sem
+   * subcategorias cadastradas para a categoria, o campo fica vazio e o
+   * atendimento pode ser salvo normalmente (campo sempre opcional).
+   * @param {string} selecionada - Subcategoria a manter selecionada.
+   */
+  popularSubcategorias: function(selecionada) {
+    if (!document.getElementById('campo-subcategoria')) return;
+    var dd = App.dropdownData || {};
+    var produto = (document.getElementById('campo-produto') || {}).value || '';
+    var categoria = (document.getElementById('campo-categoria') || {}).value || '';
+    var porProduto = dd.subcategoriasPorProdutoCategoria || {};
+
+    var lista = [];
+    if (!categoria) {
+      lista = [];
+    } else if (produto) {
+      // Produto definido: subcategorias do par produto+categoria, mais as
+      // do grupo 'Geral' (categorias sem produto — mesma convenção da
+      // cascata de categorias).
+      lista = ((porProduto[produto] || {})[categoria] || [])
+        .concat((porProduto['Geral'] || {})[categoria] || []);
+    } else {
+      // Sem produto: reúne as subcategorias desta categoria em todos os
+      // grupos (a categoria pode existir sob qualquer produto).
+      Object.keys(porProduto).forEach(function(grupo) {
+        lista = lista.concat((porProduto[grupo] || {})[categoria] || []);
+      });
+    }
+
+    App.fillSelect('campo-subcategoria', lista,
+      lista.length ? 'Selecione' : 'Sem subcategorias cadastradas',
+      selecionada || undefined);
+  },
+
+  /**
    * Liga os eventos de campo do formulário: máscara/validação de CPF,
    * verificação de protocolo duplicado, produto → categorias e
    * status → "Aguardando Retorno de" (só aparece quando Pendente).
@@ -275,7 +330,18 @@ var AtendimentoForm = {
     var campoProduto = document.getElementById('campo-produto');
     if (campoProduto) {
       campoProduto.addEventListener('change', function() {
+        // Cascata completa: trocar o produto redefine categoria E
+        // subcategoria (v4.6).
         self.popularCategorias('');
+        self.popularSubcategorias('');
+      });
+    }
+
+    // v4.6: trocar a categoria recarrega as subcategorias correspondentes.
+    var campoCategoria = document.getElementById('campo-categoria');
+    if (campoCategoria) {
+      campoCategoria.addEventListener('change', function() {
+        self.popularSubcategorias('');
       });
     }
 
@@ -444,6 +510,7 @@ var AtendimentoForm = {
 
     var dados = {
       numeroRA: '', cliente: '', cpf: '', produto: '', categoria: '',
+      subcategoria: '', // v4.6
       canal: '', observacoes: '', dataAbertura: '',
       status: (document.getElementById('campo-status') || {}).value || '',
       motivoPendencia: campoSituacao ? (campoSituacao.value || '') : '',
@@ -574,6 +641,7 @@ Pages.novoAtendimento = {
     container.innerHTML = html;
 
     AtendimentoForm.popularCategorias(atd.categoria || '');
+    AtendimentoForm.popularSubcategorias(atd.subcategoria || ''); // v4.6
     self._bindEvents();
   },
 
@@ -766,6 +834,7 @@ Pages.novoAtendimento = {
     if (campoData) campoData.value = App.toInputDate(new Date());
 
     AtendimentoForm.popularCategorias('');
+    AtendimentoForm.popularSubcategorias(''); // v4.6
 
     var grupoSituacao = document.getElementById('grupo-situacao');
     var campoStatus = document.getElementById('campo-status');

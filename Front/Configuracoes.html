@@ -54,6 +54,23 @@ Pages.configuracoes = {
         { key: 'Ordem', label: 'Ordem', type: 'number' }
       ]
     },
+    // v4.6: subcategorias — terceiro nível da classificação
+    // (Produto → Categoria → Subcategoria). Administráveis por Supervisor
+    // e ADM; a cascata do formulário de Novo Atendimento, o Dashboard e os
+    // filtros refletem qualquer alteração automaticamente (reloadBootstrap).
+    subcategorias: {
+      label: 'Subcategorias', icon: 'account_tree',
+      descricao: 'Terceiro nível da classificação: Produto → Categoria → Subcategoria. ' +
+        'Vincule cada subcategoria a uma categoria; o formulário de Novo Atendimento ' +
+        'carrega as opções em cascata conforme o produto e a categoria escolhidos.',
+      permanentDelete: true,
+      fields: [
+        { key: 'CategoriaId', label: 'Categoria', type: 'reference', source: 'categorias', required: true },
+        { key: 'Nome', label: 'Nome', required: true },
+        { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true },
+        { key: 'Ordem', label: 'Ordem', type: 'number' }
+      ]
+    },
     // v4.2: canais de entrada administráveis pelo ADM. Toda alteração é
     // refletida automaticamente no formulário de Novo Atendimento, no
     // Dashboard, nos Indicadores e nos filtros (via App.reloadBootstrap).
@@ -79,11 +96,25 @@ Pages.configuracoes = {
         { key: 'Ativo', label: 'Ativo', type: 'checkbox', defaultValue: true }
       ]
     },
+    // v4.6: central de Seletores Dinâmicos. Além de administrar os campos
+    // do formulário, o ADM cria aqui novos campos de SELEÇÃO (tipo
+    // "select") com opções próprias (separadas por ";") — sem alterar
+    // código. Os seletores relacionais (Produto, Categoria, Subcategoria,
+    // Canal) são administrados nas seções próprias; Status e "Aguardando
+    // Retorno de" são fixos do fluxo (a resolução do atendimento depende
+    // da semântica deles).
     camposFormulario: {
-      label: 'Campos do formulário', icon: 'dynamic_form', adminOnly: true,
+      label: 'Campos e Seletores', icon: 'dynamic_form', adminOnly: true,
+      descricao: 'Central de seletores dinâmicos: crie, edite, ative/desative e remova ' +
+        'campos do formulário — inclusive novos campos de seleção (tipo "select") com ' +
+        'opções próprias, separadas por ponto e vírgula (;), sem alterar o código. ' +
+        'Produto, Categoria, Subcategoria e Canal são administrados nas seções ao lado; ' +
+        'Status e "Aguardando Retorno de" são regras fixas do fluxo.',
       fields: [
         { key: 'Rotulo', label: 'Rótulo', required: true },
-        { key: 'Tipo', label: 'Tipo', type: 'select', options: ['text', 'date', 'textarea', 'number'] },
+        { key: 'Tipo', label: 'Tipo', type: 'select', options: ['text', 'date', 'textarea', 'number', 'select'] },
+        { key: 'Opcoes', label: 'Opções do seletor (separadas por ;)', type: 'textarea',
+          placeholder: 'Ex.: Alta; Média; Baixa — usado apenas no tipo "select"' },
         { key: 'Exibir', label: 'Exibir no formulário', type: 'checkbox', defaultValue: true, trueLabel: 'Exibido', falseLabel: 'Oculto' },
         { key: 'Obrigatorio', label: 'Obrigatório', type: 'checkbox', defaultValue: false, trueLabel: 'Obrigatório', falseLabel: 'Opcional' },
         { key: 'Ordem', label: 'Ordem', type: 'number' }
@@ -180,6 +211,13 @@ Pages.configuracoes = {
     var rows = this.data[this.active] || [];
     var html = '<div class="card-header"><div class="card-title"><span class="material-icons">' +
       meta.icon + '</span>' + meta.label + '</div><span class="badge">' + rows.length + ' registro(s)</span></div>';
+
+    // v4.6: seções podem ter um texto explicativo (ex.: Subcategorias e a
+    // central de Seletores Dinâmicos) para orientar o administrador.
+    if (meta.descricao) {
+      html += '<p style="font-size:13px;color:var(--text-secondary);margin:0 0 14px;">' +
+        meta.descricao + '</p>';
+    }
 
     if (!rows.length) {
       html += Components.emptyState('inbox', 'Nenhum registro cadastrado.');
@@ -278,7 +316,17 @@ Pages.configuracoes = {
     if (!id) return '';
     var rows = this.data[source] || [];
     for (var i = 0; i < rows.length; i++) {
-      if (String(rows[i].Id) === String(id)) return rows[i].Nome || rows[i].Id;
+      if (String(rows[i].Id) === String(id)) {
+        var rotulo = rows[i].Nome || rows[i].Id;
+        // v4.6: na tabela de Subcategorias, a coluna Categoria exibe também
+        // o produto ("Fatura (Cartão de Crédito)") — nomes de categoria
+        // podem se repetir entre produtos.
+        if (source === 'categorias' && rows[i].ProdutoId) {
+          var produto = this.referenceLabel('produtos', rows[i].ProdutoId);
+          if (produto) rotulo += ' (' + produto + ')';
+        }
+        return rotulo;
+      }
     }
     return id;
   },
@@ -320,7 +368,8 @@ Pages.configuracoes = {
   renderInput: function(field, value) {
     var safeValue = this.escape(value === undefined || value === null ? '' : String(value));
     if (field.type === 'textarea') {
-      return '<textarea class="form-control" id="cfg-' + field.key + '" rows="3">' + safeValue + '</textarea>';
+      return '<textarea class="form-control" id="cfg-' + field.key + '" rows="3"' +
+        (field.placeholder ? ' placeholder="' + field.placeholder + '"' : '') + '>' + safeValue + '</textarea>';
     }
     if (field.type === 'select') {
       var html = '<select class="form-control" id="cfg-' + field.key + '">';
@@ -330,12 +379,21 @@ Pages.configuracoes = {
       return html + '</select>';
     }
     if (field.type === 'reference') {
+      var self = this;
       var ref = '<select class="form-control" id="cfg-' + field.key + '">';
       if (field.allowBlank) ref += '<option value="">Todos / não especificado</option>';
       var rows = this.data[field.source] || [];
       rows.forEach(function(item) {
+        // v4.6: categorias podem repetir o nome entre produtos — o rótulo
+        // inclui o produto para o vínculo ficar inequívoco no cadastro de
+        // subcategorias (ex.: "Cobrança indevida (Cartão de Crédito)").
+        var rotulo = item.Nome || item.Id;
+        if (field.source === 'categorias' && item.ProdutoId) {
+          var produto = self.referenceLabel('produtos', item.ProdutoId);
+          if (produto) rotulo += ' (' + produto + ')';
+        }
         ref += '<option value="' + item.Id + '"' + (String(value) === String(item.Id) ? ' selected' : '') +
-          '>' + (item.Nome || item.Id) + '</option>';
+          '>' + self.escape(rotulo) + '</option>';
       });
       return ref + '</select>';
     }

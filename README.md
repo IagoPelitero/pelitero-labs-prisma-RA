@@ -23,7 +23,8 @@ Desenvolvido por **Pelitero Labs**.
 7. [Integração com o Google Sheets (banco de dados)](#7-integração-com-o-google-sheets-banco-de-dados)
 8. [Configuração inicial e instalação](#8-configuração-inicial-e-instalação)
 9. [Gerenciamento de usuários](#9-gerenciamento-de-usuários)
-10. [Gerenciamento de produtos, categorias e canais](#10-gerenciamento-de-produtos-categorias-e-canais)
+10. [Classificação: Produto → Categoria → Subcategoria](#10-classificação-produto--categoria--subcategoria)
+10.1 [Seletores dinâmicos (criar campos sem código)](#101-seletores-dinâmicos-criar-campos-sem-código)
 11. [Dashboards](#11-dashboards)
 12. [Indicadores](#12-indicadores)
 13. [Personalização](#13-personalização)
@@ -51,6 +52,8 @@ manter, nem custo de hospedagem.
 
 - **Registro e acompanhamento** de atendimentos multicanal, com fluxo de status
   (Pendente → Em análise → Concluído) e "Aguardando Retorno de" (Área/Cliente);
+- **Classificação em três níveis** — Produto → Categoria → Subcategoria — com cascata
+  automática no formulário e administração pela própria interface;
 - **Controle de acesso por perfil** (Administrador, Supervisor, Analista), aplicado
   no servidor — não apenas na interface;
 - **Formulário de cadastro configurável** sem alteração de código (aba `ConfigCampos`);
@@ -141,7 +144,8 @@ Front/                       Camada de interface (HtmlService)
  ├─ NovoAtendimento.html    Formulário dinâmico de cadastro/edição + timeline
  ├─ Relatorios.html         Relatórios filtráveis com exportação
  ├─ Indicadores.html        Painel analítico (Chart.js), restrito à supervisão
- └─ Configuracoes.html      Administração (produtos, categorias, canais, usuários, campos)
+ └─ Configuracoes.html      Administração (produtos, categorias, subcategorias, canais,
+                            usuários e a central de Campos e Seletores dinâmicos)
 
 .claude/                     Metadados de projeto
  ├─ appsscript.json         Manifesto do Apps Script (timezone, escopos, runtime)
@@ -198,8 +202,8 @@ Três perfis, definidos na coluna `Perfil` da aba Usuários. As regras são apli
 | Ver/editar atendimentos de **toda a equipe** | — | ✅ | ✅ |
 | Delegar/reatribuir responsável | — | ✅ | ✅ |
 | Aba **Indicadores** | — | ✅ | ✅ |
-| Aba **Configurações** (produtos, categorias) | — | ✅ | ✅ |
-| **Usuários**, **Canais** e **Campos do formulário** | — | — | ✅ |
+| Aba **Configurações** (produtos, categorias, **subcategorias**) | — | ✅ | ✅ |
+| **Usuários**, **Canais** e **Campos e Seletores** | — | — | ✅ |
 | Seção **Banco de Dados** (link da planilha) | — | — | ✅ |
 
 Funções-chave: `isAdminProfile_`, `isSupervisorProfile_`, `canAccessAtendimento_`,
@@ -221,6 +225,14 @@ Cada aba da planilha é uma "tabela". As colunas e os dados padrão são definid
 | `Histórico` | Trilha de auditoria campo a campo (quem, quando, valor anterior/novo, justificativa). |
 | `Usuários` | Cadastro de acesso: `Nome`, `Email`, `Perfil`, `Equipe`, `Ativo`, datas. |
 | `Produtos`, `Categorias` | Catálogo administrável (categorias podem se vincular a um produto). |
+| `Subcategorias` *(v4.6)* | Terceiro nível da classificação: `Id`, `CategoriaId`, `Nome`, `Ativo`, `Ordem`. Criada vazia — o cadastro é manual, feito por ADM/Supervisor. |
+
+**Coluna `Subcategoria` nos atendimentos (v4.6):** foi acrescentada às abas de
+atendimento logo após `Categoria`. A migração de esquema (`ensureSheetSchema_`)
+remapeia cada valor pelo **nome do cabeçalho** e regrava as linhas na nova ordem, de
+modo que nenhum dado existente é perdido ou deslocado; a coluna nova nasce **vazia**
+em todos os registros anteriores. A migração roda uma única vez, disparada pelo bump
+de `SCHEMA_VERSION` em `Config.gs`.
 
 **Política de não sobrescrita (v4.3):** o sistema **nunca sobrescreve dados existentes**.
 Os dados padrão só são gravados em **abas vazias** (primeira criação). O que o usuário
@@ -283,21 +295,81 @@ abrir o sistema.
 
 ---
 
-## 10. Gerenciamento de produtos, categorias e canais
+## 10. Classificação: Produto → Categoria → Subcategoria
 
-Em **Configurações**. Produtos e Categorias são acessíveis a Supervisor/ADM; **Canais**
-é exclusivo do ADM.
+A classificação dos atendimentos tem **três níveis encadeados**:
 
-- **Produtos**: catálogo de produtos (ex.: Cartão de Crédito, Conta Digital). Desativar
-  preserva o histórico (desativação lógica).
+```
+Produto            (ex.: Cartão de Crédito)
+   └─ Categoria    (ex.: Fatura)
+        └─ Subcategoria  (ex.: Parcelamento, Segunda Via)
+```
+
+Tudo é administrado em **Configurações**. Produtos, Categorias e Subcategorias são
+acessíveis a Supervisor/ADM; **Canais** e **Campos e Seletores** são exclusivos do ADM.
+
+- **Produtos**: catálogo de produtos. Desativar preserva o histórico (desativação lógica).
 - **Categorias**: motivos do atendimento, opcionalmente vinculados a um produto.
-  Exclusão é **definitiva** (remove a linha do Sheets, com confirmação).
+  Exclusão **definitiva** (remove a linha do Sheets, com confirmação).
+- **Subcategorias** *(v4.6)*: terceiro nível, sempre vinculado a **uma categoria**
+  (que por sua vez aponta o produto). Permite criar, editar, ativar/desativar e
+  excluir. O nome deve ser único **dentro da mesma categoria** — categorias de
+  produtos diferentes podem ter subcategorias homônimas sem conflito.
 - **Canais**: canais de entrada. Exclusão **definitiva**, com guarda para o sistema
   **nunca ficar sem canal ativo** (`assertOutroCanalAtivo_`). Canais sem aba própria
   gravam os atendimentos na aba `ReclameAqui`, preservando o canal real.
 
-Toda alteração recarrega automaticamente as listas do formulário, do Dashboard, dos
-Indicadores e dos filtros (via `App.reloadBootstrap`), sem recarregar a aplicação.
+### Como a cascata funciona no Novo Atendimento
+
+Ao escolher o **Produto**, o campo Categoria passa a listar apenas as categorias
+daquele produto. Ao escolher a **Categoria**, o campo Subcategoria lista apenas as
+subcategorias dela. Trocar o produto redefine os dois níveis abaixo.
+
+O agrupamento usado pela cascata (`subcategoriasPorProdutoCategoria`, montado em
+`getBootstrapData`) é indexado por **produto + categoria**, justamente porque
+categorias de produtos diferentes podem ter o mesmo nome (ex.: "Cobrança indevida"
+existe em Cartão de Crédito e em Conta Digital) — cada uma mantém suas próprias
+subcategorias.
+
+### Comportamento com registros antigos (retrocompatibilidade)
+
+- A **Subcategoria é sempre opcional**. Se a categoria escolhida ainda não tiver
+  subcategorias cadastradas, o campo aparece vazio e o atendimento é salvo
+  normalmente, sem erro.
+- Todos os atendimentos **anteriores à v4.6 permanecem com a Subcategoria vazia**.
+  Nada é preenchido, migrado ou inferido automaticamente.
+- Dashboard, Indicadores, Relatórios, filtros e exportações continuam operando
+  normalmente com o campo vazio. Um atendimento sem subcategoria só é excluído de
+  um resultado quando o **filtro de Subcategoria** é utilizado explicitamente.
+
+### 10.1 Seletores dinâmicos (criar campos sem código)
+
+A seção **Configurações → Campos e Seletores** (ADM) é a central de campos do
+formulário. Além de exibir/ocultar, tornar obrigatório/opcional e reordenar os campos
+existentes, o administrador pode **criar novos campos do tipo seleção sem alterar o
+código-fonte**:
+
+1. Clique em **+ Novo registro** na seção *Campos e Seletores*.
+2. Informe o **Rótulo** (ex.: "Prioridade").
+3. Escolha o **Tipo** = `select`.
+4. Preencha **Opções do seletor** separadas por ponto e vírgula — ex.:
+   `Alta; Média; Baixa`.
+5. Defina Exibir, Obrigatório e Ordem, e salve.
+
+O campo passa a aparecer no formulário de Novo Atendimento (e como coluna na tabela
+do Dashboard) imediatamente, sem republicar o projeto. Os valores são gravados na
+coluna `CamposExtras` (JSON) do atendimento, preservando o esquema da planilha.
+
+> **Seletores relacionais** — Produto, Categoria, Subcategoria e Canal — têm fonte de
+> dados própria e são administrados em suas seções específicas, não pela lista de
+> opções. **Status** e **"Aguardando Retorno de"** permanecem fixos: a lógica de
+> resolução do atendimento (data de conclusão, tempo de resolução) depende da
+> semântica desses valores.
+
+Toda alteração — em produtos, categorias, subcategorias, canais ou qualquer seletor —
+recarrega automaticamente as listas do formulário, do Dashboard, dos Indicadores, dos
+Relatórios e de todos os filtros (via `App.reloadBootstrap`), sem recarregar a
+aplicação nem alterar código.
 
 ---
 
@@ -345,10 +417,12 @@ redesenhados ao trocar de tema sem sair da tela.
 
 ## 13. Personalização
 
-- **Campos do formulário** (ADM): a aba `ConfigCampos` define quais campos aparecem no
-  Novo Atendimento, rótulo, tipo, obrigatoriedade e ordem — sem alterar código. Campos
-  personalizados são gravados em JSON na coluna `CamposExtras` do atendimento.
-- **Catálogo**: produtos, categorias e canais administráveis (ver seção 10).
+- **Campos do formulário e seletores dinâmicos** (ADM): a aba `ConfigCampos` define
+  quais campos aparecem no Novo Atendimento, rótulo, tipo, obrigatoriedade, ordem e —
+  desde a v4.6 — as **opções dos campos de seleção** (coluna `Opcoes`, separadas por
+  `;`). Tudo sem alterar código. Campos personalizados são gravados em JSON na coluna
+  `CamposExtras` do atendimento. Ver [seção 10.1](#101-seletores-dinâmicos-criar-campos-sem-código).
+- **Catálogo**: produtos, categorias, subcategorias e canais administráveis (ver seção 10).
 - **Temas**: quatro temas (Azul padrão, Rosa, Brasil, Dark), selecionáveis no cabeçalho
   e persistidos em `localStorage`. Todo o CSS usa **variáveis de tema** (`--bg`,
   `--card-bg`, `--text-primary`, `--surface-muted`, etc.), o que mantém contraste
@@ -375,6 +449,11 @@ real, minimizando leituras no Google Sheets:
 - **Escrita direcionada**: `update` mescla apenas os campos alterados; a listagem é
   paginada no cliente (`PAGE_SIZE`).
 - **Reuso de consulta**: Indicadores e Relatórios compartilham `getRelatorio` (DRY).
+- **Custo zero da cascata** (v4.6): o mapa de subcategorias por produto/categoria é
+  calculado **uma única vez** no bootstrap e resolvido no navegador a cada troca de
+  produto/categoria — nenhuma leitura extra da planilha e nenhuma chamada ao servidor
+  ao usar a cascata. A aba `Subcategorias` participa do mesmo cache de leitura das
+  demais (`CacheService`, TTL 5 min), invalidado a cada gravação.
 
 **Diretriz**: nenhuma funcionalidade nova pode degradar o desempenho. Para bases grandes,
 ver [Limitações conhecidas](#17-limitações-conhecidas).
@@ -443,6 +522,14 @@ ver [Limitações conhecidas](#17-limitações-conhecidas).
 
 ## 19. Histórico de versões
 
+- **v4.6** — **Subcategorias**: nova aba `Subcategorias` e coluna `Subcategoria` nos
+  atendimentos, fechando a hierarquia Produto → Categoria → Subcategoria com cascata
+  no formulário; gerenciamento completo em Configurações (criar, editar, ativar,
+  desativar, excluir); Subcategoria disponível em filtros, tabelas e exportações do
+  Dashboard e dos Relatórios. **Seletores Dinâmicos**: a seção "Campos e Seletores"
+  passa a permitir criar campos do tipo `select` com opções próprias, sem alterar
+  código. Migração 100% retrocompatível — nenhum registro existente foi alterado e a
+  nova coluna nasce vazia.
 - **Produção / Auditoria geral** — Autenticação exclusiva por e-mail consolidada
   (sem login/senha, bloqueio total para não cadastrados); Indicadores → **Categoria em
   Top 5** com quantidade e percentual (sobre o total filtrado) diretamente no gráfico;
