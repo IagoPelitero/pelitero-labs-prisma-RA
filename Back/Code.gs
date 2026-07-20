@@ -104,25 +104,17 @@ function include(filename) {
 // ============================================================================
 
 /**
- * Retorna informações do usuário atualmente logado.
- * Busca na planilha Usuarios para obter nome e perfil.
- * Chamada pelo frontend via google.script.run.getCurrentUser().
- * @returns {Object} { email, nome, perfil }
+ * Retorna informações do usuário atualmente autenticado (nome, perfil,
+ * equipe), resolvidas pelo e-mail da conta Google via getActor_.
+ * Usada por diagnósticos (testSystem) e disponível ao frontend.
+ * Erros de autorização ('AUTH: ...') são propagados — não há retorno de
+ * identidade genérica para quem não está cadastrado (sem acesso parcial).
+ * @returns {Object} { id, email, nome, perfil, equipe }
+ * @throws {Error} 'AUTH: ...' quando o e-mail não está autorizado.
  */
 function getCurrentUser() {
-  try {
-    ensureDatabaseReady();
-    return getActor_();
-  } catch (e) {
-    Logger.log('Erro ao obter usuário atual: ' + e.message);
-    return {
-      email: '',
-      nome: 'Usuário',
-      perfil: 'Analista',
-      equipe: '',
-      id: ''
-    };
-  }
+  ensureDatabaseReady();
+  return getActor_();
 }
 
 // ============================================================================

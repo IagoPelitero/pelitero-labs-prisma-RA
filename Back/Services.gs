@@ -73,7 +73,7 @@ function requireAuth_() {
   }) : null;
 
   if (!user) {
-    throw new Error('AUTH: este e-mail não está autorizado a utilizar o sistema. Peça ao administrador para cadastrá-lo em Configurações > Usuários.');
+    throw new Error('AUTH: Seu e-mail não está cadastrado para utilizar o Prisma RA. Entre em contato com o Administrador para solicitar seu acesso.');
   }
 
   SERVICE_CONTEXT_.actor = {
@@ -1476,40 +1476,18 @@ function parseCamposExtras_(value) {
 }
 
 /**
- * Identifica o usuário logado: cruza o e-mail da sessão Google com a
- * aba Usuários para obter nome, perfil e equipe. O resultado é cacheado
- * por execução (SERVICE_CONTEXT_). Sem correspondência, assume o perfil
- * Analista (menor privilégio).
+ * Retorna o ator autenticado da requisição atual. É preenchido por
+ * requireAuth_ (a barreira de e-mail) no início de cada função pública;
+ * se ainda não houver ator no contexto, delega a requireAuth_ — que
+ * resolve pelo e-mail da conta Google e BLOQUEIA quem não estiver
+ * cadastrado/ativo na aba Usuários. Não existe mais usuário "Visitante"
+ * nem acesso parcial: sem cadastro, não há acesso.
  * @returns {Object} { id, email, nome, perfil, equipe }.
+ * @throws {Error} 'AUTH: ...' quando o e-mail não está autorizado.
  */
 function getActor_() {
   if (SERVICE_CONTEXT_.actor) return SERVICE_CONTEXT_.actor;
-  let email = '';
-  try {
-    // Identidade SOMENTE pelo usuário que está acessando. O antigo
-    // complemento com getEffectiveUser() foi removido de propósito: em
-    // implantações "Executar como: eu", ele devolve o e-mail do DONO do
-    // script para qualquer visitante — inclusive anônimos com o link —
-    // fazendo qualquer pessoa ser tratada como o ADM.
-    email = Session.getActiveUser().getEmail() || '';
-  } catch (e) {
-    email = '';
-  }
-  const users = getAll(CONFIG.SHEET_NAMES.USUARIOS);
-  const user = users.find(function(item) {
-    return normalizeText_(item.Email) === normalizeText_(email) && isTrue_(item.Ativo);
-  });
-  // Quem não foi identificado (ou não está na aba Usuários) NUNCA assume
-  // um usuário real da base: entra como Visitante sem privilégios — não
-  // enxerga atendimentos de terceiros nem acessa Configurações.
-  SERVICE_CONTEXT_.actor = {
-    id: user ? String(user.Id || '') : '',
-    email: email,
-    nome: user ? String(user.Nome || '') : (email ? email.split('@')[0] : 'Visitante'),
-    perfil: user ? String(user.Perfil || 'Analista') : 'Analista',
-    equipe: user ? String(user.Equipe || '') : ''
-  };
-  return SERVICE_CONTEXT_.actor;
+  return requireAuth_();
 }
 
 /**

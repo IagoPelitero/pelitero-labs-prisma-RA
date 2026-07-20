@@ -131,7 +131,7 @@ Pages.indicadores = {
     html += '<div class="charts-grid" id="ind-graficos">';
     html += this._chartCard('ind-chart-dia', 'Atendimentos por dia');
     html += this._chartCard('ind-chart-produto', 'Atendimentos por Produto');
-    html += this._chartCard('ind-chart-categoria', 'Atendimentos por Categoria');
+    html += this._chartCard('ind-chart-categoria', 'Atendimentos por Categoria (Top 5)');
     html += this._chartCard('ind-chart-canal', 'Atendimentos por Canal');
     html += this._chartCard('ind-chart-responsavel', 'Atendimentos por Responsável');
     html += this._chartCard('ind-chart-status', 'Atendimentos por Status');
@@ -443,22 +443,24 @@ Pages.indicadores = {
   },
 
   /**
-   * Monta os rótulos de LEGENDA com quantidade e percentual para os
-   * gráficos de pizza/rosca (Canal, Status, Aguardando Retorno):
-   * "Nome — 125 (63,5%)". Assim os números ficam sempre visíveis,
-   * sem depender do mouse sobre o gráfico.
-   * @param {string[]} labels - Nomes originais.
-   * @param {number[]} valores - Quantidades correspondentes.
-   * @returns {string[]} Rótulos prontos para exibição.
+   * Configuração de tooltip padronizada (complementar aos rótulos fixos
+   * do gráfico): mostra "125 (63,5%)" — quantidade e percentual. Usada em
+   * todos os gráficos categóricos para manter a identidade visual.
+   * context.raw traz o valor original do dataset (funciona igual em barras
+   * verticais, horizontais e pizza/rosca).
+   * @param {number} total - Base do cálculo percentual (total filtrado).
+   * @returns {Object} Objeto "tooltip" para as options do Chart.js.
    */
-  _rotulosComValores: function(labels, valores) {
+  _tooltipQtdePct: function(total) {
     var self = this;
-    var total = 0;
-    valores.forEach(function(v) { total += Number(v) || 0; });
-    return labels.map(function(nome, i) {
-      var v = Number(valores[i]) || 0;
-      return nome + ' — ' + App.formatNumber(v) + ' (' + self._fmtPct(v, total) + ')';
-    });
+    return {
+      callbacks: {
+        label: function(context) {
+          var v = Number(context.raw) || 0;
+          return ' ' + App.formatNumber(v) + ' (' + self._fmtPct(v, total) + ')';
+        }
+      }
+    };
   },
 
   /**
@@ -475,15 +477,20 @@ Pages.indicadores = {
    */
   _pluginValoresBarras: {
     id: 'valoresNasBarras',
-    afterDatasetsDraw: function(chart) {
+    afterDatasetsDraw: function(chart, args, opts) {
       if (chart.config.type !== 'bar') return;
       var ds = chart.data.datasets[0];
       var meta = chart.getDatasetMeta(0);
       if (!ds || !meta || !meta.data) return;
 
-      // Total do gráfico → base do cálculo percentual de cada barra.
-      var total = 0;
-      ds.data.forEach(function(v) { total += Number(v) || 0; });
+      // Base do cálculo percentual de cada barra. Por padrão é a soma das
+      // barras exibidas; quando o gráfico mostra apenas um recorte (ex.:
+      // Top 5 categorias), recebe "totalBase" (via options.plugins.
+      // valoresNasBarras) com o TOTAL FILTRADO — assim o percentual reflete
+      // a participação real da categoria no conjunto completo, não só no
+      // recorte exibido.
+      var total = (opts && Number(opts.totalBase)) ? Number(opts.totalBase) : 0;
+      if (!total) { ds.data.forEach(function(v) { total += Number(v) || 0; }); }
       if (!total) return;
 
       var self = Pages.indicadores;
@@ -511,21 +518,71 @@ Pages.indicadores = {
           }
           ctx.fillText(texto, x, barra.y);
         } else {
+          // Barras verticais (Produto, Categoria): SEMPRE exibe a
+          // quantidade (linha de cima) e o percentual entre parênteses
+          // (linha de baixo), acima da barra — independentemente da
+          // largura. Em barras estreitas usa fonte menor para reduzir a
+          // sobreposição, mas a informação NUNCA é omitida (antes o
+          // percentual sumia quando a barra tinha menos de 34px).
           var largura = barra.width || 0;
-          if (largura < 14) return; // sem espaço útil: não desenha
+          if (largura < 4) return; // barra sem dado visível
+          var estreita = largura < 30;
+          ctx.font = (estreita ? '600 9px ' : '600 11px ') + 'Inter, Arial, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
           var topo = barra.y - 4;
-          if (largura >= 34) {
-            // Espaço bom: quantidade em cima, percentual entre
-            // parênteses logo abaixo.
-            ctx.fillText(App.formatNumber(v), barra.x, topo - 12);
-            ctx.fillText('(' + pctTxt + ')', barra.x, topo);
-          } else {
-            // Barra estreita: apenas a quantidade.
-            ctx.fillText(App.formatNumber(v), barra.x, topo);
-          }
+          var espaco = estreita ? 10 : 12;
+          ctx.fillText(App.formatNumber(v), barra.x, topo - espaco);
+          ctx.fillText('(' + pctTxt + ')', barra.x, topo);
         }
+      });
+      ctx.restore();
+    }
+  },
+
+  /**
+   * Plugin inline do Chart.js que desenha QUANTIDADE e PERCENTUAL
+   * diretamente sobre as fatias dos gráficos de pizza/rosca (Canal,
+   * Status, Aguardando Retorno) — os números ficam visíveis sem depender
+   * da legenda nem do mouse. Quantidade na linha de cima, percentual entre
+   * parênteses logo abaixo, no centro de cada fatia. Texto branco com leve
+   * sombra para contraste sobre qualquer cor da paleta. Fatias vazias (0)
+   * não recebem rótulo.
+   */
+  _pluginValoresPizza: {
+    id: 'valoresNasFatias',
+    afterDatasetsDraw: function(chart) {
+      var tipo = chart.config.type;
+      if (tipo !== 'pie' && tipo !== 'doughnut') return;
+      var ds = chart.data.datasets[0];
+      var meta = chart.getDatasetMeta(0);
+      if (!ds || !meta || !meta.data) return;
+
+      var total = 0;
+      ds.data.forEach(function(v) { total += Number(v) || 0; });
+      if (!total) return;
+
+      var self = Pages.indicadores;
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.font = '600 11px Inter, Arial, sans-serif';
+      ctx.textAlign = 'center';
+
+      meta.data.forEach(function(arco, i) {
+        var v = Number(ds.data[i]) || 0;
+        if (!v) return; // não rotula fatias vazias
+        var pos = (typeof arco.getCenterPoint === 'function')
+          ? arco.getCenterPoint() : { x: arco.x, y: arco.y };
+        var pctTxt = self._fmtPct(v, total);
+
+        ctx.fillStyle = '#fff';
+        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        ctx.shadowBlur = 3;
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(App.formatNumber(v), pos.x, pos.y - 1);
+        ctx.textBaseline = 'top';
+        ctx.fillText('(' + pctTxt + ')', pos.x, pos.y + 1);
+        ctx.shadowBlur = 0;
       });
       ctx.restore();
     }
@@ -586,8 +643,10 @@ Pages.indicadores = {
     // quantidade e percentual desenhados ACIMA de cada barra (plugin).
     // "grace" reserva espaço no topo do eixo para os rótulos não cortarem.
     var porProduto = self._agruparPor('produto');
+    var totalProduto = 0;
+    porProduto.valores.forEach(function(v) { totalProduto += Number(v) || 0; });
     var escalaProduto = self._escalaComTruncamento('x');
-    escalaProduto.y = { grace: '15%' };
+    escalaProduto.y = { grace: '20%' }; // espaço no topo para as duas linhas de rótulo
     self._criarChart('ind-chart-produto', {
       type: 'bar',
       plugins: [self._pluginValoresBarras],
@@ -598,61 +657,71 @@ Pages.indicadores = {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false }, // sem legenda: valores ficam nas barras
+          tooltip: self._tooltipQtdePct(totalProduto)
+        },
         scales: escalaProduto
       }
     });
 
-    // ── Por Categoria (barras) ──
-    // SEM legenda adicional (removida a pedido da operação): cada
-    // categoria mostra tudo diretamente no gráfico —
+    // ── Por Categoria (barras) — TOP 5 ──
+    // Usado em apresentações gerenciais: exibe apenas as 5 categorias com
+    // mais atendimentos após os filtros (com muitas categorias o gráfico
+    // ficava ilegível). Sem legenda — cada barra mostra tudo diretamente:
     //   - nome da categoria no eixo (truncado com "…", completo no tooltip);
     //   - QUANTIDADE acima da barra e PERCENTUAL logo abaixo, entre
     //     parênteses ("58" / "(34,5%)"), via plugin _pluginValoresBarras;
-    //   - tooltip com categoria, quantidade e percentual: "58 (34,5%)".
-    // O percentual é calculado sobre o total de atendimentos filtrados.
-    var porCategoria = self._agruparPor('categoria');
+    //   - tooltip com quantidade e percentual: "58 (34,5%)".
+    // IMPORTANTE: o percentual é sempre calculado sobre o TOTAL FILTRADO
+    // (todas as categorias), não sobre a soma do Top 5 — por isso o total
+    // é somado ANTES do recorte e passado ao plugin como "totalBase".
+    var porCategoria = self._agruparPor('categoria'); // já ordenado desc
     var totalCategorias = 0;
     porCategoria.valores.forEach(function(v) { totalCategorias += Number(v) || 0; });
+    var top5Categoria = {
+      labels: porCategoria.labels.slice(0, 5),
+      valores: porCategoria.valores.slice(0, 5)
+    };
     var escalaCategoria = self._escalaComTruncamento('x');
-    escalaCategoria.y = { grace: '15%' };
+    escalaCategoria.y = { grace: '20%' }; // espaço no topo para as duas linhas de rótulo
     self._criarChart('ind-chart-categoria', {
       type: 'bar',
       plugins: [self._pluginValoresBarras],
       data: {
-        labels: porCategoria.labels,
-        datasets: [{ label: 'Atendimentos', data: porCategoria.valores, backgroundColor: self._cores[1] }]
+        labels: top5Categoria.labels,
+        datasets: [{ label: 'Atendimentos', data: top5Categoria.valores, backgroundColor: self._cores[1] }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false }, // sem legenda: valores ficam nas barras
-          tooltip: {
-            callbacks: {
-              // Tooltip com quantidade e percentual: "58 (34,5%)".
-              // O título (nome da categoria) é o padrão do Chart.js.
-              label: function(context) {
-                var v = Number(context.parsed.y) || 0;
-                return ' ' + App.formatNumber(v) + ' (' + self._fmtPct(v, totalCategorias) + ')';
-              }
-            }
-          }
+          valoresNasBarras: { totalBase: totalCategorias }, // % sobre o total filtrado
+          tooltip: self._tooltipQtdePct(totalCategorias)
         },
         scales: escalaCategoria
       }
     });
 
     // ── Por Canal (pizza) ──
-    // A legenda já traz "Canal — 125 (63,5%)": números sempre visíveis.
+    // Quantidade e percentual desenhados SOBRE cada fatia (plugin); a
+    // legenda mostra apenas os nomes e o tooltip complementa com "125 (63,5%)".
     var porCanal = self._agruparPor('canal');
+    var totalCanal = 0;
+    porCanal.valores.forEach(function(v) { totalCanal += Number(v) || 0; });
     self._criarChart('ind-chart-canal', {
       type: 'pie',
+      plugins: [self._pluginValoresPizza],
       data: {
-        labels: self._rotulosComValores(porCanal.labels, porCanal.valores),
+        labels: porCanal.labels,
         datasets: [{ data: porCanal.valores, backgroundColor: self._cores }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' }, tooltip: self._tooltipQtdePct(totalCanal) }
+      }
     });
 
     // ── Por Responsável (barras horizontais) ──
@@ -662,6 +731,8 @@ Pages.indicadores = {
     // são desenhados no fim de cada barra ("125 (63,5%)") pelo plugin;
     // "grace" no eixo X reserva espaço à direita para o texto.
     var porResponsavel = self._topN(self._agruparPor('responsavel'), 10);
+    var totalResponsavel = 0;
+    porResponsavel.valores.forEach(function(v) { totalResponsavel += Number(v) || 0; });
     var escalaResp = self._escalaComTruncamento('y');
     escalaResp.x = { grace: '20%' };
     self._criarChart('ind-chart-responsavel', {
@@ -675,19 +746,25 @@ Pages.indicadores = {
         indexAxis: 'y', // barras horizontais
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false }, // sem legenda: valores ficam nas barras
+          tooltip: self._tooltipQtdePct(totalResponsavel)
+        },
         scales: escalaResp
       }
     });
 
     // ── Por Status (pizza) ──
-    // Legenda com quantidade e percentual; as CORES continuam mapeadas
-    // pelos nomes originais dos status (antes de anexar os números).
+    // Quantidade e percentual desenhados SOBRE cada fatia (plugin); a
+    // legenda mostra os nomes e as CORES seguem o mapa de cores por status.
     var porStatus = self._agruparPor('status');
+    var totalStatus = 0;
+    porStatus.valores.forEach(function(v) { totalStatus += Number(v) || 0; });
     self._criarChart('ind-chart-status', {
       type: 'pie',
+      plugins: [self._pluginValoresPizza],
       data: {
-        labels: self._rotulosComValores(porStatus.labels, porStatus.valores),
+        labels: porStatus.labels,
         datasets: [{
           data: porStatus.valores,
           backgroundColor: porStatus.labels.map(function(label) {
@@ -695,7 +772,11 @@ Pages.indicadores = {
           })
         }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' }, tooltip: self._tooltipQtdePct(totalStatus) }
+      }
     });
 
     // ── Aguardando Retorno: Área x Cliente (rosca) ──
@@ -707,13 +788,19 @@ Pages.indicadores = {
       if (aguardando[s] !== undefined) aguardando[s]++;
     });
     var valoresAguardando = [aguardando['Área'], aguardando['Cliente']];
+    var totalAguardando = valoresAguardando[0] + valoresAguardando[1];
     self._criarChart('ind-chart-aguardando', {
       type: 'doughnut',
+      plugins: [self._pluginValoresPizza],
       data: {
-        labels: self._rotulosComValores(['Área', 'Cliente'], valoresAguardando),
+        labels: ['Área', 'Cliente'],
         datasets: [{ data: valoresAguardando, backgroundColor: [self._cores[4], self._cores[1]] }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: basePlugins }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' }, tooltip: self._tooltipQtdePct(totalAguardando) }
+      }
     });
 
     // ── Evolução diária acumulada (abertos x concluídos) ──

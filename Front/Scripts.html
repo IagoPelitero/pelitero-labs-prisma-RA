@@ -233,7 +233,11 @@ var App = {
     if (app) app.innerHTML = '';
     var feedback = document.getElementById('access-denied-message');
     if (feedback) {
-      feedback.textContent = message || 'Este e-mail não possui autorização para utilizar o sistema.';
+      // Mostra a mensagem vinda do servidor (sem o prefixo técnico "AUTH:");
+      // se não houver, usa o texto padrão amigável.
+      var texto = String(message || '').replace(/^AUTH:\s*/, '');
+      feedback.textContent = texto ||
+        'Seu e-mail não está cadastrado para utilizar o Prisma RA. Entre em contato com o Administrador para solicitar seu acesso.';
     }
   },
 
