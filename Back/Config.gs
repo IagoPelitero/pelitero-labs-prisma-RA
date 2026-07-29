@@ -38,6 +38,13 @@ const CONFIG = {
   // esquema (ensureSheetSchema_/migrateLegacyData_), que PRESERVA todos os
   // dados existentes: valores são remapeados pelo NOME do cabeçalho e a
   // coluna nova nasce vazia nos registros antigos.
+  //
+  // ATENÇÃO (v4.6.1): esta versão também compõe a CHAVE DE CACHE
+  // (getCacheKey em Database.gs → "PRISMA_RA_<versão>_<Aba>"). Isso é
+  // proteção contra regressão: ao mudar COLUMNS, sempre suba a
+  // SCHEMA_VERSION — assim o cache gravado pelo esquema anterior fica
+  // automaticamente inacessível e nenhuma leitura mistura ordens de
+  // colunas diferentes (era a causa do "Dashboard vazio" intermitente).
   SCHEMA_VERSION: '4.6.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
   SHEET_NAMES: {

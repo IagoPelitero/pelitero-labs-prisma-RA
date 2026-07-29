@@ -247,6 +247,96 @@ edita manualmente no Sheets é sempre preservado.
 - A estrutura é criada/migrada sob demanda por `ensureDatabaseReady` /
   `initializeSheets` (executadas na primeira abertura).
 
+### 7.1 Estratégia de carregamento de dados (confiabilidade)
+
+O Google Sheets é a **fonte oficial** dos dados. O cache existe apenas para
+performance e **nunca** é fonte única. O fluxo de qualquer leitura é:
+
+```
+Solicitação
+   ↓
+Cache existe E é válido? ──Sim──► usa o cache (rápido)
+   │Não
+   ▼
+Lê o Google Sheets (fonte oficial)
+   │  falhou? → 1 retentativa (pausa de 500 ms)
+   ▼
+Valida → devolve os dados → reabastece o cache
+   │  falhou de novo?
+   ▼
+Lança erro "DADOS: ..." (nunca uma lista vazia silenciosa)
+```
+
+**Validação do cache (`isCacheValido_`):** antes de ser usado, o conteúdo do cache é
+verificado — precisa ser uma matriz com linha de cabeçalho e conter **todas** as
+colunas do esquema atual. Cache corrompido, com estrutura inesperada ou gravado por
+um esquema anterior é descartado e a leitura vai ao Sheets.
+
+**Chave de cache versionada:** a chave inclui `CONFIG.SCHEMA_VERSION`
+(`PRISMA_RA_<versão>_<Aba>`). Caches de versões diferentes do esquema nunca se
+cruzam. `invalidateCache` remove também a chave legada (sem versão), usada por
+versões anteriores do código.
+
+**Mapeamento por cabeçalho, não por posição:** `getAll` localiza cada campo pelo
+**nome** na linha de cabeçalho real da aba. Assim, acrescentar, remover ou reordenar
+colunas no Sheets não desloca os valores dos registros; uma coluna configurada e
+ausente na aba vira string vazia (retrocompatibilidade) e colunas extras são
+ignoradas. Se o cabeçalho estiver ilegível, há fallback para o mapeamento posicional
+legado, para nunca perder dados de bases antigas.
+
+**Alinhamento antes de gravar (`ensureAlignedHeaders_`):** `insert` e `update`
+escrevem a linha inteira na ordem das colunas configuradas. Se alguém alterou a
+estrutura da aba manualmente, o cabeçalho é realinhado por `ensureSheetSchema_`
+(que preserva os dados remapeando pelo nome) antes da gravação.
+
+### 7.2 Invalidação do cache
+
+O cache da aba afetada é invalidado automaticamente em **toda escrita** —
+`insert`, `update`, `remove` e `batchInsert` em `Database.gs`. Como todas as
+operações de negócio passam por essas funções, ficam cobertas: novo atendimento,
+edição, exclusão, alteração de status, de responsável, de produto, de categoria, de
+subcategoria e de canal, além das configurações administráveis. Por isso Dashboard e
+Indicadores refletem as alterações imediatamente, sem recarregar o navegador.
+`invalidateAllCache` limpa tudo (usado pelo menu da planilha, pelas migrações e pelo
+fallback com `forceRefresh`).
+
+### 7.3 Fallback automático e tratamento de erros
+
+Erro de leitura e "não há registros" são situações **diferentes** e tratadas como tais:
+
+| Situação | Comportamento |
+| --- | --- |
+| Não existem registros | Mensagem neutra "Nenhum atendimento encontrado." |
+| Falha ao carregar | Fallback automático → se persistir, estado de **erro** com ícone `cloud_off`, aviso de que os dados seguem seguros no Sheets e botão "Tentar novamente" |
+
+No frontend, `Pages.dashboard.carregarDados` e `Pages.indicadores.atualizar`:
+
+1. Tratam resposta ausente ou fora do formato esperado como **falha** (não como
+   base vazia);
+2. Na primeira falha, repetem a chamada **uma única vez** com
+   `{ forceRefresh: true }` — o servidor descarta o cache e lê o Sheets diretamente
+   (`getDashboardData` / `getRelatorio` aceitam esse parâmetro). Não há loop de
+   tentativas;
+3. Registram o contexto técnico no console (`[Dashboard]` / `[Indicadores]`, número
+   da tentativa e mensagem do servidor);
+4. **Preservam a interface**: dados já exibidos não são apagados por uma falha
+   posterior. O estado de erro só aparece quando não há nada para preservar.
+
+**Indisponibilidade temporária do Google:** durante uma instabilidade do Sheets, a
+retentativa do servidor e o fallback do frontend costumam resolver de forma
+transparente. Se não resolverem, o usuário vê o estado de erro (nunca uma tela vazia
+enganosa) e pode tentar novamente sem recarregar a página — nenhum dado é perdido,
+pois todas as gravações já estão na planilha.
+
+### 7.4 Fonte única de atendimentos
+
+`getActiveAtendimentos_` (`Services.gs`) é a **única** função que lê atendimentos:
+consolida as abas de canal, descarta os excluídos e alimenta Dashboard, Indicadores,
+Relatórios, pesquisas e validações. `decorateAtendimentos_` normaliza o formato
+entregue ao frontend e `applyAtendimentoFilters_` centraliza os filtros do servidor.
+Nenhuma tela tem lógica própria de leitura — o que garante que Dashboard e
+Indicadores mostrem sempre a mesma base para o mesmo perfil e filtros.
+
 ---
 
 ## 8. Configuração inicial e instalação
@@ -522,6 +612,17 @@ ver [Limitações conhecidas](#17-limitações-conhecidas).
 
 ## 19. Histórico de versões
 
+- **v4.6.1** — **Correção crítica de carregamento de dados**: eliminada a falha
+  intermitente em que Dashboard e Indicadores apareciam sem registros mesmo com
+  dados válidos na planilha. Causa raiz: cache de esquema anterior (sem a coluna
+  `Subcategoria`) sendo consumido pelo código novo dentro da janela de TTL,
+  deslocando todos os campos a partir de `Categoria` — para o perfil Analista, o
+  filtro por responsável deixava de casar e a tela ficava vazia. Correções: chave
+  de cache versionada por `SCHEMA_VERSION`, validação de estrutura/esquema do cache
+  antes do uso, mapeamento de campos pelo **nome do cabeçalho** (não por posição),
+  retentativa na leitura do Sheets, erro explícito em vez de lista vazia silenciosa,
+  fallback automático `forceRefresh` no frontend e estados de erro distintos de
+  "sem registros" no Dashboard e nos Indicadores. Ver seções 7.1 a 7.4.
 - **v4.6** — **Subcategorias**: nova aba `Subcategorias` e coluna `Subcategoria` nos
   atendimentos, fechando a hierarquia Produto → Categoria → Subcategoria com cascata
   no formulário; gerenciamento completo em Configurações (criar, editar, ativar,

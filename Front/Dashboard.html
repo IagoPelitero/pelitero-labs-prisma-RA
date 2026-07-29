@@ -330,29 +330,76 @@ Pages.dashboard = {
    * Busca KPIs + indicadores por canal + atendimentos em UMA chamada
    * (getDashboardData) e desenha tudo.
    */
-  carregarDados: function() {
+  carregarDados: function(tentativa) {
     var self = this;
+    // Fallback automático (sem loop infinito): na 1ª falha, repete UMA vez
+    // com { forceRefresh: true } — o servidor descarta o cache e lê o
+    // Google Sheets diretamente (fonte oficial). Só depois disso o erro é
+    // mostrado — e SEM apagar dados já exibidos na tela.
+    tentativa = tentativa || 1;
+
     google.script.run
       .withSuccessHandler(function(data) {
-        self.state.atendimentos = (data && data.atendimentos) || [];
+        // Resposta sem a estrutura esperada = falha (não "0 registros"):
+        // aciona o mesmo fallback em vez de exibir uma tela vazia.
+        if (!data || !Array.isArray(data.atendimentos)) {
+          console.error('[Dashboard] Resposta inválida do servidor:', data);
+          self._falhaCarregamento(tentativa, { message: 'Resposta inválida do servidor.' });
+          return;
+        }
+        self.state.atendimentos = data.atendimentos;
         self.state.pagina = 1;
         self.filtrarLocal();
-        self.renderizarKPIs(data && data.cards, data && data.porSituacao);
-        self.renderizarCanais(data && data.porCanal);
+        self.renderizarKPIs(data.cards, data.porSituacao);
+        self.renderizarCanais(data.porCanal);
         self.renderizarTabela();
+        if (tentativa > 1) {
+          Components.toast('Dados recuperados diretamente do Google Sheets. ✓', 'success');
+        }
       })
       .withFailureHandler(function(erro) {
-        Components.toast('Erro ao carregar o dashboard: ' + erro.message, 'error', 5000);
-        var kpiContainer = document.getElementById('dashboard-kpis');
-        if (kpiContainer) {
-          kpiContainer.innerHTML = Components.emptyState('error_outline', 'Não foi possível carregar os indicadores. Tente novamente.');
-        }
-        var tabela = document.getElementById('dashboard-tabela');
-        if (tabela) {
-          tabela.innerHTML = Components.emptyState('error_outline', 'Não foi possível carregar os atendimentos.');
-        }
+        self._falhaCarregamento(tentativa, erro);
       })
-      .getDashboardData();
+      .getDashboardData(tentativa > 1 ? { forceRefresh: true } : null);
+  },
+
+  /**
+   * Tratamento central de falha do carregamento do Dashboard.
+   * 1ª falha → registra o contexto técnico e tenta o fallback (Sheets
+   * direto, sem cache). 2ª falha → mostra o estado de ERRO com botão
+   * "Tentar novamente" — visual DIFERENTE de "Nenhum atendimento
+   * encontrado" (erro nunca se disfarça de base vazia) — e preserva a
+   * tabela anterior se já havia dados na tela.
+   * @param {number} tentativa - Número da tentativa que falhou.
+   * @param {Object} erro - Erro recebido do failure handler.
+   */
+  _falhaCarregamento: function(tentativa, erro) {
+    var msg = (erro && erro.message) || 'erro desconhecido';
+    console.error('[Dashboard] Falha ao carregar (tentativa ' + tentativa + '):', msg);
+
+    if (tentativa === 1) {
+      Components.toast('Falha ao carregar. Consultando o Google Sheets diretamente...', 'warning');
+      this.carregarDados(2); // fallback: força leitura da fonte oficial
+      return;
+    }
+
+    Components.toast('Erro ao carregar o dashboard: ' + msg, 'error', 6000);
+
+    // Preserva a interface: se já existem dados na tela, mantém.
+    if (this.state.atendimentos.length > 0) return;
+
+    var estadoErro = '<div class="empty-state">' +
+      '<span class="material-icons" style="color:var(--danger,#E53935)">cloud_off</span>' +
+      '<div class="empty-state-title">Não foi possível carregar os atendimentos.</div>' +
+      '<div class="empty-state-message">Os registros continuam seguros no Google Sheets — houve uma falha temporária de leitura.</div>' +
+      '<button class="btn btn-primary" style="margin-top:12px;" onclick="Pages.dashboard.carregarDados()">🔄 Tentar novamente</button>' +
+      '</div>';
+    var kpiContainer = document.getElementById('dashboard-kpis');
+    if (kpiContainer) {
+      kpiContainer.innerHTML = Components.emptyState('error_outline', 'Não foi possível carregar os indicadores.');
+    }
+    var tabela = document.getElementById('dashboard-tabela');
+    if (tabela) tabela.innerHTML = estadoErro;
   },
 
   /**

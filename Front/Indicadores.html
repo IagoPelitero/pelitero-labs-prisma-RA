@@ -128,16 +128,7 @@ Pages.indicadores = {
     html += '<div class="grid-4" id="ind-cards"></div>';
 
     // ── Grade de gráficos ──
-    html += '<div class="charts-grid" id="ind-graficos">';
-    html += this._chartCard('ind-chart-dia', 'Atendimentos por dia');
-    html += this._chartCard('ind-chart-produto', 'Atendimentos por Produto');
-    html += this._chartCard('ind-chart-categoria', 'Atendimentos por Categoria (Top 5)');
-    html += this._chartCard('ind-chart-canal', 'Atendimentos por Canal');
-    html += this._chartCard('ind-chart-responsavel', 'Atendimentos por Responsável');
-    html += this._chartCard('ind-chart-status', 'Atendimentos por Status');
-    html += this._chartCard('ind-chart-aguardando', 'Aguardando Retorno (Área x Cliente)');
-    html += this._chartCard('ind-chart-evolucao', 'Evolução Diária no Período', true);
-    html += '</div>';
+    html += '<div class="charts-grid" id="ind-graficos">' + this._gradeGraficosHtml() + '</div>';
 
     container.innerHTML = html;
 
@@ -269,19 +260,101 @@ Pages.indicadores = {
   /**
    * Busca os dados filtrados no servidor (getRelatorio — mesma regra de
    * permissão dos Relatórios) e redesenha cards e gráficos.
+   *
+   * Fallback automático (mesmo padrão do Dashboard, sem loop infinito):
+   * na 1ª falha ou resposta inválida, repete UMA vez com
+   * { forceRefresh: true } — o servidor descarta o cache e consulta o
+   * Google Sheets diretamente. Uma falha de leitura NUNCA é exibida como
+   * "0 atendimentos": os gráficos anteriores são preservados e o erro é
+   * registrado no console para diagnóstico.
+   * @param {number} tentativa - Nº da tentativa (interno; padrão 1).
    */
-  atualizar: function() {
+  atualizar: function(tentativa) {
     var self = this;
+    tentativa = tentativa || 1;
+
+    var falhou = function(err) {
+      var msg = (err && err.message) || 'erro desconhecido';
+      console.error('[Indicadores] Falha ao carregar (tentativa ' + tentativa + '):', msg);
+      if (tentativa === 1) {
+        Components.toast('Falha ao carregar. Consultando o Google Sheets diretamente...', 'warning');
+        self.atualizar(2); // fallback: força leitura da fonte oficial
+        return;
+      }
+      // 2ª falha: informa o erro. Se JÁ havia gráficos na tela, eles são
+      // preservados (o usuário continua com os últimos dados válidos).
+      Components.toast('Erro ao carregar indicadores: ' + msg, 'error', 6000);
+      if (self.state.dados.length === 0) self._renderEstadoErro();
+    };
+
     google.script.run
       .withSuccessHandler(function(dados) {
-        self.state.dados = dados || [];
+        // Resposta inesperada (não-array) é FALHA, não "sem registros".
+        if (!Array.isArray(dados)) {
+          falhou({ message: 'Resposta inválida do servidor.' });
+          return;
+        }
+        self.state.dados = dados;
         self.renderCards();
         self.renderCharts();
+        if (tentativa > 1) {
+          Components.toast('Indicadores recuperados diretamente do Google Sheets. ✓', 'success');
+        }
       })
-      .withFailureHandler(function(err) {
-        Components.toast('Erro ao carregar indicadores: ' + err.message, 'error');
-      })
-      .getRelatorio(self.getFiltros());
+      .withFailureHandler(falhou)
+      .getRelatorio(self.getFiltros(), tentativa > 1 ? { forceRefresh: true } : null);
+  },
+
+  /**
+   * Estado de ERRO da tela de Indicadores (falha na primeira carga, sem
+   * dados anteriores para preservar).
+   *
+   * Por que existe: sem isto, uma falha de leitura deixava a área de
+   * cards e a grade de gráficos em branco — indistinguível de "não há
+   * registros no período". A mensagem deixa claro que os dados existem
+   * no Google Sheets e houve falha TÉCNICA, com ação de recuperação.
+   */
+  _renderEstadoErro: function() {
+    var cards = document.getElementById('ind-cards');
+    var graficos = document.getElementById('ind-graficos');
+    if (cards) cards.innerHTML = '';
+    if (!graficos) return;
+    graficos.innerHTML =
+      '<div class="chart-card chart-wide"><div class="empty-state">' +
+      '<span class="material-icons" style="color:var(--danger,#E53935)">cloud_off</span>' +
+      '<div class="empty-state-title">Não foi possível carregar os indicadores.</div>' +
+      '<div class="empty-state-message">Os registros continuam seguros no Google Sheets — houve uma falha temporária de leitura.</div>' +
+      '<button class="btn btn-primary" style="margin-top:12px;" onclick="Pages.indicadores.atualizar()">🔄 Tentar novamente</button>' +
+      '</div></div>';
+  },
+
+  /**
+   * HTML dos cards de gráfico da tela — FONTE ÚNICA da lista de gráficos,
+   * usada tanto pelo render() inicial quanto pela recriação após o estado
+   * de erro (evita as duas listas divergirem com o tempo).
+   * @returns {string} HTML dos cards (sem o container .charts-grid).
+   */
+  _gradeGraficosHtml: function() {
+    return this._chartCard('ind-chart-dia', 'Atendimentos por dia') +
+      this._chartCard('ind-chart-produto', 'Atendimentos por Produto') +
+      this._chartCard('ind-chart-categoria', 'Atendimentos por Categoria (Top 5)') +
+      this._chartCard('ind-chart-canal', 'Atendimentos por Canal') +
+      this._chartCard('ind-chart-responsavel', 'Atendimentos por Responsável') +
+      this._chartCard('ind-chart-status', 'Atendimentos por Status') +
+      this._chartCard('ind-chart-aguardando', 'Aguardando Retorno (Área x Cliente)') +
+      this._chartCard('ind-chart-evolucao', 'Evolução Diária no Período', true);
+  },
+
+  /**
+   * Recria a grade de gráficos quando ela foi substituída pelo estado de
+   * erro (_renderEstadoErro apaga os canvas). Chamado antes de redesenhar
+   * os gráficos após uma recuperação bem-sucedida.
+   */
+  _garantirGradeGraficos: function() {
+    var grade = document.getElementById('ind-graficos');
+    if (!grade || document.getElementById('ind-chart-dia')) return; // já existe
+    this.state.charts = {}; // instâncias antigas foram removidas do DOM
+    grade.innerHTML = this._gradeGraficosHtml();
   },
 
   // ── Classificadores de status (regras do fluxo) ──
@@ -610,6 +683,8 @@ Pages.indicadores = {
       Components.toast('Biblioteca de gráficos ainda não carregou. Tente novamente em alguns segundos.', 'warning');
       return;
     }
+    // Se a tela estava no estado de erro, recria os canvas antes de desenhar.
+    self._garantirGradeGraficos();
 
     // Cores de texto/grades acompanham o tema atual (inclusive Dark).
     var css = getComputedStyle(document.body);

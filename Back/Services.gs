@@ -313,14 +313,17 @@ function getAtendimentoSheetNames_() {
 }
 
 /**
- * Todos os atendimentos ativos, consolidados das três abas por canal.
- * A pesquisa e os relatórios usam esta função — o usuário nunca precisa
- * saber em qual aba o registro está gravado.
+ * Todos os atendimentos ativos, consolidados das abas por canal.
+ * FONTE ÚNICA de atendimentos do sistema: Dashboard, Indicadores,
+ * Relatórios, pesquisas e validações usam esta função — o usuário nunca
+ * precisa saber em qual aba o registro está gravado.
+ * @param {boolean} forceRefresh - true ignora o cache e lê o Sheets
+ *        diretamente (usado pelo fallback automático do frontend).
  */
-function getActiveAtendimentos_() {
+function getActiveAtendimentos_(forceRefresh) {
   let records = [];
   getAtendimentoSheetNames_().forEach(function(sheetName) {
-    records = records.concat(getAll(sheetName));
+    records = records.concat(getAll(sheetName, forceRefresh === true));
   });
   return records.filter(function(record) {
     return !isTrue_(record.Excluido);
@@ -1049,10 +1052,15 @@ function buildChangeHistory_(atendimentoId, oldRecord, updates, userName, justif
  * seus; Supervisor vê todos). Evita múltiplas idas ao servidor e telas de
  * carregamento em sequência.
  */
-function getDashboardData() {
+function getDashboardData(options) {
   requireAuth_();
   const actor = getActor_();
-  const raw = restrictToOwnerIfNeeded_(getActiveAtendimentos_(), actor);
+  // Fallback automático: quando o frontend detecta uma falha ou resposta
+  // inválida, repete a chamada com { forceRefresh: true } — o cache é
+  // descartado e os dados vêm DIRETO do Google Sheets (fonte oficial).
+  const force = !!(options && options.forceRefresh);
+  if (force) invalidateAllCache();
+  const raw = restrictToOwnerIfNeeded_(getActiveAtendimentos_(force), actor);
   const records = decorateAtendimentos_(raw);
   sortClientRecords_(records, { campo: 'dataAbertura', direcao: 'desc' });
 
@@ -1123,11 +1131,15 @@ function getDashboardData() {
  * @param {Object} filtros - Filtros da tela de Relatórios.
  * @returns {Object[]} Atendimentos no formato do frontend.
  */
-function getRelatorio(filtros) {
+function getRelatorio(filtros, options) {
   requireAuth_();
   const actor = getActor_();
+  // Mesmo fallback do Dashboard: { forceRefresh: true } ignora o cache e
+  // consulta o Google Sheets diretamente (Indicadores/Relatórios).
+  const force = !!(options && options.forceRefresh);
+  if (force) invalidateAllCache();
   return decorateAtendimentos_(
-    applyAtendimentoFilters_(restrictToOwnerIfNeeded_(getActiveAtendimentos_(), actor), filtros || {})
+    applyAtendimentoFilters_(restrictToOwnerIfNeeded_(getActiveAtendimentos_(force), actor), filtros || {})
   );
 }
 

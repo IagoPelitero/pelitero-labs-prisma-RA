@@ -596,22 +596,45 @@ function removeDefaultBlankSheet_(ss) {
 
 /**
  * Gera a chave de cache para uma planilha.
+ *
+ * CORREÇÃO DE BUG (causa raiz do "dashboard vazio" intermitente):
+ * a chave agora inclui a SCHEMA_VERSION. Antes, um cache gravado por uma
+ * versão anterior do código (ex.: sem a coluna Subcategoria) podia ser
+ * lido pela versão nova durante a janela do TTL — as linhas cruas eram
+ * então mapeadas com a lista de colunas nova, deslocando TODOS os campos
+ * a partir do ponto de inserção (Status virava Subcategoria, Responsável
+ * virava DataResolucao...). Para o perfil Analista, o filtro por
+ * responsável deixava de casar e a tela ficava COMPLETAMENTE VAZIA,
+ * mesmo com registros válidos na planilha. Com a versão na chave, caches
+ * de esquemas diferentes nunca se cruzam.
  * @param {string} sheetName - Nome da planilha
  * @returns {string} Chave de cache
  */
 function getCacheKey(sheetName) {
+  return 'PRISMA_RA_' + CONFIG.SCHEMA_VERSION + '_' + sheetName;
+}
+
+/**
+ * Chave de cache usada por versões anteriores (sem SCHEMA_VERSION).
+ * Mantida apenas para LIMPEZA durante a atualização — nunca para leitura.
+ * @param {string} sheetName - Nome da planilha
+ * @returns {string} Chave de cache legada
+ */
+function getLegacyCacheKey_(sheetName) {
   return 'PRISMA_RA_' + sheetName;
 }
 
 /**
  * Invalida (remove) o cache de uma planilha específica.
  * Deve ser chamada após qualquer operação de escrita.
+ * Remove também a chave legada (sem versão), para que instâncias ainda
+ * não atualizadas não sirvam dados obsoletos durante o upgrade.
  * @param {string} sheetName - Nome da planilha
  */
 function invalidateCache(sheetName) {
   try {
     const cache = CacheService.getScriptCache();
-    cache.remove(getCacheKey(sheetName));
+    cache.removeAll([getCacheKey(sheetName), getLegacyCacheKey_(sheetName)]);
     Logger.log('Cache invalidado para: ' + sheetName);
   } catch (e) {
     Logger.log('Erro ao invalidar cache: ' + e.message);
@@ -619,13 +642,15 @@ function invalidateCache(sheetName) {
 }
 
 /**
- * Invalida o cache de todas as planilhas.
+ * Invalida o cache de todas as planilhas (chaves atuais e legadas).
  */
 function invalidateAllCache() {
   try {
     const cache = CacheService.getScriptCache();
-    const keys = Object.values(CONFIG.SHEET_NAMES).map(function(name) {
-      return getCacheKey(name);
+    const keys = [];
+    Object.values(CONFIG.SHEET_NAMES).forEach(function(name) {
+      keys.push(getCacheKey(name));
+      keys.push(getLegacyCacheKey_(name));
     });
     cache.removeAll(keys);
     Logger.log('Todos os caches invalidados.');
@@ -639,91 +664,188 @@ function invalidateAllCache() {
 // ============================================================================
 
 /**
- * Lê todos os dados de uma planilha, utilizando cache quando disponível.
- * Os dados são armazenados em cache por CONFIG.CACHE_TTL segundos.
- * @param {string} sheetName - Nome da planilha
- * @returns {Array[]} Array bidimensional com os dados (incluindo cabeçalho)
+ * Valida a estrutura de um cache de planilha antes de usá-lo.
+ * O cache é APENAS otimização — nunca fonte única. Se estiver corrompido,
+ * com estrutura inesperada ou com cabeçalho incompatível com o esquema
+ * atual (ex.: gravado antes de uma migração de colunas), ele é descartado
+ * e a leitura volta para o Google Sheets (fonte oficial).
+ * @param {*} data - Valor desserializado do cache.
+ * @param {string} sheetName - Nome da planilha (para conferir o esquema).
+ * @returns {boolean} true somente se o cache é seguro para uso.
  */
-function getSheetData(sheetName) {
-  try {
-    const cache = CacheService.getScriptCache();
-    const cacheKey = getCacheKey(sheetName);
-    const cached = cache.get(cacheKey);
-    
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (parseError) {
-        Logger.log('Erro ao parsear cache, lendo da planilha: ' + parseError.message);
-      }
-    }
-    
-    // Lê da planilha
-    const ss = getSpreadsheet();
-    const sheet = ss.getSheetByName(sheetName);
-    
-    if (!sheet) {
-      Logger.log('Planilha não encontrada: ' + sheetName);
-      return [];
-    }
-    
-    const lastRow = sheet.getLastRow();
-    const lastCol = sheet.getLastColumn();
-    
-    if (lastRow === 0 || lastCol === 0) {
-      return [];
-    }
-    
-    const data = sheet.getDataRange().getValues();
-    
-    // Tenta cachear (limite de 100KB por chave do CacheService)
-    try {
-      const jsonData = JSON.stringify(data);
-      if (jsonData.length <= 100000) {
-        cache.put(cacheKey, jsonData, CONFIG.CACHE_TTL);
-      } else {
-        Logger.log('Dados muito grandes para cache (' + sheetName + '): ' + jsonData.length + ' bytes');
-      }
-    } catch (cacheError) {
-      Logger.log('Erro ao cachear dados de ' + sheetName + ': ' + cacheError.message);
-    }
-    
-    return data;
-  } catch (e) {
-    Logger.log('Erro ao ler dados de ' + sheetName + ': ' + e.message);
-    return [];
+function isCacheValido_(data, sheetName) {
+  // Estrutura básica: array de arrays, com linha de cabeçalho.
+  if (!Array.isArray(data) || data.length === 0) return false;
+  if (!Array.isArray(data[0])) return false;
+
+  // Cabeçalho do cache deve conter TODAS as colunas do esquema atual.
+  // Se a lista de colunas mudou (ex.: Subcategoria adicionada) e o cache
+  // é anterior à mudança, ele é rejeitado — evita o deslocamento de
+  // campos que fazia registros "sumirem" do Dashboard/Indicadores.
+  const columns = getColumnsForSheet(sheetName);
+  if (columns.length > 0) {
+    const headers = data[0].map(function(value) { return String(value); });
+    const todasPresentes = columns.every(function(col) {
+      return headers.indexOf(col) !== -1;
+    });
+    if (!todasPresentes) return false;
   }
+  return true;
+}
+
+/**
+ * Lê todos os dados de uma planilha, utilizando cache quando disponível.
+ *
+ * ESTRATÉGIA (confiabilidade + performance):
+ *   1. Cache válido?  → usa (rápido, sem tocar no Sheets);
+ *   2. Cache ausente/expirado/corrompido/incompatível → lê o Sheets
+ *      (fonte oficial), valida e reabastece o cache;
+ *   3. Falha transitória do Sheets → UMA nova tentativa;
+ *   4. Falha definitiva → ERRO explícito (prefixo "DADOS:").
+ *
+ * CORREÇÃO DE BUG: antes, qualquer exceção era engolida e a função
+ * devolvia [] — o frontend exibia "Nenhum atendimento encontrado" como
+ * se a base estivesse vazia (confundia ERRO com AUSÊNCIA DE DADOS).
+ * Agora erro é erro: propaga para o failure handler do frontend, que
+ * aciona o fallback automático e nunca mostra tela vazia indevida.
+ * @param {string} sheetName - Nome da planilha
+ * @param {boolean} forceRefresh - true ignora o cache e lê o Sheets.
+ * @returns {Array[]} Array bidimensional com os dados (incluindo cabeçalho)
+ * @throws {Error} 'DADOS: ...' quando o Sheets não pôde ser lido.
+ */
+function getSheetData(sheetName, forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = getCacheKey(sheetName);
+
+  // ── 1. Tenta o cache (somente se não for refresh forçado) ──
+  if (!forceRefresh) {
+    try {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (isCacheValido_(parsed, sheetName)) {
+          return parsed;
+        }
+        // Cache inválido/incompatível: descarta e segue para o Sheets.
+        cache.remove(cacheKey);
+        Logger.log('[CacheGuard] Cache descartado (estrutura/esquema inválido): ' + sheetName);
+      }
+    } catch (cacheReadError) {
+      // Falha no cache NUNCA impede a leitura da fonte oficial.
+      Logger.log('[CacheGuard] Erro ao ler cache de ' + sheetName + ': ' + cacheReadError.message);
+    }
+  }
+
+  // ── 2. Fonte oficial: Google Sheets (com uma retentativa) ──
+  let lastError = null;
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      const ss = getSpreadsheet();
+      const sheet = ss.getSheetByName(sheetName);
+
+      if (!sheet) {
+        // Aba mapeada que não existe é problema estrutural, não "0 registros".
+        throw new Error('Aba "' + sheetName + '" não encontrada na planilha.');
+      }
+
+      if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+        return []; // aba realmente vazia (sem cabeçalho): não há o que ler
+      }
+
+      const data = sheet.getDataRange().getValues();
+
+      // ── 3. Reabastece o cache (limite de 100KB por chave) ──
+      try {
+        const jsonData = JSON.stringify(data);
+        if (jsonData.length <= 100000) {
+          cache.put(cacheKey, jsonData, CONFIG.CACHE_TTL);
+        } else {
+          Logger.log('Dados muito grandes para cache (' + sheetName + '): ' + jsonData.length + ' bytes');
+        }
+      } catch (cacheError) {
+        Logger.log('Erro ao cachear dados de ' + sheetName + ': ' + cacheError.message);
+      }
+
+      return data;
+    } catch (e) {
+      lastError = e;
+      Logger.log('[Dados] Tentativa ' + tentativa + ' falhou ao ler ' + sheetName + ': ' + e.message);
+      if (tentativa === 1) Utilities.sleep(500); // pequena pausa antes de tentar de novo
+    }
+  }
+
+  // ── 4. Falha definitiva: erro explícito (nunca [] silencioso) ──
+  throw new Error('DADOS: Falha ao ler a aba "' + sheetName + '" no Google Sheets: ' +
+    (lastError ? lastError.message : 'erro desconhecido'));
 }
 
 /**
  * Obtém todos os registros de uma planilha como array de objetos.
  * Exclui a linha de cabeçalho e converte cada linha para objeto.
+ *
+ * PROTEÇÃO CONTRA REGRESSÃO (mapeamento por CABEÇALHO, não por posição):
+ * cada campo é localizado pelo NOME na linha de cabeçalho real da aba,
+ * e não mais pela posição fixa na lista de colunas do Config. Assim:
+ *   - adicionar uma coluna nova no Sheets (ex.: Subcategoria) não
+ *     desloca os campos dos registros;
+ *   - colunas em ordem diferente da configurada continuam corretas;
+ *   - coluna configurada mas ausente na aba (registros antigos) vira ''
+ *     — compatibilidade preservada;
+ *   - colunas extras na aba são simplesmente ignoradas.
+ * Fallback: se o cabeçalho da aba estiver ilegível (nenhuma coluna
+ * reconhecida), usa o mapeamento posicional legado, para nunca perder
+ * dados de bases antigas.
+ *
+ * Erros de leitura NÃO são engolidos: propagam para o chamador (e daí
+ * para o failure handler do frontend), que distingue "erro" de
+ * "0 registros" e aciona o fallback automático.
  * @param {string} sheetName - Nome da planilha
+ * @param {boolean} forceRefresh - true ignora o cache (fallback).
  * @returns {Object[]} Array de objetos com os dados
+ * @throws {Error} 'DADOS: ...' quando a leitura da fonte oficial falha.
  */
-function getAll(sheetName) {
-  try {
-    const data = getSheetData(sheetName);
-    
-    if (data.length <= 1) return []; // Sem dados (só cabeçalho ou vazio)
-    
-    // Obtém as colunas definidas para esta planilha
-    const columns = getColumnsForSheet(sheetName);
-    
-    // Converte cada linha (exceto cabeçalho) para objeto
-    const records = [];
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      // Ignora linhas completamente vazias
-      if (row.every(function(cell) { return cell === '' || cell === null || cell === undefined; })) continue;
-      records.push(toObject(row, columns));
-    }
-    
-    return records;
-  } catch (e) {
-    Logger.log('Erro em getAll(' + sheetName + '): ' + e.message);
-    return [];
+function getAll(sheetName, forceRefresh) {
+  const data = getSheetData(sheetName, forceRefresh === true);
+
+  if (data.length <= 1) return []; // Sem dados (só cabeçalho ou vazio)
+
+  // Colunas definidas no Config para esta planilha
+  const columns = getColumnsForSheet(sheetName);
+
+  // Índice de cada coluna pelo NOME no cabeçalho real da aba.
+  const headers = data[0].map(function(value) { return String(value); });
+  const indicePorColuna = {};
+  let reconhecidas = 0;
+  columns.forEach(function(col) {
+    const idx = headers.indexOf(col);
+    indicePorColuna[col] = idx;
+    if (idx !== -1) reconhecidas++;
+  });
+  const mapearPorCabecalho = reconhecidas > 0;
+  if (!mapearPorCabecalho && columns.length > 0) {
+    Logger.log('[Dados] Cabeçalho de ' + sheetName + ' não reconhecido — usando mapeamento posicional legado.');
   }
+
+  // Converte cada linha (exceto cabeçalho) para objeto
+  const records = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    // Ignora linhas completamente vazias
+    if (row.every(function(cell) { return cell === '' || cell === null || cell === undefined; })) continue;
+
+    if (mapearPorCabecalho) {
+      const obj = {};
+      columns.forEach(function(col) {
+        const idx = indicePorColuna[col];
+        obj[col] = (idx !== -1 && idx < row.length) ? row[idx] : '';
+      });
+      records.push(obj);
+    } else {
+      records.push(toObject(row, columns)); // fallback posicional legado
+    }
+  }
+
+  return records;
 }
 
 /**
@@ -814,6 +936,31 @@ function getFilteredData(sheetName, filters) {
 // ============================================================================
 
 /**
+ * Garante que o cabeçalho físico da aba está alinhado com o esquema do
+ * Config ANTES de uma gravação posicional (insert/update escrevem a linha
+ * inteira na ordem das colunas configuradas).
+ * Se alguém adicionou/reordenou colunas manualmente no Sheets, realinha a
+ * aba via ensureSheetSchema_ (que preserva os dados remapeando pelo NOME
+ * do cabeçalho) e invalida o cache. Proteção contra regressão: uma
+ * mudança estrutural na planilha não corrompe mais as gravações.
+ * @param {Sheet} sheet - Aba de destino.
+ * @param {string} sheetName - Nome da aba (para invalidar o cache).
+ * @param {string[]} columns - Colunas esperadas (Config).
+ */
+function ensureAlignedHeaders_(sheet, sheetName, columns) {
+  if (!columns || columns.length === 0) return;
+  const lastCol = sheet.getLastColumn();
+  if (lastCol > 0) {
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(v) { return String(v); });
+    const alinhado = columns.every(function(col, index) { return headers[index] === col; });
+    if (alinhado) return;
+  }
+  Logger.log('[SchemaGuard] Cabeçalho de ' + sheetName + ' desalinhado — realinhando antes da gravação.');
+  ensureSheetSchema_(sheet, columns);
+  invalidateCache(sheetName);
+}
+
+/**
  * Insere um novo registro na planilha.
  * Utiliza LockService para garantir concorrência segura.
  * @param {string} sheetName - Nome da planilha
@@ -835,6 +982,8 @@ function insert(sheetName, data) {
     
     const columns = getColumnsForSheet(sheetName);
     assertColumnsForSheet_(sheetName, columns);
+    // Gravação é posicional: garante o alinhamento do cabeçalho antes.
+    ensureAlignedHeaders_(sheet, sheetName, columns);
     const rowData = toRowArray(data, columns);
 
     sheet.appendRow(rowData);
@@ -873,15 +1022,18 @@ function update(sheetName, id, data) {
       throw new Error('Planilha não encontrada: ' + sheetName);
     }
     
+    const columns = getColumnsForSheet(sheetName);
+    assertColumnsForSheet_(sheetName, columns);
+    // Leitura e regravação da linha são posicionais: alinha o cabeçalho
+    // ANTES de localizar a linha (o realinhamento pode mover linhas).
+    ensureAlignedHeaders_(sheet, sheetName, columns);
+
     // Encontra a linha do registro pelo ID
     const rowIndex = findRowById(sheet, id);
-    
+
     if (rowIndex === -1) {
       throw new Error('Registro não encontrado: ' + id);
     }
-    
-    const columns = getColumnsForSheet(sheetName);
-    assertColumnsForSheet_(sheetName, columns);
 
     // Mescla dados existentes com novos dados
     const existingData = sheet.getRange(rowIndex, 1, 1, columns.length).getValues()[0];
