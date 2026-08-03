@@ -82,8 +82,11 @@ var App = {
         App.user = result && result.user ? result.user : {};
         App.dropdownData = result && result.dropdownData ? result.dropdownData : {};
         App.formConfig = result && result.formConfig ? result.formConfig : [];
+        // v4.7: resumo do módulo Indicadores Operacionais (rótulo dinâmico do menu).
+        App.moduloIndicadoresOp = result && result.moduloIndicadoresOp ? result.moduloIndicadoresOp : {};
         App.renderUser();
         App.applyRoleVisibility();
+        App.aplicarRotuloIndicOp();
         if (typeof onSuccess === 'function') onSuccess(result);
       })
       .withFailureHandler(function(error) {
@@ -189,6 +192,18 @@ var App = {
       element.style.display = admin ? '' : 'none';
     });
     if (!allowed && this.currentPage === 'configuracoes') this.navigateTo('dashboard');
+  },
+
+  // v4.7: aplica o rótulo dinâmico do módulo Indicadores Operacionais no
+  // item de menu (o ADM define o nome em Configurações). O texto vem do
+  // bootstrap (App.moduloIndicadoresOp.abaNome); o tooltip acompanha.
+  aplicarRotuloIndicOp: function() {
+    var nome = (this.moduloIndicadoresOp && this.moduloIndicadoresOp.abaNome) ||
+      'Indicadores Operacionais';
+    var label = document.getElementById('menu-indic-op-label');
+    if (label) label.textContent = nome;
+    var item = document.getElementById('menu-indic-op');
+    if (item) item.setAttribute('data-tooltip', nome);
   },
 
   // Abre/fecha o menu lateral (gaveta no celular, encolhido no desktop).

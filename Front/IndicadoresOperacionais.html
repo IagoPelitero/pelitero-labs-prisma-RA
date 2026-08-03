@@ -1,0 +1,297 @@
+<script>
+/* ============================================================
+   Pelitero Labs Prisma RA — IndicadoresOperacionais.html
+   Pages.indicadoresOperacionais — Painel de indicadores operacionais (v4.7)
+   Desenvolvido por Pelitero Labs.
+   ------------------------------------------------------------
+   GUIA PARA QUEM ESTÁ COMEÇANDO
+   Tela independente, restrita à supervisão (Supervisor/ADM). Mostra uma
+   tabela matriz (indicadores nas LINHAS, datas nas COLUNAS) consolidada a
+   partir de uma planilha Google Sheets EXTERNA configurada pelo ADM em
+   Configurações → Indicadores Operacionais.
+
+   Fluxo:
+     render()   → desenha o cabeçalho (botões) e dispara a 1ª carga.
+     carregar() → chama getIndicadoresOperacionais no servidor, que lê e
+                  consolida a planilha externa (com cache) e devolve os 4
+                  indicadores automáticos (Casos, Em Aberto, Em Análise,
+                  Fechado+Rejeitado) + a linha manual "Fora da SLA".
+     "Atualizar Dados" → recarrega forçando releitura da planilha externa.
+     "Exportar Excel"  → exporta exatamente a tabela exibida.
+
+   O servidor localiza as colunas de Data/Status pelo NOME do cabeçalho, trata
+   datas com horário, células mescladas e linhas vazias — o frontend apenas
+   apresenta o resultado já consolidado.
+   ============================================================ */
+Pages.indicadoresOperacionais = {
+  state: {
+    dados: null,     // último resultado carregado (para exportação)
+    carregando: false
+  },
+
+  /**
+   * Desenha a tela e carrega os dados. Analistas são redirecionados
+   * (a permissão também é validada no servidor: requireSupervisor_).
+   * @param {HTMLElement} container - <main id="app">.
+   */
+  render: function(container) {
+    container = container || document.getElementById('app');
+    if (!App.isSupervisor()) {
+      App.navigateTo('dashboard');
+      return;
+    }
+
+    // Rótulo dinâmico do módulo (definido pelo ADM), vindo do bootstrap.
+    var titulo = (App.moduloIndicadoresOp && App.moduloIndicadoresOp.abaNome) ||
+      'Indicadores Operacionais';
+
+    var html = '';
+    html += '<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">';
+    html += '  <div>';
+    html += '    <h1 class="page-title">' + App.escapeHtml(titulo) + '</h1>';
+    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Indicadores consolidados a partir da planilha operacional externa.</p>';
+    html += '  </div>';
+    html += '  <div style="display:flex;gap:10px;flex-wrap:wrap;">';
+    html += '    <button class="btn btn-secondary" id="indop-atualizar">🔄 Atualizar Dados</button>';
+    html += '    <button class="btn btn-success" id="indop-exportar">📊 Exportar Excel</button>';
+    html += '  </div>';
+    html += '</div>';
+    html += '<div class="card" id="indop-conteudo">' +
+      Components.emptyState('query_stats', 'Carregando indicadores operacionais...') + '</div>';
+
+    container.innerHTML = html;
+
+    var self = this;
+    var btnAtualizar = document.getElementById('indop-atualizar');
+    if (btnAtualizar) {
+      btnAtualizar.addEventListener('click', function() { self.carregar(true); });
+    }
+    var btnExportar = document.getElementById('indop-exportar');
+    if (btnExportar) {
+      btnExportar.addEventListener('click', function() { self.exportar(); });
+    }
+
+    this.carregar(false);
+  },
+
+  /**
+   * Busca os indicadores no servidor. forceRefresh=true (botão "Atualizar
+   * Dados") faz o servidor reler a planilha externa ignorando o cache.
+   * @param {boolean} forceRefresh - Releitura forçada.
+   */
+  carregar: function(forceRefresh) {
+    var self = this;
+    if (self.state.carregando) return;
+    self.state.carregando = true;
+
+    var btn = document.getElementById('indop-atualizar');
+    if (btn && forceRefresh) { btn.disabled = true; btn.textContent = '🔄 Atualizando...'; }
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.carregando = false;
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar Dados'; }
+        self.state.dados = dados || null;
+        self._renderConteudo(dados);
+        if (forceRefresh && dados && dados.habilitado) {
+          Components.toast('Indicadores atualizados a partir da planilha. ✓', 'success');
+        }
+      })
+      .withFailureHandler(function(err) {
+        self.state.carregando = false;
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar Dados'; }
+        self._renderErro((err && err.message) || 'Erro desconhecido.');
+      })
+      .getIndicadoresOperacionais(forceRefresh ? { forceRefresh: true } : null);
+  },
+
+  /**
+   * Decide o que exibir conforme a resposta: módulo não configurado,
+   * sem dados, ou a tabela consolidada.
+   * @param {Object} dados - Resposta de getIndicadoresOperacionais.
+   */
+  _renderConteudo: function(dados) {
+    var container = document.getElementById('indop-conteudo');
+    if (!container) return;
+
+    // Módulo ainda não configurado pelo ADM.
+    if (!dados || !dados.habilitado) {
+      var msg = App.isAdmin()
+        ? 'Configure a planilha de origem em Configurações → Indicadores Operacionais para ativar este painel.'
+        : 'Este painel ainda não foi configurado. Solicite ao administrador a configuração da planilha de origem.';
+      container.innerHTML = Components.emptyState('settings_suggest', msg);
+      return;
+    }
+
+    // Configurado, mas sem nenhuma data consolidada (planilha vazia/sem linhas úteis).
+    if (!dados.datas || dados.datas.length === 0) {
+      container.innerHTML = Components.emptyState('inbox',
+        'Nenhum dado encontrado na planilha de origem. Verifique se há linhas preenchidas nas colunas de Data e Status.');
+      return;
+    }
+
+    container.innerHTML = this._tabelaHtml(dados);
+  },
+
+  /** Estado de erro, com botão de nova tentativa. */
+  _renderErro: function(msg) {
+    var container = document.getElementById('indop-conteudo');
+    if (!container) return;
+    // Remove o prefixo técnico "INDICOP:" da mensagem exibida.
+    var texto = String(msg || '').replace(/^INDICOP:\s*/, '');
+    container.innerHTML =
+      '<div class="empty-state">' +
+      '<span class="material-icons" style="color:var(--danger,#E53935)">cloud_off</span>' +
+      '<div class="empty-state-title">Não foi possível carregar os indicadores.</div>' +
+      '<div class="empty-state-message">' + App.escapeHtml(texto) + '</div>' +
+      '<button class="btn btn-primary" style="margin-top:12px;" onclick="Pages.indicadoresOperacionais.carregar(true)">🔄 Tentar novamente</button>' +
+      '</div>';
+  },
+
+  /**
+   * Monta a tabela matriz. As LINHAS são os indicadores; as COLUNAS, as
+   * datas (ordenadas). A 1ª coluna e o cabeçalho ficam fixos (CSS
+   * .indop-table). A linha "Fora da SLA" tem inputs editáveis por data,
+   * salvos individualmente no servidor (salvarForaSLA).
+   * @param {Object} dados - Resposta com datas, indicadores e foraSLA.
+   * @returns {string} HTML da tabela.
+   */
+  _tabelaHtml: function(dados) {
+    var datas = dados.datas || [];
+    var ind = dados.indicadores || {};
+    var sla = dados.foraSLA || {};
+
+    // Cabeçalho (canto + uma coluna por data).
+    var thead = '<thead><tr>';
+    thead += '<th class="indop-rowhead">Indicador</th>';
+    datas.forEach(function(d) {
+      thead += '<th>' + App.escapeHtml(d.label) + '</th>';
+    });
+    thead += '</tr></thead>';
+
+    // Linhas automáticas (Casos, Em Aberto, Em Análise, Fechado+Rejeitado).
+    var linhasAuto = [
+      { chave: 'casos', rotulo: 'Casos' },
+      { chave: 'emAberto', rotulo: 'Em Aberto' },
+      { chave: 'emAnalise', rotulo: 'Em Análise' },
+      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' }
+    ];
+    var tbody = '<tbody>';
+    linhasAuto.forEach(function(linha) {
+      var mapa = ind[linha.chave] || {};
+      tbody += '<tr><td class="indop-rowhead">' + App.escapeHtml(linha.rotulo) + '</td>';
+      datas.forEach(function(d) {
+        var v = Number(mapa[d.chave]) || 0;
+        tbody += '<td>' + App.formatNumber(v) + '</td>';
+      });
+      tbody += '</tr>';
+    });
+
+    // Linha MANUAL "Fora da SLA": input por data (persistido no servidor).
+    tbody += '<tr class="indop-linha-sla"><td class="indop-rowhead">Fora da SLA <span title="Valor informado manualmente" class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--text-secondary);">edit</span></td>';
+    datas.forEach(function(d) {
+      var valor = sla[d.chave];
+      valor = (valor === undefined || valor === null) ? '' : valor;
+      tbody += '<td><input type="number" min="0" class="indop-sla-input" value="' + App.escapeHtml(String(valor)) +
+        '" onchange="Pages.indicadoresOperacionais.salvarSLA(\'' + d.chave + '\', this)"></td>';
+    });
+    tbody += '</tr>';
+    tbody += '</tbody>';
+
+    var rodape = '';
+    if (dados.atualizadoEm) {
+      rodape = '<p style="font-size:12px;color:var(--text-secondary);margin-top:10px;">' +
+        'Última leitura da planilha: ' + App.escapeHtml(App.formatDateTimeBR ? App.formatDateTimeBR(dados.atualizadoEm) : App.formatDateBR(dados.atualizadoEm)) +
+        ' — clique em "Atualizar Dados" para reler.</p>';
+    }
+
+    return '<div class="indop-scroll"><table class="indop-table">' + thead + tbody + '</table></div>' + rodape;
+  },
+
+  /**
+   * Salva o valor manual "Fora da SLA" de uma data. Atualiza o estado local
+   * (para a exportação refletir o valor) e persiste no servidor.
+   * @param {string} chave - Data no formato AAAA-MM-DD.
+   * @param {HTMLInputElement} input - Campo editado.
+   */
+  salvarSLA: function(chave, input) {
+    var self = this;
+    var valor = Number(input.value);
+    if (!isFinite(valor) || valor < 0) { valor = 0; input.value = 0; }
+
+    // Reflete imediatamente no estado local (exportação/consistência visual).
+    if (self.state.dados && self.state.dados.foraSLA) {
+      self.state.dados.foraSLA[chave] = valor;
+    }
+
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.toast('"Fora da SLA" salvo.', 'success', 1500);
+      })
+      .withFailureHandler(function(err) {
+        Components.toast('Não foi possível salvar: ' + ((err && err.message) || ''), 'error');
+      })
+      .salvarForaSLA(chave, valor);
+  },
+
+  /**
+   * Exporta exatamente a tabela exibida (datas × indicadores, incluindo
+   * "Fora da SLA") para Excel. Usa SheetJS (aoa_to_sheet) quando disponível;
+   * senão, um CSV com BOM/;" que abre corretamente no Excel e LibreOffice.
+   */
+  exportar: function() {
+    var dados = this.state.dados;
+    if (!dados || !dados.habilitado || !dados.datas || dados.datas.length === 0) {
+      Components.toast('Nenhum dado para exportar.', 'warning');
+      return;
+    }
+    var datas = dados.datas;
+    var ind = dados.indicadores || {};
+    var sla = dados.foraSLA || {};
+
+    // Monta a matriz como array de arrays (mesma disposição da tela).
+    var aoa = [];
+    aoa.push(['Indicador'].concat(datas.map(function(d) { return d.label; })));
+    var linhas = [
+      { chave: 'casos', rotulo: 'Casos' },
+      { chave: 'emAberto', rotulo: 'Em Aberto' },
+      { chave: 'emAnalise', rotulo: 'Em Análise' },
+      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' }
+    ];
+    linhas.forEach(function(linha) {
+      var mapa = ind[linha.chave] || {};
+      aoa.push([linha.rotulo].concat(datas.map(function(d) { return Number(mapa[d.chave]) || 0; })));
+    });
+    aoa.push(['Fora da SLA'].concat(datas.map(function(d) {
+      var v = sla[d.chave];
+      return (v === undefined || v === null || v === '') ? 0 : Number(v) || 0;
+    })));
+
+    var nomeBase = 'indicadores_operacionais_' + new Date().toISOString().slice(0, 10);
+
+    if (window.XLSX) {
+      var sheet = XLSX.utils.aoa_to_sheet(aoa);
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, sheet, 'Indicadores');
+      XLSX.writeFile(wb, nomeBase + '.xlsx');
+      Components.toast('Arquivo Excel exportado com sucesso!', 'success');
+      return;
+    }
+
+    // Fallback CSV (separador ";", com BOM p/ acentos no Excel pt-BR).
+    var csv = aoa.map(function(linha) {
+      return linha.map(function(c) { return String(c).replace(/;/g, ','); }).join(';');
+    }).join('\n');
+    var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', nomeBase + '.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    Components.toast('Arquivo CSV exportado com sucesso!', 'success');
+  }
+};
+</script>

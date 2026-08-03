@@ -27,6 +27,7 @@ Desenvolvido por **Pelitero Labs**.
 10.1 [Seletores dinâmicos (criar campos sem código)](#101-seletores-dinâmicos-criar-campos-sem-código)
 11. [Dashboards](#11-dashboards)
 12. [Indicadores](#12-indicadores)
+12.1 [Indicadores Operacionais (planilha externa)](#121-indicadores-operacionais-planilha-externa)
 13. [Personalização](#13-personalização)
 14. [Performance](#14-performance)
 15. [Segurança](#15-segurança)
@@ -226,6 +227,7 @@ Cada aba da planilha é uma "tabela". As colunas e os dados padrão são definid
 | `Usuários` | Cadastro de acesso: `Nome`, `Email`, `Perfil`, `Equipe`, `Ativo`, datas. |
 | `Produtos`, `Categorias` | Catálogo administrável (categorias podem se vincular a um produto). |
 | `Subcategorias` *(v4.6)* | Terceiro nível da classificação: `Id`, `CategoriaId`, `Nome`, `Ativo`, `Ordem`. Criada vazia — o cadastro é manual, feito por ADM/Supervisor. |
+| `IndicadoresSLA` *(v4.7)* | Valores manuais "Fora da SLA" do módulo Indicadores Operacionais: `Data` (AAAA-MM-DD) e `ForaSLA` (número). Criada vazia. |
 
 **Coluna `Subcategoria` nos atendimentos (v4.6):** foi acrescentada às abas de
 atendimento logo após `Categoria`. A migração de esquema (`ensureSheetSchema_`)
@@ -503,6 +505,74 @@ ilegível com muitas categorias), mas o **percentual continua relativo ao total 
 — não à soma do Top 5. Os rótulos numéricos acompanham o tema (inclusive Dark) e são
 redesenhados ao trocar de tema sem sair da tela.
 
+### 12.1 Indicadores Operacionais (planilha externa)
+
+*(v4.7)* Módulo **independente** para acompanhar indicadores operacionais que vivem em
+uma planilha Google Sheets **externa** ao Prisma RA (por exemplo, um relatório
+operacional mantido por outra equipe). Restrito à supervisão (Supervisor/ADM). O **nome
+do módulo no menu é configurável** pelo Administrador.
+
+**Configuração da fonte** — em *Configurações → Indicadores Operacionais* (ADM):
+
+| Campo | Descrição |
+| --- | --- |
+| Nome da aba (menu) | Rótulo do item no menu lateral. |
+| Link da planilha de origem | URL do Google Sheets externo (você precisa ter acesso a ele). |
+| Nome da aba de origem | Aba, dentro da planilha externa, onde estão os dados. |
+| Linha do cabeçalho | Linha onde estão os títulos das colunas (a tabela pode começar em qualquer linha). |
+| Coluna da Data | **Nome** do cabeçalho da coluna de data. |
+| Coluna do Status | **Nome** do cabeçalho da coluna de status. |
+
+**Estrutura esperada da planilha de origem** — o sistema é resiliente e **não depende de
+posições fixas**:
+
+- as colunas de **Data** e **Status** são localizadas pelo **nome do cabeçalho** — se a
+  ordem das colunas mudar ou surgirem colunas novas, a leitura continua funcionando;
+- a tabela pode **começar em qualquer linha** (informe a linha do cabeçalho);
+- colunas extras são simplesmente ignoradas.
+
+**Tratamento automático dos dados** (feito no servidor):
+
+- **datas com horário** são reduzidas à data — `02/08/2026 14:35` → `02/08/2026`;
+- **linhas totalmente vazias** são ignoradas;
+- **células mescladas** na coluna de data são tratadas por *forward-fill* (a última data
+  válida é "arrastada" para baixo enquanto não muda);
+- **espaços extras** são removidos; linhas sem data ou sem status são descartadas.
+
+**Consolidação por data** — para cada data, o painel calcula:
+
+| Indicador | Como é obtido |
+| --- | --- |
+| **Casos** | Total de registros da data (= soma dos três grupos abaixo). |
+| **Em Aberto** | Status que não caem em "Em Análise" nem "Fechado/Rejeitado". |
+| **Em Análise** | Status contendo "análise". |
+| **Fechado (Fechado + Rejeitado)** | Status contendo fechado, rejeitado, concluído, encerrado, resolvido ou finalizado. |
+| **Fora da SLA** | **Valor manual**, informado pelo usuário (ver abaixo). |
+
+A classificação usa palavras-chave normalizadas (sem acento/caixa), de modo a absorver
+variações de escrita da planilha de origem.
+
+**Campo manual "Fora da SLA"** — é uma linha editável na própria tabela: o usuário digita
+o valor de cada data e ele é **salvo automaticamente** (aba `IndicadoresSLA` do banco do
+Prisma RA, com chave por data no formato `AAAA-MM-DD`). Por ser persistido no banco do
+sistema — e não na planilha externa — o valor **sobrevive a qualquer releitura** da
+origem.
+
+**Layout e navegação** — tabela matriz (indicadores nas linhas, datas nas colunas) com
+**scroll horizontal**, **primeira coluna fixa** (nome do indicador) e **cabeçalho fixo**
+(datas) ao rolar, facilitando a leitura quando há muitas datas.
+
+**Exportar Excel** — botão que exporta **exatamente a tabela exibida** (datas × Casos, Em
+Aberto, Em Análise, Fechado e Fora da SLA). Usa SheetJS (`.xlsx`); em ambientes sem a
+biblioteca, cai para CSV com BOM/`;`, compatível com **Microsoft Excel** e **LibreOffice**.
+
+**Atualizar Dados** — botão que **relê a planilha externa** ignorando o cache, retrata os
+dados e atualiza a tabela sem recarregar a aplicação.
+
+**Performance** — o resultado consolidado da planilha externa é **cacheado**
+(`CacheService`, TTL de 5 min); leituras repetidas não tocam a planilha de origem. A
+releitura só acontece sob demanda ("Atualizar Dados") ou quando o cache expira.
+
 ---
 
 ## 13. Personalização
@@ -612,6 +682,16 @@ ver [Limitações conhecidas](#17-limitações-conhecidas).
 
 ## 19. Histórico de versões
 
+- **v4.7** — **Módulo Indicadores Operacionais**: nova tela (nome configurável pelo ADM)
+  que consolida indicadores de uma planilha Google Sheets externa — colunas localizadas
+  pelo nome do cabeçalho, tratamento de datas com horário, células mescladas e linhas
+  vazias, consolidação por data (Casos, Em Aberto, Em Análise, Fechado+Rejeitado), campo
+  manual "Fora da SLA" persistido (aba `IndicadoresSLA`), tabela com coluna/cabeçalho
+  fixos e scroll horizontal, exportação Excel e botão "Atualizar Dados" com cache.
+  **Popup de CPF** enriquecido com Status, Categoria e Subcategoria do primeiro registro.
+  **Carregamento mais robusto**: `getSpreadsheet` memoizada por execução (de ~10 aberturas
+  para 1, reduzindo latência e falhas transitórias) e retentativa silenciosa no Dashboard
+  e Indicadores — a mensagem de contingência deixou de aparecer no fluxo normal.
 - **v4.6.1** — **Correção crítica de carregamento de dados**: eliminada a falha
   intermitente em que Dashboard e Indicadores apareciam sem registros mesmo com
   dados válidos na planilha. Causa raiz: cache de esquema anterior (sem a coluna

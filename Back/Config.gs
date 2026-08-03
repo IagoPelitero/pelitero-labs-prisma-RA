@@ -45,7 +45,11 @@ const CONFIG = {
   // SCHEMA_VERSION — assim o cache gravado pelo esquema anterior fica
   // automaticamente inacessível e nenhuma leitura mistura ordens de
   // colunas diferentes (era a causa do "Dashboard vazio" intermitente).
-  SCHEMA_VERSION: '4.6.0',
+  //
+  // v4.7: módulo Indicadores Operacionais — nova aba IndicadoresSLA (campo
+  // manual "Fora da SLA"). Abas novas são criadas vazias, sem tocar nas
+  // demais; o bump também invalida os caches do esquema anterior.
+  SCHEMA_VERSION: '4.7.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
   SHEET_NAMES: {
     // Abas de atendimento separadas por canal. A aba legada "Atendimentos"
@@ -64,7 +68,11 @@ const CONFIG = {
     CATEGORIAS: 'Categorias',
     // v4.6: subcategorias vinculadas às categorias (Produto → Categoria →
     // Subcategoria), administráveis pela tela de Configurações.
-    SUBCATEGORIAS: 'Subcategorias'
+    SUBCATEGORIAS: 'Subcategorias',
+    // v4.7: valores manuais "Fora da SLA" do módulo Indicadores
+    // Operacionais, por data (Data | ForaSLA). Persistidos aqui para
+    // sobreviverem à releitura da planilha externa.
+    INDICADORES_SLA: 'IndicadoresSLA'
   },
   // Nome da aba legada (pré-v4), usada apenas pela migração.
   LEGACY_ATENDIMENTOS_SHEET: 'Atendimentos',
@@ -86,7 +94,11 @@ const PROPERTY_KEYS = {
   // (política de não sobrescrita: dados padrão só em abas vazias).
   CANAL_MIGRATION: 'PRISMA_RA_CANAL_MIGRATION',
   // v4.2: migração única que move a aba ChatPrivadoRA para ReclameAqui.
-  CHAT_PRIVADO_MIGRATION: 'PRISMA_RA_CHAT_PRIVADO_MIGRATION'
+  CHAT_PRIVADO_MIGRATION: 'PRISMA_RA_CHAT_PRIVADO_MIGRATION',
+  // v4.7: configuração da fonte de dados do módulo Indicadores Operacionais
+  // (JSON com nome da aba/menu, URL da planilha externa, aba de origem,
+  // linha inicial e nomes das colunas de Data e Status).
+  INDIC_OP_CONFIG: 'PRISMA_RA_INDIC_OP_CONFIG'
 };
 
 // ============================================================================
@@ -194,6 +206,13 @@ const COLUMNS = {
     'Nome',
     'Ativo',
     'Ordem'
+  ],
+  // v4.7: valores manuais "Fora da SLA" do módulo Indicadores Operacionais.
+  // Chave = data no formato ISO curto (AAAA-MM-DD, estável e ordenável);
+  // ForaSLA = número informado pelo usuário para aquela data.
+  INDICADORES_SLA: [
+    'Data',
+    'ForaSLA'
   ]
 };
 

@@ -120,6 +120,13 @@ Pages.configuracoes = {
         { key: 'Ordem', label: 'Ordem', type: 'number' }
       ]
     },
+    // v4.7: configuração da fonte de dados do módulo Indicadores
+    // Operacionais (EXCLUSIVA do ADM). Não é uma lista cadastrável — é um
+    // formulário único (custom) que define a planilha externa e as colunas.
+    indicadoresOperacionais: {
+      label: 'Indicadores Operacionais', icon: 'query_stats', adminOnly: true,
+      custom: true, customPanel: 'indicOp', fields: []
+    },
     // Seção "Banco de Dados" (EXCLUSIVA do ADM): não é uma lista
     // cadastrável — exibe o link da planilha Google Sheets usada como
     // base do sistema, para o administrador abrir/editar manualmente
@@ -205,7 +212,9 @@ Pages.configuracoes = {
     var meta = this.metadata[this.active];
     // Seções custom têm renderização própria (não são tabelas de registros).
     if (meta.custom) {
-      this.renderDatabasePanel(container);
+      // v4.7: roteia pelo tipo de painel custom (padrão: Banco de Dados).
+      if (meta.customPanel === 'indicOp') this.renderIndicOpPanel(container);
+      else this.renderDatabasePanel(container);
       return;
     }
     var rows = this.data[this.active] || [];
@@ -294,6 +303,88 @@ Pages.configuracoes = {
           'Não foi possível carregar as informações da base.', error.message);
       })
       .getDatabaseInfo();
+  },
+
+  /**
+   * v4.7 — Painel de configuração do módulo Indicadores Operacionais
+   * (EXCLUSIVO do ADM). Formulário único (não é lista) para definir a
+   * planilha externa de origem e como lê-la. Ao salvar, recarrega o
+   * bootstrap para o rótulo do menu refletir o novo nome imediatamente.
+   * @param {HTMLElement} container - <div id="config-table">.
+   */
+  renderIndicOpPanel: function(container) {
+    var self = this;
+    container.innerHTML = Components.emptyState('query_stats', 'Carregando configuração...');
+
+    google.script.run
+      .withSuccessHandler(function(cfg) {
+        cfg = cfg || {};
+        var html = '<div class="card-header"><div class="card-title">' +
+          '<span class="material-icons">query_stats</span>Indicadores Operacionais</div></div>';
+        html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">' +
+          'Configure a planilha Google Sheets externa que alimenta o painel de Indicadores ' +
+          'Operacionais. As colunas de Data e Status são localizadas pelo NOME do cabeçalho — ' +
+          'mudanças de layout na origem não quebram a leitura. Você precisa ter acesso à planilha informada.</p>';
+
+        // Campos do formulário (chave → rótulo/tipo/dica).
+        var campos = [
+          { k: 'abaNome', label: 'Nome da aba (menu)', tipo: 'text', dica: 'Como o item aparece no menu lateral.' },
+          { k: 'planilhaUrl', label: 'Link da planilha de origem', tipo: 'text', dica: 'URL completa do Google Sheets externo.' },
+          { k: 'abaOrigem', label: 'Nome da aba de origem', tipo: 'text', dica: 'Aba, dentro da planilha externa, com os dados.' },
+          { k: 'linhaInicial', label: 'Linha do cabeçalho', tipo: 'number', dica: 'Linha onde estão os títulos das colunas (a tabela pode começar em qualquer linha).' },
+          { k: 'colunaData', label: 'Coluna da Data (cabeçalho)', tipo: 'text', dica: 'Nome exato do cabeçalho da coluna de data.' },
+          { k: 'colunaStatus', label: 'Coluna do Status (cabeçalho)', tipo: 'text', dica: 'Nome exato do cabeçalho da coluna de status.' }
+        ];
+
+        html += '<div class="config-form-grid">';
+        campos.forEach(function(c) {
+          var valor = cfg[c.k] === undefined || cfg[c.k] === null ? '' : String(cfg[c.k]);
+          html += '<div class="form-group' + (c.k === 'planilhaUrl' ? ' config-form-wide' : '') + '">';
+          html += '<label class="form-label" for="indop-' + c.k + '">' + c.label + '</label>';
+          html += '<input class="form-control" id="indop-' + c.k + '" type="' + c.tipo + '"' +
+            (c.tipo === 'number' ? ' min="1"' : '') + ' value="' + App.escapeHtml(valor) + '">';
+          html += '<small style="color:var(--text-secondary);font-size:11.5px;">' + c.dica + '</small>';
+          html += '</div>';
+        });
+        html += '</div>';
+        html += '<div class="form-actions" style="margin-top:16px;">' +
+          '<button type="button" class="btn btn-primary" id="indop-salvar">💾 Salvar configuração</button></div>';
+
+        container.innerHTML = html;
+
+        var btn = document.getElementById('indop-salvar');
+        if (btn) btn.addEventListener('click', function() { self._salvarIndicOp(); });
+      })
+      .withFailureHandler(function(error) {
+        container.innerHTML = Components.emptyState('error_outline',
+          'Não foi possível carregar a configuração.', error.message);
+      })
+      .getIndicadoresOperacionaisConfig();
+  },
+
+  /** Coleta o formulário e salva a configuração do módulo (v4.7). */
+  _salvarIndicOp: function() {
+    var payload = {
+      abaNome: (document.getElementById('indop-abaNome') || {}).value || '',
+      planilhaUrl: (document.getElementById('indop-planilhaUrl') || {}).value || '',
+      abaOrigem: (document.getElementById('indop-abaOrigem') || {}).value || '',
+      linhaInicial: (document.getElementById('indop-linhaInicial') || {}).value || '1',
+      colunaData: (document.getElementById('indop-colunaData') || {}).value || '',
+      colunaStatus: (document.getElementById('indop-colunaStatus') || {}).value || ''
+    };
+    Components.showLoading('Salvando configuração...');
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.hideLoading();
+        Components.toast('Configuração salva com sucesso.', 'success');
+        // Atualiza o rótulo do menu (nome da aba pode ter mudado).
+        App.reloadBootstrap();
+      })
+      .withFailureHandler(function(error) {
+        Components.hideLoading();
+        Components.toast('Erro ao salvar: ' + error.message, 'error');
+      })
+      .salvarIndicadoresOperacionaisConfig(payload);
   },
 
   formatCell: function(value, field) {

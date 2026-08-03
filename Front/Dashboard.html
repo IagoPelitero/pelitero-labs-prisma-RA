@@ -353,8 +353,11 @@ Pages.dashboard = {
         self.renderizarKPIs(data.cards, data.porSituacao);
         self.renderizarCanais(data.porCanal);
         self.renderizarTabela();
+        // Só confirma quando houve RECUPERAÇÃO após uma falha real (2ª
+        // tentativa bem-sucedida). No fluxo normal (1ª tentativa) nada é
+        // exibido — carregamento silencioso.
         if (tentativa > 1) {
-          Components.toast('Dados recuperados diretamente do Google Sheets. ✓', 'success');
+          Components.toast('Dados atualizados a partir do Google Sheets. ✓', 'success');
         }
       })
       .withFailureHandler(function(erro) {
@@ -378,7 +381,11 @@ Pages.dashboard = {
     console.error('[Dashboard] Falha ao carregar (tentativa ' + tentativa + '):', msg);
 
     if (tentativa === 1) {
-      Components.toast('Falha ao carregar. Consultando o Google Sheets diretamente...', 'warning');
+      // Retentativa SILENCIOSA: a maioria das falhas é transitória e se
+      // resolve na 2ª tentativa (com forceRefresh). Não exibimos mais o
+      // aviso aqui — ele assustava o usuário mesmo quando tudo se
+      // recuperava sozinho. O erro fica registrado no console para
+      // diagnóstico; só a falha DEFINITIVA (2ª tentativa) vira mensagem.
       this.carregarDados(2); // fallback: força leitura da fonte oficial
       return;
     }

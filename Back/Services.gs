@@ -138,9 +138,18 @@ function getBootstrapData() {
     subcategoriasPorProdutoCategoria[nomeProduto][nomeCategoria].push(String(sub.Nome || ''));
   });
 
+  // v4.7: resumo do módulo Indicadores Operacionais para o menu (rótulo
+  // dinâmico definido pelo ADM). Lê apenas Script Properties — sem leitura
+  // extra de planilha. O item de menu aparece para Supervisor/ADM.
+  const indicOpCfg = lerIndicOpConfig_();
+
   return {
     user: getActor_(),
     formConfig: getFormConfig_(),
+    moduloIndicadoresOp: {
+      abaNome: indicOpCfg.abaNome,
+      habilitado: indicOpCfg.habilitado
+    },
     dropdownData: {
       produtos: pluck_(produtos, 'Nome'),
       categorias: pluck_(categorias, 'Nome'),
@@ -272,8 +281,8 @@ function verificarProtocoloDuplicado(protocolo, ignorarId) {
  * o mesmo cliente pode ter vários atendimentos.
  * @param {string} cpf - CPF digitado (com ou sem máscara).
  * @param {string} ignorarId - Id do próprio atendimento (em edições).
- * @returns {Object} { duplicado } ou
- *   { duplicado: true, cpf, analista, dataRegistro (ISO) }.
+ * @returns {Object} { duplicado } ou { duplicado: true, cpf, analista,
+ *   dataRegistro (ISO), status, categoria, subcategoria }.
  */
 function verificarCpfDuplicado(cpf, ignorarId) {
   requireAuth_();
@@ -295,11 +304,18 @@ function verificarCpfDuplicado(cpf, ignorarId) {
   });
 
   if (!primeiro) return { duplicado: false };
+  // Popup informativo enriquecido: além do analista e da data, devolve o
+  // status atual (com "Aguardando Retorno de", quando Pendente), a
+  // categoria e a subcategoria do primeiro registro. Todos os campos vêm
+  // do registro já em memória — nenhuma leitura extra da planilha.
   return {
     duplicado: true,
     cpf: formatCPF(digitos),
     analista: String(primeiro.CriadoPor || primeiro.Responsavel || ''),
-    dataRegistro: toIso_(primeiraData)
+    dataRegistro: toIso_(primeiraData),
+    status: statusLabel_(primeiro.Status, primeiro.MotivoPendencia),
+    categoria: String(primeiro.Categoria || ''),
+    subcategoria: String(primeiro.Subcategoria || '') // v4.6: '' se não houver
   };
 }
 
@@ -1141,6 +1157,341 @@ function getRelatorio(filtros, options) {
   return decorateAtendimentos_(
     applyAtendimentoFilters_(restrictToOwnerIfNeeded_(getActiveAtendimentos_(force), actor), filtros || {})
   );
+}
+
+// ============================================================================
+// MÓDULO INDICADORES OPERACIONAIS (v4.7)
+// ============================================================================
+/*
+ * Acompanha indicadores operacionais a partir de uma planilha Google Sheets
+ * EXTERNA, configurada pelo Administrador (fora do banco do Prisma RA).
+ *
+ * Resiliência (não depender de posições fixas):
+ *  - as colunas de Data e Status são localizadas pelo NOME do cabeçalho, na
+ *    "linha inicial" configurada — se a planilha de origem mudar a ordem das
+ *    colunas ou ganhar colunas novas, a leitura continua funcionando;
+ *  - datas com horário são reduzidas à data ("02/08/2026 14:35" → 02/08/2026);
+ *  - linhas totalmente vazias são ignoradas;
+ *  - células mescladas: o valor só existe na primeira célula do bloco, então
+ *    a Data é "arrastada" para baixo (forward-fill) enquanto não muda;
+ *  - espaços extras são removidos.
+ *
+ * Consolidação por data: Casos (total), Em Aberto, Em Análise e
+ * Fechado+Rejeitado (classificados por palavra-chave), mais "Fora da SLA",
+ * um valor MANUAL informado pelo usuário (aba IndicadoresSLA) e preservado
+ * entre releituras da planilha externa.
+ *
+ * Performance: o resultado consolidado é cacheado (CacheService, TTL padrão);
+ * o botão "Atualizar Dados" força a releitura.
+ */
+
+// Chave de cache do resultado consolidado da planilha externa.
+const INDIC_OP_CACHE_KEY_ = 'PRISMA_RA_INDIC_OP_CACHE';
+
+/** Configuração padrão do módulo (antes de o ADM configurar a fonte). */
+function indicOpConfigPadrao_() {
+  return {
+    abaNome: 'Indicadores Operacionais',
+    planilhaUrl: '',
+    abaOrigem: '',
+    linhaInicial: 1,
+    colunaData: 'Data',
+    colunaStatus: 'Status'
+  };
+}
+
+/**
+ * Lê a configuração do módulo (Script Properties) e devolve sempre um objeto
+ * completo (mesclado com os padrões). "habilitado" indica se há URL e aba de
+ * origem definidas — condição mínima para o módulo operar.
+ * @returns {Object} configuração + { habilitado }.
+ */
+function lerIndicOpConfig_() {
+  const padrao = indicOpConfigPadrao_();
+  let salvo = {};
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(PROPERTY_KEYS.INDIC_OP_CONFIG);
+    if (raw) salvo = JSON.parse(raw) || {};
+  } catch (e) {
+    Logger.log('[IndicOp] Config inválida em Script Properties: ' + e.message);
+  }
+  const cfg = {
+    abaNome: String(salvo.abaNome || '').trim() || padrao.abaNome,
+    planilhaUrl: String(salvo.planilhaUrl || '').trim(),
+    abaOrigem: String(salvo.abaOrigem || '').trim(),
+    linhaInicial: Math.max(1, parseInt(salvo.linhaInicial, 10) || padrao.linhaInicial),
+    colunaData: String(salvo.colunaData || '').trim() || padrao.colunaData,
+    colunaStatus: String(salvo.colunaStatus || '').trim() || padrao.colunaStatus
+  };
+  cfg.habilitado = !!(cfg.planilhaUrl && cfg.abaOrigem);
+  return cfg;
+}
+
+/** (ADM) Retorna a configuração do módulo para a tela de Configurações. */
+function getIndicadoresOperacionaisConfig() {
+  requireAuth_();
+  requireAdmin_();
+  return lerIndicOpConfig_();
+}
+
+/**
+ * (ADM) Salva a configuração da fonte de dados e limpa o cache do resultado
+ * consolidado (a próxima leitura já usa a nova fonte).
+ * @param {Object} dados - Campos do formulário de configuração.
+ * @returns {Object} { success, config }.
+ */
+function salvarIndicadoresOperacionaisConfig(dados) {
+  requireAuth_();
+  requireAdmin_();
+  const entrada = dados || {};
+  const cfg = {
+    abaNome: sanitizeInput(entrada.abaNome) || 'Indicadores Operacionais',
+    planilhaUrl: sanitizeInput(entrada.planilhaUrl),
+    abaOrigem: sanitizeInput(entrada.abaOrigem),
+    linhaInicial: Math.max(1, parseInt(entrada.linhaInicial, 10) || 1),
+    colunaData: sanitizeInput(entrada.colunaData) || 'Data',
+    colunaStatus: sanitizeInput(entrada.colunaStatus) || 'Status'
+  };
+  if (cfg.planilhaUrl && !/docs\.google\.com\/spreadsheets/i.test(cfg.planilhaUrl)) {
+    throw new Error('A URL informada não parece ser de uma planilha Google Sheets.');
+  }
+  PropertiesService.getScriptProperties().setProperty(
+    PROPERTY_KEYS.INDIC_OP_CONFIG, JSON.stringify(cfg));
+  try { CacheService.getScriptCache().remove(INDIC_OP_CACHE_KEY_); } catch (e) { /* ignore */ }
+  cfg.habilitado = !!(cfg.planilhaUrl && cfg.abaOrigem);
+  return { success: true, config: cfg };
+}
+
+/**
+ * Normaliza uma data (Date ou texto, possivelmente com horário) numa CHAVE
+ * ordenável AAAA-MM-DD e num RÓTULO DD/MM/AAAA. Considera apenas a parte da
+ * data ("02/08/2026 14:35" → 2026-08-02).
+ * @param {*} valor - Célula de data da planilha externa.
+ * @returns {Object|null} { chave, label } ou null se não for data válida.
+ */
+function normalizarDataOp_(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  let d = null;
+  if (valor instanceof Date && !isNaN(valor.getTime())) {
+    d = valor;
+  } else {
+    // Texto: descarta o horário (após o 1º espaço ou "T") e interpreta
+    // dd/mm/aaaa ou aaaa-mm-dd.
+    const txt = String(valor).trim().split(' ')[0].split('T')[0];
+    let m = txt.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (m) {
+      let ano = parseInt(m[3], 10);
+      if (ano < 100) ano += 2000;
+      d = new Date(ano, parseInt(m[2], 10) - 1, parseInt(m[1], 10));
+    } else {
+      m = txt.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (m) d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+    }
+  }
+  if (!d || isNaN(d.getTime())) return null;
+  const ano = d.getFullYear();
+  const mes = ('0' + (d.getMonth() + 1)).slice(-2);
+  const dia = ('0' + d.getDate()).slice(-2);
+  return { chave: ano + '-' + mes + '-' + dia, label: dia + '/' + mes + '/' + ano };
+}
+
+/**
+ * Classifica um status BRUTO da planilha externa num dos três grupos do
+ * painel, por palavra-chave (sem acento/caixa). A ordem importa: "análise" e
+ * "fechado/rejeitado" são testados antes do padrão "Em Aberto".
+ * @param {string} statusBruto - Texto do status na origem.
+ * @returns {string} 'emAnalise' | 'fechado' | 'emAberto'.
+ */
+function classificarStatusOp_(statusBruto) {
+  const s = normalizeText_(statusBruto);
+  if (s.indexOf('analise') !== -1) return 'emAnalise';
+  if (s.indexOf('fechad') !== -1 || s.indexOf('rejeitad') !== -1 ||
+      s.indexOf('conclu') !== -1 || s.indexOf('encerrad') !== -1 ||
+      s.indexOf('resolvid') !== -1 || s.indexOf('finaliz') !== -1) return 'fechado';
+  return 'emAberto';
+}
+
+/** Estrutura vazia dos indicadores automáticos (sem nenhuma data). */
+function emptyIndicadoresOp_() {
+  return { casos: {}, emAberto: {}, emAnalise: {}, fechado: {} };
+}
+
+/**
+ * Lê e consolida a planilha externa configurada. Localiza as colunas de Data
+ * e Status pelo NOME do cabeçalho (na linha inicial), limpa os dados e agrega
+ * por data. Resultado cacheado; forceRefresh ignora o cache.
+ * @param {Object} cfg - Configuração resolvida (lerIndicOpConfig_).
+ * @param {boolean} forceRefresh - true relê a planilha externa.
+ * @returns {Object} { datas:[{chave,label}], indicadores, atualizadoEm }.
+ * @throws {Error} 'INDICOP: ...' quando a planilha não pôde ser lida.
+ */
+function consolidarIndicadoresOp_(cfg, forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  if (!forceRefresh) {
+    try {
+      const cached = cache.get(INDIC_OP_CACHE_KEY_);
+      if (cached) return JSON.parse(cached);
+    } catch (e) { /* cache ruim nunca impede a leitura */ }
+  }
+
+  // ── Abre a planilha externa (roda como o usuário que acessa) ──
+  let planilha;
+  try {
+    planilha = SpreadsheetApp.openByUrl(cfg.planilhaUrl);
+  } catch (e) {
+    throw new Error('INDICOP: não foi possível abrir a planilha configurada. ' +
+      'Verifique o link e se você tem acesso a ela. (' + e.message + ')');
+  }
+  const aba = planilha.getSheetByName(cfg.abaOrigem);
+  if (!aba) {
+    throw new Error('INDICOP: a aba "' + cfg.abaOrigem + '" não existe na planilha de origem.');
+  }
+  if (aba.getLastRow() === 0 || aba.getLastColumn() === 0) {
+    return { datas: [], indicadores: emptyIndicadoresOp_(), atualizadoEm: toIso_(new Date()) };
+  }
+
+  const valores = aba.getDataRange().getValues();
+  const linhaCabecalho = Math.min(cfg.linhaInicial, valores.length) - 1; // 0-indexed
+  const cabecalhos = (valores[linhaCabecalho] || []).map(function(v) { return normalizeText_(v); });
+  const idxData = cabecalhos.indexOf(normalizeText_(cfg.colunaData));
+  const idxStatus = cabecalhos.indexOf(normalizeText_(cfg.colunaStatus));
+  if (idxData === -1 || idxStatus === -1) {
+    throw new Error('INDICOP: não encontrei as colunas "' + cfg.colunaData + '" e/ou "' +
+      cfg.colunaStatus + '" na linha ' + cfg.linhaInicial + ' da planilha de origem.');
+  }
+
+  // ── Consolida por data ──
+  const porData = {};       // chave AAAA-MM-DD → { casos, emAberto, emAnalise, fechado }
+  const labelPorChave = {};
+  let ultimaData = null;    // forward-fill de células mescladas na coluna Data
+  for (let i = linhaCabecalho + 1; i < valores.length; i++) {
+    const linha = valores[i];
+    // Linha completamente vazia → ignora.
+    const vazia = linha.every(function(c) { return c === '' || c === null || c === undefined; });
+    if (vazia) continue;
+
+    const dataNorm = normalizarDataOp_(linha[idxData]);
+    if (dataNorm) ultimaData = dataNorm;     // atualiza a data corrente
+    const data = ultimaData;                 // usa a última válida (célula mesclada)
+    const statusTxt = String(linha[idxStatus] === undefined || linha[idxStatus] === null ? '' : linha[idxStatus]).trim();
+    // Sem data válida ou sem status → linha sem conteúdo útil: ignora.
+    if (!data || !statusTxt) continue;
+
+    if (!porData[data.chave]) {
+      porData[data.chave] = { casos: 0, emAberto: 0, emAnalise: 0, fechado: 0 };
+      labelPorChave[data.chave] = data.label;
+    }
+    porData[data.chave].casos++;
+    porData[data.chave][classificarStatusOp_(statusTxt)]++;
+  }
+
+  // ── Ordena as datas cronologicamente (chave AAAA-MM-DD é ordenável) ──
+  const chaves = Object.keys(porData).sort();
+  const datas = chaves.map(function(chave) {
+    return { chave: chave, label: labelPorChave[chave] };
+  });
+  const indicadores = emptyIndicadoresOp_();
+  chaves.forEach(function(chave) {
+    indicadores.casos[chave] = porData[chave].casos;
+    indicadores.emAberto[chave] = porData[chave].emAberto;
+    indicadores.emAnalise[chave] = porData[chave].emAnalise;
+    indicadores.fechado[chave] = porData[chave].fechado;
+  });
+
+  const resultado = { datas: datas, indicadores: indicadores, atualizadoEm: toIso_(new Date()) };
+  try {
+    const json = JSON.stringify(resultado);
+    if (json.length <= 100000) cache.put(INDIC_OP_CACHE_KEY_, json, CONFIG.CACHE_TTL);
+  } catch (e) { Logger.log('[IndicOp] Falha ao cachear: ' + e.message); }
+  return resultado;
+}
+
+/**
+ * (Supervisor/ADM) Indicadores operacionais prontos para a tela: datas, os 4
+ * indicadores automáticos (planilha externa, consolidados) e a linha manual
+ * "Fora da SLA" (aba IndicadoresSLA). Sem configuração → { habilitado:false }.
+ * @param {Object} options - { forceRefresh } para o botão "Atualizar Dados".
+ * @returns {Object} dados do painel.
+ */
+function getIndicadoresOperacionais(options) {
+  requireAuth_();
+  requireSupervisor_();
+  const cfg = lerIndicOpConfig_();
+  if (!cfg.habilitado) {
+    return { habilitado: false, abaNome: cfg.abaNome };
+  }
+  const force = !!(options && options.forceRefresh);
+  const consolidado = consolidarIndicadoresOp_(cfg, force);
+
+  // Linha manual "Fora da SLA" (persistida por data na aba IndicadoresSLA).
+  const foraSLA = {};
+  getAll(CONFIG.SHEET_NAMES.INDICADORES_SLA).forEach(function(reg) {
+    const chave = String(reg.Data || '').trim();
+    if (chave) foraSLA[chave] = Number(reg.ForaSLA) || 0;
+  });
+
+  return {
+    habilitado: true,
+    abaNome: cfg.abaNome,
+    datas: consolidado.datas,
+    indicadores: consolidado.indicadores,
+    foraSLA: foraSLA,
+    atualizadoEm: consolidado.atualizadoEm
+  };
+}
+
+/**
+ * (Supervisor/ADM) Salva/atualiza o valor manual "Fora da SLA" de uma data
+ * (upsert na aba IndicadoresSLA). A chave é a data em AAAA-MM-DD, a mesma da
+ * consolidação — o valor sobrevive à releitura da planilha externa.
+ * @param {string} dataChave - Data no formato AAAA-MM-DD.
+ * @param {*} valor - Número informado (vazio/negativo vira 0).
+ * @returns {Object} { success }.
+ */
+function salvarForaSLA(dataChave, valor) {
+  requireAuth_();
+  requireSupervisor_();
+  const chave = sanitizeInput(dataChave);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(chave)) throw new Error('Data inválida.');
+  let numero = Number(valor);
+  if (!isFinite(numero) || numero < 0) numero = 0;
+
+  const existente = getAll(CONFIG.SHEET_NAMES.INDICADORES_SLA).some(function(reg) {
+    return String(reg.Data || '').trim() === chave;
+  });
+  if (existente) {
+    updateForaSLAPorData_(chave, numero);      // a aba não tem Id: grava pela data
+  } else {
+    insert(CONFIG.SHEET_NAMES.INDICADORES_SLA, { Data: chave, ForaSLA: numero });
+  }
+  return { success: true };
+}
+
+/**
+ * Atualiza a linha da aba IndicadoresSLA cuja coluna Data corresponde à
+ * chave (a aba não usa Id). Sob lock, como as demais escritas.
+ */
+function updateForaSLAPorData_(dataChave, numero) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+    const sheet = getSpreadsheet().getSheetByName(CONFIG.SHEET_NAMES.INDICADORES_SLA);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const colData = COLUMNS.INDICADORES_SLA.indexOf('Data');
+    const colSLA = COLUMNS.INDICADORES_SLA.indexOf('ForaSLA');
+    const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.INDICADORES_SLA.length);
+    const linhas = range.getValues();
+    for (let i = 0; i < linhas.length; i++) {
+      if (String(linhas[i][colData]).trim() === dataChave) {
+        linhas[i][colSLA] = numero;
+        range.setValues(linhas);
+        break;
+      }
+    }
+    invalidateCache(CONFIG.SHEET_NAMES.INDICADORES_SLA);
+  } finally {
+    try { lock.releaseLock(); } catch (e) { /* ignore */ }
+  }
 }
 
 // ============================================================================

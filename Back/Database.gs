@@ -48,33 +48,48 @@
 // ACESSO À PLANILHA
 // ============================================================================
 
+// PERFORMANCE/CONFIABILIDADE: referência à planilha memoizada por execução.
+// Cada google.script.run é uma nova execução isolada, então esta variável
+// vive apenas durante a requisição atual. Sem ela, um único getDashboardData
+// abria a planilha (SpreadsheetApp.openById) ~10 vezes — cada abertura é uma
+// chamada de rede sujeita a instabilidade transitória (a causa recorrente da
+// mensagem "Falha ao carregar. Consultando o Google Sheets diretamente..."):
+// reutilizar a mesma referência reduz a latência e a superfície de falha.
+var SPREADSHEET_REF_ = null;
+
 /**
- * Obtém a planilha principal do sistema.
- * Se CONFIG.SPREADSHEET_ID estiver vazio, usa a planilha ativa.
+ * Obtém a planilha principal do sistema, reaproveitando a referência já
+ * aberta na mesma execução (memoização). Se CONFIG.SPREADSHEET_ID estiver
+ * vazio, usa o id salvo em Script Properties ou a planilha ativa.
  * @returns {Spreadsheet} Planilha do Google Sheets
  */
 function getSpreadsheet() {
+  if (SPREADSHEET_REF_) return SPREADSHEET_REF_;
   try {
     if (CONFIG.SPREADSHEET_ID && CONFIG.SPREADSHEET_ID.trim() !== '') {
-      return SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+      SPREADSHEET_REF_ = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+      return SPREADSHEET_REF_;
     }
 
     const properties = PropertiesService.getScriptProperties();
     const storedId = properties.getProperty(PROPERTY_KEYS.SPREADSHEET_ID);
     if (storedId) {
-      return SpreadsheetApp.openById(storedId);
+      SPREADSHEET_REF_ = SpreadsheetApp.openById(storedId);
+      return SPREADSHEET_REF_;
     }
 
     const active = SpreadsheetApp.getActiveSpreadsheet();
     if (active) {
       properties.setProperty(PROPERTY_KEYS.SPREADSHEET_ID, active.getId());
-      return active;
+      SPREADSHEET_REF_ = active;
+      return SPREADSHEET_REF_;
     }
 
     // Permite que o projeto também funcione como Apps Script independente.
     const created = SpreadsheetApp.create('Prisma RA - Banco de Dados');
     properties.setProperty(PROPERTY_KEYS.SPREADSHEET_ID, created.getId());
-    return created;
+    SPREADSHEET_REF_ = created;
+    return SPREADSHEET_REF_;
   } catch (e) {
     Logger.log('Erro ao abrir planilha: ' + e.message);
     throw new Error('Não foi possível acessar a planilha do sistema. Verifique o SPREADSHEET_ID em Config.gs.');
@@ -128,7 +143,10 @@ function initializeSheets() {
       { name: CONFIG.SHEET_NAMES.CATEGORIAS,     columns: COLUMNS.CATEGORIAS,    defaults: DEFAULT_CATEGORIAS },
       // v4.6: subcategorias (Produto → Categoria → Subcategoria). Sem dados
       // padrão: o cadastro é feito manualmente pela tela de Configurações.
-      { name: CONFIG.SHEET_NAMES.SUBCATEGORIAS,  columns: COLUMNS.SUBCATEGORIAS, defaults: [] }
+      { name: CONFIG.SHEET_NAMES.SUBCATEGORIAS,  columns: COLUMNS.SUBCATEGORIAS, defaults: [] },
+      // v4.7: valores manuais "Fora da SLA" do módulo Indicadores
+      // Operacionais. Nasce vazia; é preenchida conforme o usuário informa.
+      { name: CONFIG.SHEET_NAMES.INDICADORES_SLA, columns: COLUMNS.INDICADORES_SLA, defaults: [] }
     ];
     
     sheetsConfig.forEach(function(cfg) {
@@ -1195,6 +1213,7 @@ function getColumnsForSheet(sheetName) {
   mapping[CONFIG.SHEET_NAMES.PRODUTOS]       = COLUMNS.PRODUTOS;
   mapping[CONFIG.SHEET_NAMES.CATEGORIAS]     = COLUMNS.CATEGORIAS;
   mapping[CONFIG.SHEET_NAMES.SUBCATEGORIAS]  = COLUMNS.SUBCATEGORIAS; // v4.6
+  mapping[CONFIG.SHEET_NAMES.INDICADORES_SLA] = COLUMNS.INDICADORES_SLA; // v4.7
 
   return mapping[sheetName] || [];
 }

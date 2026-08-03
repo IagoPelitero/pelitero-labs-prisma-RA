@@ -56,6 +56,12 @@
         <li class="sidebar-item" data-page="indicadores" data-supervisor-only data-tooltip="Indicadores">
           <span class="material-icons">insights</span><span class="sidebar-label">Indicadores</span>
         </li>
+        <!-- v4.7: Indicadores Operacionais (planilha externa). Rótulo dinâmico
+             definido pelo ADM — App.aplicarRotuloIndicOp() atualiza o texto e o
+             tooltip a partir do bootstrap. Restrito à supervisão. -->
+        <li class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-tooltip="Indicadores Operacionais" id="menu-indic-op">
+          <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Indicadores Operacionais</span>
+        </li>
         <li class="sidebar-item" data-page="configuracoes" data-supervisor-only data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
         </li>
@@ -129,6 +135,7 @@
   <?!= include('NovoAtendimento'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
+  <?!= include('IndicadoresOperacionais'); ?>
   <?!= include('Configuracoes'); ?>
 </body>
 </html>

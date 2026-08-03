@@ -277,7 +277,10 @@ Pages.indicadores = {
       var msg = (err && err.message) || 'erro desconhecido';
       console.error('[Indicadores] Falha ao carregar (tentativa ' + tentativa + '):', msg);
       if (tentativa === 1) {
-        Components.toast('Falha ao carregar. Consultando o Google Sheets diretamente...', 'warning');
+        // Retentativa SILENCIOSA (mesmo padrão do Dashboard): falhas
+        // transitórias se resolvem na 2ª tentativa; não exibimos aviso
+        // aqui para não alarmar o usuário. Só a falha definitiva vira
+        // mensagem, e os gráficos anteriores são preservados.
         self.atualizar(2); // fallback: força leitura da fonte oficial
         return;
       }
@@ -297,8 +300,9 @@ Pages.indicadores = {
         self.state.dados = dados;
         self.renderCards();
         self.renderCharts();
+        // Confirmação apenas quando houve recuperação após falha real.
         if (tentativa > 1) {
-          Components.toast('Indicadores recuperados diretamente do Google Sheets. ✓', 'success');
+          Components.toast('Indicadores atualizados a partir do Google Sheets. ✓', 'success');
         }
       })
       .withFailureHandler(falhou)
