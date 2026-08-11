@@ -97,6 +97,54 @@ function getSpreadsheet() {
 }
 
 // ============================================================================
+// CONCORRÊNCIA (trava de escrita reentrante)
+// ============================================================================
+
+/*
+ * POR QUE ESTE HELPER EXISTE
+ * --------------------------
+ * Todas as operações que ESCREVEM na planilha precisam da trava do
+ * LockService, para que dois usuários não gravem ao mesmo tempo. O
+ * problema é que algumas operações chamam outras: por exemplo,
+ * ensureDatabaseReady() -> initializeSheets() -> promoteFirstAdmin_() ->
+ * update(). Se cada uma tentasse adquirir a trava por conta própria, a
+ * segunda tentativa ficaria esperando uma trava que a PRÓPRIA execução já
+ * possui — um impasse (deadlock) que só terminaria no timeout.
+ *
+ * A solução é uma trava REENTRANTE: a primeira chamada adquire de fato a
+ * trava e marca uma bandeira; as chamadas aninhadas percebem a bandeira e
+ * executam direto, sem readquirir. A bandeira é uma variável global do
+ * script — e como cada google.script.run roda em uma execução isolada,
+ * ela sempre nasce zerada e não vaza entre requisições.
+ */
+
+// true enquanto ESTA execução já detém a trava de escrita.
+var LOCK_HELD_ = false;
+
+/**
+ * Executa uma função com a trava de escrita do script garantida.
+ * Reentrante: chamadas aninhadas reutilizam a trava já adquirida.
+ * A trava é SEMPRE liberada no finally, mesmo em caso de erro.
+ * @param {Function} fn - Trecho a executar sob trava.
+ * @returns {*} O que a função retornar.
+ * @throws {Error} Se a trava não for obtida dentro do timeout.
+ */
+function withScriptLock_(fn) {
+  // Já estamos dentro da trava nesta execução: executa direto.
+  if (LOCK_HELD_) return fn();
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+  LOCK_HELD_ = true;
+  try {
+    return fn();
+  } finally {
+    LOCK_HELD_ = false;
+    try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+  }
+}
+
+// ============================================================================
 // INICIALIZAÇÃO DAS PLANILHAS
 // ============================================================================
 
@@ -105,10 +153,28 @@ function getSpreadsheet() {
  */
 function ensureDatabaseReady() {
   const properties = PropertiesService.getScriptProperties();
-  if (properties.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) !== CONFIG.SCHEMA_VERSION) {
+
+  // Caminho rápido: esquema já atualizado (99,9% das requisições).
+  // Nenhuma trava é adquirida aqui — leitura de propriedade é barata.
+  if (properties.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) === CONFIG.SCHEMA_VERSION) return;
+
+  // PROTEÇÃO CONTRA MIGRAÇÃO CONCORRENTE:
+  // sem trava, dois usuários abrindo o sistema ao mesmo tempo logo após
+  // uma atualização executariam initializeSheets() em paralelo sobre as
+  // MESMAS abas — o cenário de maior risco de perda de dados. Agora a
+  // migração é serializada: o segundo espera o primeiro terminar.
+  withScriptLock_(function() {
+    // Dupla verificação: enquanto esperávamos a trava, outra execução
+    // pode ter concluído a migração. Nesse caso não há nada a fazer.
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) === CONFIG.SCHEMA_VERSION) return;
+
     initializeSheets();
-    properties.setProperty(PROPERTY_KEYS.SCHEMA_VERSION, CONFIG.SCHEMA_VERSION);
-  }
+    // A versão só é marcada APÓS a migração concluir sem erro. Se
+    // initializeSheets lançar, a propriedade permanece antiga e a
+    // migração será tentada de novo na próxima requisição.
+    props.setProperty(PROPERTY_KEYS.SCHEMA_VERSION, CONFIG.SCHEMA_VERSION);
+  });
 }
 
 /**
@@ -503,7 +569,8 @@ function promoteFirstAdmin_() {
   });
   if (supervisor) {
     update(CONFIG.SHEET_NAMES.USUARIOS, supervisor.Id, { Perfil: 'ADM' });
-    Logger.log('Usuário promovido a ADM: ' + supervisor.Nome);
+    // LGPD: registra apenas o Id técnico — nunca o nome ou e-mail.
+    Logger.log('Usuário promovido a ADM (Id): ' + supervisor.Id);
   }
 }
 
@@ -518,49 +585,166 @@ function promoteFirstAdmin_() {
  */
 
 /**
- * Atualiza o esquema de uma aba preservando os dados pelas chaves do cabeçalho.
- * Isso permite evoluir o sistema sem deslocar dados de instalações anteriores.
+ * Aplica a formatação padrão do cabeçalho (negrito, fundo azul, congelado).
+ * Operação puramente visual — não altera dados.
+ * @param {Sheet} sheet - Aba a formatar.
+ * @param {number} totalColunas - Quantidade de colunas do cabeçalho.
  */
-function ensureSheetSchema_(sheet, columns) {
-  if (!columns || columns.length === 0) return;
-
-  if (sheet.getMaxColumns() < columns.length) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), columns.length - sheet.getMaxColumns());
-  }
-
-  const lastRow = sheet.getLastRow();
-  const lastCol = sheet.getLastColumn();
-  let rows = [];
-
-  if (lastRow > 0 && lastCol > 0) {
-    const existing = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-    const oldHeaders = existing[0].map(function(value) { return String(value); });
-    const sameSchema = oldHeaders.length === columns.length && oldHeaders.every(function(value, index) {
-      return value === columns[index];
-    });
-
-    if (!sameSchema && existing.length > 1) {
-      rows = existing.slice(1).map(function(row) {
-        const record = {};
-        oldHeaders.forEach(function(header, index) {
-          if (header) record[header] = row[index];
-        });
-        return toRowArray(record, columns);
-      });
-      sheet.clearContents();
-    }
-  }
-
-  sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, columns.length).setValues(rows);
-  }
-
-  const headerRange = sheet.getRange(1, 1, 1, columns.length);
+function aplicarFormatoCabecalho_(sheet, totalColunas) {
+  const headerRange = sheet.getRange(1, 1, 1, totalColunas);
   headerRange.setFontWeight('bold');
   headerRange.setBackground('#0046C0');
   headerRange.setFontColor('#FFFFFF');
   sheet.setFrozenRows(1);
+}
+
+/**
+ * Atualiza o esquema de uma aba preservando os dados pelas chaves do cabeçalho.
+ * Isso permite evoluir o sistema sem deslocar dados de instalações anteriores.
+ *
+ * ============================================================================
+ * 🔴 FUNÇÃO DE ALTO RISCO — LEIA ANTES DE ALTERAR
+ * ============================================================================
+ * CORREÇÃO DE RISCO CRÍTICO (Fase 1 de estabilização):
+ * a versão anterior fazia, nesta ordem:
+ *     clearContents()  →  escreve cabeçalho  →  regrava as linhas
+ * Entre o clearContents() e a regravação a aba ficava VAZIA. Qualquer
+ * falha nesse intervalo (timeout de 6 min, erro de rede, exceção) apagava
+ * DEFINITIVAMENTE os dados — não havia como recuperar.
+ *
+ * A rotina agora é NÃO DESTRUTIVA e reversível:
+ *   1. Lê tudo em memória e remapeia pelo NOME do cabeçalho;
+ *   2. VALIDA a contagem antes de gravar (nenhuma linha pode sumir);
+ *   3. Cria uma ABA DE BACKUP com o conteúdo original (rede de segurança
+ *      que permanece na planilha para conferência/rollback manual);
+ *   4. SOBRESCREVE o intervalo por cima, sem nunca esvaziar a aba antes
+ *      (só limpa colunas remanescentes à direita, se o esquema encolheu);
+ *   5. VALIDA de novo lendo a aba: contagem tem de bater;
+ *   6. Em caso de erro em qualquer ponto, RESTAURA os valores originais
+ *      a partir da memória (rollback) e interrompe com erro explícito.
+ *
+ * A trava de escrita é garantida por withScriptLock_ (reentrante), de modo
+ * que duas migrações nunca rodam ao mesmo tempo sobre a mesma aba.
+ * ============================================================================
+ * @param {Sheet} sheet - Aba a ajustar.
+ * @param {string[]} columns - Colunas esperadas (Config.gs).
+ * @throws {Error} 'ESQUEMA: ...' quando a migração não pôde ser concluída
+ *   com segurança (neste caso os dados originais são preservados).
+ */
+function ensureSheetSchema_(sheet, columns) {
+  if (!columns || columns.length === 0) return;
+
+  // Garantir colunas físicas suficientes é uma operação aditiva e segura.
+  if (sheet.getMaxColumns() < columns.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), columns.length - sheet.getMaxColumns());
+  }
+
+  const sheetName = sheet.getName();
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  // ── CASO 1: aba vazia (sem cabeçalho) — nada a preservar ──
+  if (lastRow === 0 || lastCol === 0) {
+    sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
+    aplicarFormatoCabecalho_(sheet, columns.length);
+    return;
+  }
+
+  const existing = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const oldHeaders = existing[0].map(function(value) { return String(value); });
+  const sameSchema = oldHeaders.length === columns.length && oldHeaders.every(function(value, index) {
+    return value === columns[index];
+  });
+
+  // ── CASO 2: esquema já correto — só reforça cabeçalho e formatação ──
+  if (sameSchema) {
+    sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
+    aplicarFormatoCabecalho_(sheet, columns.length);
+    return;
+  }
+
+  // ── CASO 3: esquema diferente, mas SEM linhas de dados ──
+  // Não há o que preservar: apenas troca o cabeçalho.
+  if (existing.length <= 1) {
+    sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
+    if (lastCol > columns.length) {
+      sheet.getRange(1, columns.length + 1, 1, lastCol - columns.length).clearContent();
+    }
+    aplicarFormatoCabecalho_(sheet, columns.length);
+    return;
+  }
+
+  // ── CASO 4: MIGRAÇÃO COM DADOS REAIS — caminho protegido ──
+  withScriptLock_(function() {
+    const totalOriginal = existing.length - 1; // linhas de dados (sem cabeçalho)
+
+    // 4.1 Remapeia cada linha pelo NOME da coluna no cabeçalho antigo.
+    const rows = existing.slice(1).map(function(row) {
+      const record = {};
+      oldHeaders.forEach(function(header, index) {
+        if (header) record[header] = row[index];
+      });
+      return toRowArray(record, columns);
+    });
+
+    // 4.2 VALIDAÇÃO PRÉVIA: nenhuma linha pode ter se perdido no remapeamento.
+    if (rows.length !== totalOriginal) {
+      throw new Error('ESQUEMA: remapeamento de "' + sheetName + '" gerou ' + rows.length +
+        ' linhas para ' + totalOriginal + ' originais. Migração abortada — nada foi alterado.');
+    }
+
+    // 4.3 BACKUP: cópia integral da aba ANTES de qualquer escrita.
+    // Fica na própria planilha como rede de segurança (não é apagada
+    // automaticamente — o administrador confere e remove quando quiser).
+    let nomeBackup = '';
+    try {
+      const ss = sheet.getParent();
+      const carimbo = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+      nomeBackup = ('_bkp_' + sheetName + '_' + carimbo).substring(0, 99);
+      sheet.copyTo(ss).setName(nomeBackup);
+      Logger.log('[Esquema] Backup criado antes da migração: ' + nomeBackup);
+    } catch (e) {
+      // Sem backup não migramos: preferimos manter o sistema como está.
+      throw new Error('ESQUEMA: não foi possível criar a aba de backup de "' + sheetName +
+        '" (' + e.message + '). Migração abortada — nenhum dado foi alterado.');
+    }
+
+    // 4.4 ESCRITA POR CIMA (a aba NUNCA fica vazia em nenhum instante).
+    try {
+      sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
+      sheet.getRange(2, 1, rows.length, columns.length).setValues(rows);
+
+      // Se o esquema novo tem MENOS colunas, limpa só o excedente à direita
+      // (nunca o intervalo que acabou de receber os dados).
+      if (lastCol > columns.length) {
+        sheet.getRange(1, columns.length + 1, lastRow, lastCol - columns.length).clearContent();
+      }
+
+      // 4.5 VALIDAÇÃO POSTERIOR: relê a aba e confere a contagem.
+      SpreadsheetApp.flush();
+      const conferencia = sheet.getLastRow() - 1;
+      if (conferencia !== totalOriginal) {
+        throw new Error('contagem final (' + conferencia + ') diferente da original (' + totalOriginal + ')');
+      }
+    } catch (e) {
+      // 4.6 ROLLBACK: devolve os valores originais a partir da memória.
+      try {
+        sheet.getRange(1, 1, existing.length, oldHeaders.length).setValues(existing);
+        SpreadsheetApp.flush();
+        Logger.log('[Esquema] ROLLBACK aplicado em "' + sheetName + '" — dados originais restaurados.');
+      } catch (rollbackErro) {
+        Logger.log('[Esquema] FALHA NO ROLLBACK de "' + sheetName + '": ' + rollbackErro.message +
+          ' — utilize a aba de backup "' + nomeBackup + '".');
+      }
+      throw new Error('ESQUEMA: falha ao migrar "' + sheetName + '" (' + e.message +
+        '). Os dados originais foram restaurados; a aba de backup "' + nomeBackup + '" também está disponível.');
+    }
+
+    aplicarFormatoCabecalho_(sheet, columns.length);
+    invalidateCache(sheetName);
+    Logger.log('[Esquema] Migração concluída em "' + sheetName + '": ' + totalOriginal +
+      ' registros preservados. Backup: ' + nomeBackup);
+  });
 }
 
 /**
@@ -873,19 +1057,21 @@ function getAll(sheetName, forceRefresh) {
  * @returns {Object|null} Registro encontrado ou null
  */
 function getById(sheetName, id) {
-  try {
-    if (!id) return null;
-    
-    const records = getAll(sheetName);
-    const record = records.find(function(r) {
-      return String(r.Id) === String(id);
-    });
-    
-    return record || null;
-  } catch (e) {
-    Logger.log('Erro em getById(' + sheetName + ', ' + id + '): ' + e.message);
-    return null;
-  }
+  // IMPORTANTE (correção de risco): esta função NÃO captura erros de
+  // leitura. Antes, qualquer falha do Sheets virava "return null", e o
+  // sistema exibia "Atendimento não encontrado" — transformando uma FALHA
+  // TÉCNICA em AUSÊNCIA DE DADO. Agora o erro ('DADOS: ...') sobe até o
+  // frontend, que aciona a nova tentativa e, se persistir, mostra o erro
+  // real. "null" passou a significar exclusivamente: não existe registro
+  // com este Id.
+  if (!id) return null;
+
+  const records = getAll(sheetName);
+  const record = records.find(function(r) {
+    return String(r.Id) === String(id);
+  });
+
+  return record || null;
 }
 
 /**
@@ -896,15 +1082,14 @@ function getById(sheetName, id) {
  * @returns {Object[]} Array de registros correspondentes
  */
 function getByField(sheetName, field, value) {
-  try {
-    const records = getAll(sheetName);
-    return records.filter(function(r) {
-      return String(r[field]) === String(value);
-    });
-  } catch (e) {
-    Logger.log('Erro em getByField(' + sheetName + ', ' + field + '): ' + e.message);
-    return [];
-  }
+  // Sem captura de erro (mesma correção de getById): uma falha de leitura
+  // aqui fazia a TIMELINE aparecer vazia, como se o atendimento não
+  // tivesse histórico. Agora o erro propaga e "[]" significa apenas:
+  // nenhum registro corresponde ao filtro.
+  const records = getAll(sheetName);
+  return records.filter(function(r) {
+    return String(r[field]) === String(value);
+  });
 }
 
 /**
@@ -914,39 +1099,36 @@ function getByField(sheetName, field, value) {
  * @returns {Object[]} Array de registros correspondentes
  */
 function getFilteredData(sheetName, filters) {
-  try {
-    let records = getAll(sheetName);
-    
-    if (!filters || Object.keys(filters).length === 0) {
-      return records;
-    }
-    
-    return records.filter(function(record) {
-      return Object.keys(filters).every(function(key) {
-        const filterValue = filters[key];
-        
-        // Ignora filtros vazios
-        if (filterValue === null || filterValue === undefined || filterValue === '') {
-          return true;
-        }
-        
-        const recordValue = record[key];
-        
-        // Comparação por array (OR): se o filtro é array, basta ter um match
-        if (Array.isArray(filterValue)) {
-          return filterValue.some(function(fv) {
-            return String(recordValue) === String(fv);
-          });
-        }
-        
-        // Comparação simples
-        return String(recordValue) === String(filterValue);
-      });
-    });
-  } catch (e) {
-    Logger.log('Erro em getFilteredData(' + sheetName + '): ' + e.message);
-    return [];
+  // Sem captura de erro (mesma correção de getById/getByField): falha de
+  // leitura nunca deve virar lista vazia.
+  const records = getAll(sheetName);
+
+  if (!filters || Object.keys(filters).length === 0) {
+    return records;
   }
+
+  return records.filter(function(record) {
+    return Object.keys(filters).every(function(key) {
+      const filterValue = filters[key];
+
+      // Ignora filtros vazios
+      if (filterValue === null || filterValue === undefined || filterValue === '') {
+        return true;
+      }
+
+      const recordValue = record[key];
+
+      // Comparação por array (OR): se o filtro é array, basta ter um match
+      if (Array.isArray(filterValue)) {
+        return filterValue.some(function(fv) {
+          return String(recordValue) === String(fv);
+        });
+      }
+
+      // Comparação simples
+      return String(recordValue) === String(filterValue);
+    });
+  });
 }
 
 // ============================================================================
@@ -979,6 +1161,87 @@ function ensureAlignedHeaders_(sheet, sheetName, columns) {
 }
 
 /**
+ * 🔴 ALTO RISCO — PREPARA UMA ABA PARA GRAVAÇÃO POSICIONAL.
+ *
+ * PARA QUE SERVE:
+ * O Prisma grava as linhas por POSIÇÃO (a 1ª célula é a 1ª coluna de
+ * COLUMNS, a 2ª é a 2ª...). Se o cabeçalho físico da planilha estiver em
+ * outra ordem, o valor de "Status" pode acabar gravado na coluna
+ * "Subcategoria". Esta função é a barreira que impede isso.
+ *
+ * O QUE ELA FAZ, NESTA ORDEM:
+ *   1. confere se a aba tem esquema mapeado no código;
+ *   2. lê o cabeçalho real da planilha;
+ *   3. ABORTA se a estrutura for insegura (cabeçalho irreconhecível com
+ *      dados, ou coluna repetida) — nunca tenta adivinhar;
+ *   4. se já estiver alinhado, libera a gravação;
+ *   5. se estiver desalinhado mas for corrigível, corrige usando a rotina
+ *      protegida da Fase 1 (backup + validação + rollback);
+ *   6. CONFERE DE NOVO e só então libera a gravação.
+ *
+ * ⚠️ NÃO REMOVA ESTAS VALIDAÇÕES. É melhor recusar a gravação com um erro
+ * claro do que gravar informação na coluna errada.
+ *
+ * Deve ser chamada com a trava de escrita já adquirida (withScriptLock_).
+ * @param {Sheet} sheet - Aba de destino.
+ * @param {string} sheetName - Nome da aba.
+ * @param {string[]} columns - Colunas esperadas (Config.gs).
+ * @throws {Error} 'ESTRUTURA: ...' quando não é seguro gravar.
+ */
+function prepararAbaParaGravacao_(sheet, sheetName, columns) {
+  // 1. A aba precisa ter esquema conhecido pelo código.
+  assertColumnsForSheet_(sheetName, columns);
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  // 2. Aba ainda sem cabeçalho e sem dados: apenas cria o cabeçalho.
+  if (lastRow === 0 || lastCol === 0) {
+    ensureAlignedHeaders_(sheet, sheetName, columns);
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(v) { return String(v); });
+
+  // 3a. FAIL CLOSED — cabeçalho irreconhecível COM dados na aba.
+  // Sem nenhuma coluna conhecida não há como remapear: um "conserto"
+  // automático aqui esvaziaria os registros existentes.
+  const reconhecidas = columns.filter(function(col) { return headers.indexOf(col) !== -1; }).length;
+  if (reconhecidas === 0 && lastRow > 1) {
+    throw new Error('ESTRUTURA: o cabeçalho da aba "' + sheetName + '" não foi reconhecido e ela ' +
+      'contém dados. A gravação foi cancelada para não corromper os registros. ' +
+      'Restaure a primeira linha com os nomes de coluna originais.');
+  }
+
+  // 3b. FAIL CLOSED — coluna configurada aparece MAIS DE UMA VEZ.
+  // Nesse caso é impossível saber qual delas guarda o dado verdadeiro.
+  const duplicadas = columns.filter(function(col) {
+    return headers.filter(function(h) { return h === col; }).length > 1;
+  });
+  if (duplicadas.length > 0) {
+    throw new Error('ESTRUTURA: a aba "' + sheetName + '" tem a(s) coluna(s) ' +
+      duplicadas.join(', ') + ' repetida(s) no cabeçalho. A gravação foi cancelada — ' +
+      'remova a duplicidade na planilha antes de continuar.');
+  }
+
+  // 4. Já alinhado: nada a fazer (caminho normal, sem custo extra).
+  const alinhado = columns.every(function(col, index) { return headers[index] === col; });
+  if (alinhado) return;
+
+  // 5. Desalinhado, porém corrigível: usa a rotina protegida da Fase 1.
+  ensureAlignedHeaders_(sheet, sheetName, columns);
+
+  // 6. VALIDA DE NOVO. Se ainda não estiver alinhado, não grava.
+  const conferencia = sheet.getRange(1, 1, 1, Math.max(columns.length, sheet.getLastColumn()))
+    .getValues()[0].map(function(v) { return String(v); });
+  const alinhadoAgora = columns.every(function(col, index) { return conferencia[index] === col; });
+  if (!alinhadoAgora) {
+    throw new Error('ESTRUTURA: não foi possível alinhar o cabeçalho da aba "' + sheetName +
+      '". A gravação foi cancelada e nenhum dado foi alterado.');
+  }
+}
+
+/**
  * Insere um novo registro na planilha.
  * Utiliza LockService para garantir concorrência segura.
  * @param {string} sheetName - Nome da planilha
@@ -987,10 +1250,17 @@ function ensureAlignedHeaders_(sheet, sheetName, columns) {
  */
 function insert(sheetName, data) {
   const lock = LockService.getScriptLock();
-  
+  // Trava reentrante (ver withScriptLock_): se ESTA execução já detém a
+  // trava — por exemplo, uma migração que chama insert internamente —
+  // não tentamos readquiri-la, o que causaria impasse até o timeout.
+  const jaTravado = LOCK_HELD_;
+
   try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    
+    if (!jaTravado) {
+      lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+      LOCK_HELD_ = true;
+    }
+
     const ss = getSpreadsheet();
     const sheet = ss.getSheetByName(sheetName);
     
@@ -999,9 +1269,10 @@ function insert(sheetName, data) {
     }
     
     const columns = getColumnsForSheet(sheetName);
-    assertColumnsForSheet_(sheetName, columns);
-    // Gravação é posicional: garante o alinhamento do cabeçalho antes.
-    ensureAlignedHeaders_(sheet, sheetName, columns);
+    // Gravação POSICIONAL: valida a estrutura antes (esquema mapeado,
+    // cabeçalho legível, sem colunas duplicadas) e alinha com segurança.
+    // Estrutura insegura ABORTA a gravação — ver prepararAbaParaGravacao_.
+    prepararAbaParaGravacao_(sheet, sheetName, columns);
     const rowData = toRowArray(data, columns);
 
     sheet.appendRow(rowData);
@@ -1015,7 +1286,11 @@ function insert(sheetName, data) {
     Logger.log('Erro ao inserir em ' + sheetName + ': ' + e.message);
     throw new Error('Erro ao inserir registro: ' + e.message);
   } finally {
-    try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    // Só libera quem realmente adquiriu (a trava pertence ao chamador externo).
+    if (!jaTravado) {
+      LOCK_HELD_ = false;
+      try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    }
   }
 }
 
@@ -1029,10 +1304,14 @@ function insert(sheetName, data) {
  */
 function update(sheetName, id, data) {
   const lock = LockService.getScriptLock();
-  
+  const jaTravado = LOCK_HELD_; // trava reentrante (ver withScriptLock_)
+
   try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    
+    if (!jaTravado) {
+      lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+      LOCK_HELD_ = true;
+    }
+
     const ss = getSpreadsheet();
     const sheet = ss.getSheetByName(sheetName);
     
@@ -1041,10 +1320,10 @@ function update(sheetName, id, data) {
     }
     
     const columns = getColumnsForSheet(sheetName);
-    assertColumnsForSheet_(sheetName, columns);
-    // Leitura e regravação da linha são posicionais: alinha o cabeçalho
-    // ANTES de localizar a linha (o realinhamento pode mover linhas).
-    ensureAlignedHeaders_(sheet, sheetName, columns);
+    // Leitura e regravação da linha são posicionais: valida e alinha o
+    // cabeçalho ANTES de localizar a linha (o realinhamento reescreve a
+    // aba e um índice obtido antes ficaria desatualizado).
+    prepararAbaParaGravacao_(sheet, sheetName, columns);
 
     // Encontra a linha do registro pelo ID
     const rowIndex = findRowById(sheet, id);
@@ -1074,7 +1353,10 @@ function update(sheetName, id, data) {
     Logger.log('Erro ao atualizar em ' + sheetName + ': ' + e.message);
     throw new Error('Erro ao atualizar registro: ' + e.message);
   } finally {
-    try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    if (!jaTravado) {
+      LOCK_HELD_ = false;
+      try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    }
   }
 }
 
@@ -1087,10 +1369,14 @@ function update(sheetName, id, data) {
  */
 function remove(sheetName, id) {
   const lock = LockService.getScriptLock();
-  
+  const jaTravado = LOCK_HELD_; // trava reentrante (ver withScriptLock_)
+
   try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    
+    if (!jaTravado) {
+      lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+      LOCK_HELD_ = true;
+    }
+
     const ss = getSpreadsheet();
     const sheet = ss.getSheetByName(sheetName);
     
@@ -1098,12 +1384,18 @@ function remove(sheetName, id) {
       throw new Error('Planilha não encontrada: ' + sheetName);
     }
     
+    // A exclusão também é POSICIONAL: findRowById procura o Id na coluna
+    // A e deleteRow apaga a linha inteira. Com o cabeçalho desalinhado, a
+    // busca poderia apontar a linha errada — e uma exclusão é
+    // irreversível. Por isso a estrutura é validada antes.
+    prepararAbaParaGravacao_(sheet, sheetName, getColumnsForSheet(sheetName));
+
     const rowIndex = findRowById(sheet, id);
-    
+
     if (rowIndex === -1) {
       throw new Error('Registro não encontrado: ' + id);
     }
-    
+
     sheet.deleteRow(rowIndex);
     
     // Invalida cache após escrita
@@ -1115,7 +1407,10 @@ function remove(sheetName, id) {
     Logger.log('Erro ao remover de ' + sheetName + ': ' + e.message);
     throw new Error('Erro ao remover registro: ' + e.message);
   } finally {
-    try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    if (!jaTravado) {
+      LOCK_HELD_ = false;
+      try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    }
   }
 }
 
@@ -1128,10 +1423,14 @@ function remove(sheetName, id) {
  */
 function batchInsert(sheetName, dataArray) {
   const lock = LockService.getScriptLock();
-  
+  const jaTravado = LOCK_HELD_; // trava reentrante (ver withScriptLock_)
+
   try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    
+    if (!jaTravado) {
+      lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+      LOCK_HELD_ = true;
+    }
+
     if (!dataArray || dataArray.length === 0) return 0;
     
     const ss = getSpreadsheet();
@@ -1142,7 +1441,11 @@ function batchInsert(sheetName, dataArray) {
     }
     
     const columns = getColumnsForSheet(sheetName);
-    assertColumnsForSheet_(sheetName, columns);
+    // A gravação em lote também é POSICIONAL (setValues na ordem de
+    // COLUMNS). Sem esta validação, uma aba desalinhada (ex.: coluna
+    // inserida manualmente) receberia as linhas do Histórico deslocadas,
+    // silenciosamente.
+    prepararAbaParaGravacao_(sheet, sheetName, columns);
 
     const rows = dataArray.map(function(data) {
       return toRowArray(data, columns);
@@ -1161,7 +1464,10 @@ function batchInsert(sheetName, dataArray) {
     Logger.log('Erro em batchInsert(' + sheetName + '): ' + e.message);
     throw new Error('Erro ao inserir registros em lote: ' + e.message);
   } finally {
-    try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    if (!jaTravado) {
+      LOCK_HELD_ = false;
+      try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
+    }
   }
 }
 

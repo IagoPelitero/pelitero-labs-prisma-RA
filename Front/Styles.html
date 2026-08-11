@@ -1143,7 +1143,10 @@ input, select, textarea, button {
 
 .idade-atencao {
   background: #FFF3E0;
-  color: #A85E00;
+  /* Acessibilidade: o tom anterior (#A85E00) rendia contraste 4,49 sobre
+     este fundo — um fio abaixo do mínimo AA (4,5). Escurecido para 4,70,
+     mantendo exatamente a mesma leitura visual de "atenção". */
+  color: #A45B00;
 }
 
 .idade-critica {

@@ -359,6 +359,15 @@ Pages.dashboard = {
         if (tentativa > 1) {
           Components.toast('Dados atualizados a partir do Google Sheets. ✓', 'success');
         }
+        // VISÃO PARCIAL: o servidor conseguiu ler parte das abas, mas não
+        // todas. Os dados exibidos estão INCOMPLETOS — o usuário precisa
+        // saber disso explicitamente (nunca apresentar número parcial como
+        // se fosse total).
+        if (data.parcial) {
+          Components.toast('Atenção: não foi possível ler ' +
+            (data.abasIndisponiveis || []).join(', ') +
+            '. A lista está incompleta — use "Atualizar" em instantes.', 'warning', 8000);
+        }
       })
       .withFailureHandler(function(erro) {
         self._falhaCarregamento(tentativa, erro);

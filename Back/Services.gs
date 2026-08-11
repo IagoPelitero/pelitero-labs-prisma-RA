@@ -164,10 +164,44 @@ function getBootstrapData() {
       status: STATUS_LIST.map(function(item) { return item.Nome; }),
       situacoesPendencia: SITUACOES_PENDENCIA.slice(),
       canais: getCanaisAtivos_(), // v4.2: lista dinâmica (aba Canais)
+      // Nomes puros — usados pelos FILTROS (Dashboard, Relatórios,
+      // Indicadores), que continuam filtrando pela coluna Responsavel.
       responsaveis: pluck_(usuarios, 'Nome'),
+      // v4.7 (Fase 2D): opções do SELETOR de responsável, com Id. O
+      // formulário passa a enviar o Id — dois homônimos deixam de ser
+      // indistinguíveis. Quando há nomes repetidos, o rótulo recebe a
+      // Equipe (ou o Perfil) para o supervisor saber quem está escolhendo.
+      // E-mail não é exposto aqui, por não ser necessário.
+      responsaveisOpcoes: montarOpcoesResponsavel_(usuarios),
       statusCores: getStatusColorMap_()
     }
   };
+}
+
+/**
+ * Monta as opções do seletor de responsável: { id, nome, rotulo }.
+ * O rótulo só ganha o complemento (Equipe ou Perfil) quando existe mais
+ * de um usuário ativo com o MESMO nome — evita poluir a lista no caso
+ * comum e resolve a ambiguidade quando ela realmente existe.
+ * @param {Object[]} usuarios - Usuários ativos ordenados.
+ * @returns {Object[]} Opções para o <select>.
+ */
+function montarOpcoesResponsavel_(usuarios) {
+  const ocorrencias = {};
+  usuarios.forEach(function(u) {
+    const chave = normalizeText_(u.Nome);
+    ocorrencias[chave] = (ocorrencias[chave] || 0) + 1;
+  });
+  return usuarios.map(function(u) {
+    const nome = String(u.Nome || '');
+    const repetido = ocorrencias[normalizeText_(nome)] > 1;
+    const complemento = repetido ? String(u.Equipe || u.Perfil || '').trim() : '';
+    return {
+      id: String(u.Id || ''),
+      nome: nome,
+      rotulo: complemento ? (nome + ' — ' + complemento) : nome
+    };
+  });
 }
 
 /**
@@ -225,8 +259,16 @@ function activeSorted_(sheetName) {
  * @returns {string[]} Ex.: ['Reclame Aqui', 'SAC Preventivo'].
  */
 function getCanaisAtivos_() {
-  const canais = pluck_(activeSorted_(CONFIG.SHEET_NAMES.CANAIS), 'Nome');
-  return canais.length > 0 ? canais : CANAIS_LIST.slice();
+  try {
+    const canais = pluck_(activeSorted_(CONFIG.SHEET_NAMES.CANAIS), 'Nome');
+    return canais.length > 0 ? canais : CANAIS_LIST.slice();
+  } catch (e) {
+    // Falha transitória ao ler a aba Canais não pode derrubar o Dashboard
+    // inteiro: recorre à lista padrão (mesmo fallback já previsto para a
+    // aba vazia). A falha fica registrada no log para diagnóstico.
+    Logger.log('[Dados] Falha ao ler a aba Canais — usando a lista padrão: ' + e.message);
+    return CANAIS_LIST.slice();
+  }
 }
 
 // ============================================================================
@@ -289,33 +331,60 @@ function verificarCpfDuplicado(cpf, ignorarId) {
   const digitos = String(cpf || '').replace(/\D/g, '');
   if (digitos.length !== 11) return { duplicado: false };
   const safeId = sanitizeInput(ignorarId);
+  const actor = getActor_();
 
-  // Localiza o PRIMEIRO cadastro do CPF (menor data de criação/abertura).
-  let primeiro = null;
-  let primeiraData = null;
+  // Percorre os atendimentos do CPF guardando dois candidatos:
+  //  - o mais ANTIGO de todos (prova a existência do cadastro);
+  //  - o mais ANTIGO que este usuário PODE ver (para exibir detalhes).
+  let primeiro = null, primeiraData = null;
+  let primeiroVisivel = null, primeiraDataVisivel = null;
+
   getActiveAtendimentos_().forEach(function(record) {
     if (String(record.Id) === String(safeId || '')) return;
     if (String(record.CPF || '').replace(/\D/g, '') !== digitos) return;
     const data = asDate_(record.DataCriacao) || asDate_(record.DataAbertura);
+
     if (!primeiro || (data && (!primeiraData || data < primeiraData))) {
       primeiro = record;
       primeiraData = data;
     }
+    if (canAccessAtendimento_(record, actor)) {
+      if (!primeiroVisivel || (data && (!primeiraDataVisivel || data < primeiraDataVisivel))) {
+        primeiroVisivel = record;
+        primeiraDataVisivel = data;
+      }
+    }
   });
 
   if (!primeiro) return { duplicado: false };
-  // Popup informativo enriquecido: além do analista e da data, devolve o
-  // status atual (com "Aguardando Retorno de", quando Pendente), a
-  // categoria e a subcategoria do primeiro registro. Todos os campos vêm
-  // do registro já em memória — nenhuma leitura extra da planilha.
+
+  // ── PRIVACIDADE (Fase 2D) ──
+  // A decisão é do SERVIDOR: quando o usuário não tem autorização sobre
+  // nenhum dos atendimentos do CPF, a resposta NÃO CARREGA os detalhes.
+  // Não existe "campo oculto" — o dado simplesmente não sai daqui, então
+  // nem pelo console do navegador ele é acessível.
+  // ADM e Supervisor enxergam todos os atendimentos (canAccessAtendimento_
+  // já devolve true para esses perfis), então recebem o detalhamento.
+  if (!primeiroVisivel) {
+    return {
+      duplicado: true,
+      restrito: true,
+      cpf: formatCPF(digitos),
+      // A data já fazia parte da regra operacional do aviso e é o mínimo
+      // necessário para o analista entender que existe histórico.
+      dataRegistro: toIso_(primeiraData)
+    };
+  }
+
   return {
     duplicado: true,
+    restrito: false,
     cpf: formatCPF(digitos),
-    analista: String(primeiro.CriadoPor || primeiro.Responsavel || ''),
-    dataRegistro: toIso_(primeiraData),
-    status: statusLabel_(primeiro.Status, primeiro.MotivoPendencia),
-    categoria: String(primeiro.Categoria || ''),
-    subcategoria: String(primeiro.Subcategoria || '') // v4.6: '' se não houver
+    analista: String(primeiroVisivel.CriadoPor || primeiroVisivel.Responsavel || ''),
+    dataRegistro: toIso_(primeiraDataVisivel),
+    status: statusLabel_(primeiroVisivel.Status, primeiroVisivel.MotivoPendencia),
+    categoria: String(primeiroVisivel.Categoria || ''),
+    subcategoria: String(primeiroVisivel.Subcategoria || '') // '' se não houver
   };
 }
 
@@ -336,11 +405,38 @@ function getAtendimentoSheetNames_() {
  * @param {boolean} forceRefresh - true ignora o cache e lê o Sheets
  *        diretamente (usado pelo fallback automático do frontend).
  */
-function getActiveAtendimentos_(forceRefresh) {
+function getActiveAtendimentos_(forceRefresh, tolerante) {
+  const sheetNames = getAtendimentoSheetNames_();
   let records = [];
-  getAtendimentoSheetNames_().forEach(function(sheetName) {
-    records = records.concat(getAll(sheetName, forceRefresh === true));
+  const falhas = [];
+
+  sheetNames.forEach(function(sheetName) {
+    try {
+      records = records.concat(getAll(sheetName, forceRefresh === true));
+    } catch (e) {
+      // MODO ESTRITO (padrão): qualquer falha de leitura interrompe a
+      // operação. É o comportamento obrigatório para VALIDAÇÕES e
+      // GRAVAÇÕES (ex.: checagem de protocolo duplicado) — um resultado
+      // parcial poderia aprovar um duplicado ou apagar informação.
+      if (!tolerante) throw e;
+
+      // MODO TOLERANTE: usado apenas por telas de EXIBIÇÃO. Uma falha
+      // transitória em uma aba não pode zerar o Dashboard inteiro; o que
+      // foi lido é aproveitado e a falha é sinalizada ao frontend.
+      falhas.push(sheetName);
+      Logger.log('[Dados] Leitura tolerante — falha em "' + sheetName + '": ' + e.message);
+    }
   });
+
+  // Se NENHUMA aba pôde ser lida, isso não é "base vazia": é falha real.
+  if (tolerante && falhas.length === sheetNames.length) {
+    throw new Error('DADOS: não foi possível ler nenhuma das abas de atendimento no Google Sheets.');
+  }
+
+  // Registra os avisos no contexto da execução para getDashboardData
+  // informar o usuário de que a visão está incompleta.
+  if (tolerante) SERVICE_CONTEXT_.avisosLeitura = falhas;
+
   return records.filter(function(record) {
     return !isTrue_(record.Excluido);
   });
@@ -441,15 +537,20 @@ function salvarAtendimento(dados) {
   const input = validateAtendimentoInput_(dados || {});
 
   const actor = getActor_();
-  // Analista não escolhe responsável: o sistema identifica automaticamente
-  // quem está criando o atendimento. Apenas o Supervisor pode delegar a
-  // outro analista.
-  if (!isSupervisorProfile_(actor.perfil) || !input.responsavel) {
-    input.responsavel = actor.nome;
-  }
+  // Responsável definido no SERVIDOR: Analista não delega; Supervisor/ADM
+  // delegam por Id validado (o nome vem do cadastro, não do navegador).
+  const responsavel = resolverResponsavel_(input, actor);
+  input.responsavel = responsavel.nome;
+
   const now = new Date();
   const opening = parseInputDate_(input.dataAbertura, false) || now;
   const finalStatus = isFinalStatus_(input.status);
+
+  // v4.7 — vínculo por ID estável (ver metadadosAtendimento_).
+  input.camposExtras = mesclarMetadadosAtendimento_(input.camposExtras, {
+    _responsavelId: responsavel.id,
+    _criadoPorId: String(actor.id || '')
+  });
 
   const record = {
     Id: generateId('ATD'),
@@ -514,15 +615,44 @@ function atualizarAtendimento(id, dados, justificativa) {
   // valores já gravados para a edição não apagar dados existentes.
   preserveHiddenFields_(input, oldRecord);
 
-  // Analista não escolhe responsável: mantém o responsável atual. Apenas o
-  // Supervisor pode reatribuir o atendimento a outro analista.
-  if (!isSupervisorProfile_(actor.perfil) || !input.responsavel) {
-    input.responsavel = oldRecord.Responsavel || actor.nome;
-  }
+  // Responsável resolvido no SERVIDOR (mesma regra da criação). Analista
+  // mantém o caso consigo; Supervisor/ADM reatribuem por Id validado.
+  const responsavel = resolverResponsavel_(input, actor, oldRecord.Responsavel);
+  input.responsavel = responsavel.nome;
+
   const now = new Date();
   const opening = parseInputDate_(input.dataAbertura, false) || asDate_(oldRecord.DataAbertura) || now;
   const safeJustification = sanitizeInput(justificativa);
   const statusChanged = normalizeText_(oldRecord.Status) !== normalizeText_(input.status);
+
+  // ── v4.7 — metadados de vínculo (Ids estáveis) ──
+  // Regras, nesta ordem:
+  //  1. os metadados que já existem são PRESERVADOS (validateAtendimentoInput_
+  //     descarta chaves não declaradas, então precisam ser remesclados);
+  //  2. houve REATRIBUIÇÃO (o nome do responsável mudou)? o Id é resolvido
+  //     de novo; se o nome for ambíguo, a chave é removida e o registro
+  //     volta ao comportamento legado por nome — nunca "chutamos" um Id;
+  //  3. registro ANTIGO sendo editado legitimamente e ainda sem vínculo?
+  //     recebe o Id agora, de forma natural (sem varredura da base).
+  const metaAtual = metadadosAtendimento_(oldRecord);
+  const novosMetadados = {
+    _responsavelId: metaAtual._responsavelId || '',
+    _criadoPorId: metaAtual._criadoPorId || ''
+  };
+  const trocouResponsavel =
+    normalizeText_(oldRecord.Responsavel || '') !== normalizeText_(input.responsavel || '');
+  if (responsavel.explicito) {
+    // Seleção explícita por Id sempre manda. É o caso crítico da troca
+    // entre HOMÔNIMOS: o nome continua idêntico, mas o Id muda — sem
+    // esta regra o vínculo antigo permaneceria, apontando a pessoa errada.
+    novosMetadados._responsavelId = responsavel.id;
+  } else if (trocouResponsavel || !novosMetadados._responsavelId) {
+    novosMetadados._responsavelId = responsavel.id;
+  }
+  if (!novosMetadados._criadoPorId) {
+    novosMetadados._criadoPorId = resolverUsuarioIdPorNome_(oldRecord.CriadoPor);
+  }
+  input.camposExtras = mesclarMetadadosAtendimento_(input.camposExtras, novosMetadados);
 
   const resolution = resolveResolution_(oldRecord, input.status, opening, now);
 
@@ -709,6 +839,10 @@ function validateAtendimentoInput_(dados) {
     subcategoria: sanitizeInput(dados.subcategoria), // v4.6: sempre opcional
     canal: sanitizeInput(dados.canal),
     responsavel: sanitizeInput(dados.responsavel),
+    // v4.7 (Fase 2D): Id do responsável escolhido no seletor. É a fonte
+    // confiável da delegação — o nome acima é apenas informativo e o
+    // servidor o substitui pelo nome oficial do cadastro.
+    responsavelId: sanitizeInput(dados.responsavelId),
     status: sanitizeInput(dados.status),
     observacoes: sanitizeInput(dados.observacoes),
     dataAbertura: sanitizeInput(dados.dataAbertura),
@@ -842,43 +976,106 @@ function statusLabel_(status, situacao) {
 }
 
 /**
- * Escritas atômicas do atendimento: a verificação de protocolo duplicado e
- * a gravação acontecem sob o mesmo lock para impedir duplicidades em
- * requisições paralelas. A unicidade é verificada nas três abas por canal.
+ * Garante que TODAS as abas de atendimento estão com o cabeçalho alinhado
+ * antes de qualquer gravação ou verificação de duplicidade.
+ *
+ * POR QUE TODAS (e não só a aba de destino):
+ * a checagem de protocolo único percorre todas as abas por canal lendo as
+ * colunas por POSIÇÃO. Se uma delas estivesse desalinhada, a verificação
+ * leria a coluna errada e poderia deixar passar um protocolo duplicado.
+ * Alinhando todas antes, a checagem e a gravação operam sobre a mesma
+ * estrutura confiável. Abas já alinhadas não têm custo (só a leitura do
+ * cabeçalho).
+ * @param {Spreadsheet} ss - Planilha do sistema.
+ * @throws {Error} 'ESTRUTURA: ...' quando alguma aba não é segura para gravar.
  */
-function insertAtendimentoUnique_(record, sheetName) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    const ss = getSpreadsheet();
-    assertUniqueNumeroRAAllSheets_(ss, record.NumeroRA, '');
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) throw new Error('Aba do canal não encontrada: ' + sheetName);
-    const row = toRowArray(record, COLUMNS.ATENDIMENTOS);
-    sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
-    invalidateCache(sheetName);
-  } finally {
-    try { lock.releaseLock(); } catch (e) { /* lock não adquirido */ }
-  }
+function prepararAbasAtendimento_(ss) {
+  getAtendimentoSheetNames_().forEach(function(nome) {
+    const aba = ss.getSheetByName(nome);
+    if (!aba) return; // aba ausente é tratada por quem for gravar nela
+    prepararAbaParaGravacao_(aba, nome, COLUMNS.ATENDIMENTOS);
+  });
 }
 
 /**
- * Atualiza um atendimento em sua aba atual. Quando o canal muda
- * (fromSheetName !== toSheetName), o registro é movido para a aba do novo
- * canal — removido da origem e regravado no destino, sob o mesmo lock.
+ * 🔴 ALTO RISCO — GRAVA UM ATENDIMENTO NOVO NA PLANILHA.
+ *
+ * Antes de salvar, nesta ordem:
+ *   1. trava a operação (impede gravações simultâneas);
+ *   2. confere e alinha o cabeçalho de todas as abas de atendimento;
+ *   3. verifica se o protocolo já existe (dentro da mesma trava);
+ *   4. somente depois grava a linha.
+ *
+ * ⚠️ Não remova essas validações. Elas evitam que informações sejam
+ * gravadas em colunas incorretas e que dois atendimentos recebam o mesmo
+ * protocolo em requisições paralelas.
+ * @param {Object} record - Registro completo do atendimento.
+ * @param {string} sheetName - Aba de destino (definida pelo canal).
+ */
+function insertAtendimentoUnique_(record, sheetName) {
+  // withScriptLock_ é reentrante: se esta execução já detém a trava,
+  // reutiliza em vez de travar a si mesma (ver Database.gs).
+  withScriptLock_(function() {
+    const ss = getSpreadsheet();
+
+    // Estrutura primeiro: sem cabeçalho confiável, nada é gravado.
+    prepararAbasAtendimento_(ss);
+
+    // Protocolo único — mesma regra de antes, agora sobre dados alinhados.
+    assertUniqueNumeroRAAllSheets_(ss, record.NumeroRA, '');
+
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) throw new Error('Aba do canal não encontrada: ' + sheetName);
+
+    const row = toRowArray(record, COLUMNS.ATENDIMENTOS);
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+    invalidateCache(sheetName);
+  });
+}
+
+/**
+ * 🔴 ALTO RISCO — ATUALIZA UM ATENDIMENTO EXISTENTE.
+ *
+ * A linha é LIDA e REGRAVADA por posição, então o cabeçalho precisa estar
+ * alinhado antes de tudo. Ordem obrigatória:
+ *   1. trava a operação;
+ *   2. confere e alinha o cabeçalho das abas de atendimento;
+ *   3. verifica protocolo único (dentro da mesma trava);
+ *   4. só então localiza a linha e regrava.
+ *
+ * O alinhamento vem ANTES de localizar a linha de propósito: corrigir a
+ * estrutura pode reescrever a aba, e um índice obtido antes disso ficaria
+ * desatualizado — o sistema poderia sobrescrever o registro vizinho.
+ *
+ * Quando o canal muda (fromSheetName !== toSheetName), o registro é movido:
+ * gravado no destino e removido da origem, tudo sob a mesma trava.
+ *
+ * ⚠️ Não remova essas validações.
+ * @param {string} id - Id do atendimento.
+ * @param {Object} updates - Campos a alterar.
+ * @param {string} fromSheetName - Aba atual do registro.
+ * @param {string} toSheetName - Aba de destino (pode ser a mesma).
  */
 function updateAtendimentoUnique_(id, updates, fromSheetName, toSheetName) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
+  withScriptLock_(function() {
     const ss = getSpreadsheet();
+
+    // 1) Estrutura de TODAS as abas de atendimento (origem, destino e as
+    //    demais, que a checagem de duplicidade percorre).
+    prepararAbasAtendimento_(ss);
+
+    // 2) Protocolo único — regra inalterada, agora sobre dados alinhados.
     if (updates.NumeroRA !== undefined) {
       assertUniqueNumeroRAAllSheets_(ss, updates.NumeroRA, id);
     }
+
     const fromSheet = ss.getSheetByName(fromSheetName);
     if (!fromSheet) throw new Error('Aba do canal não encontrada: ' + fromSheetName);
+
+    // 3) Só agora localiza a linha (a estrutura já está estável).
     const rowIndex = findRowById(fromSheet, id);
     if (rowIndex === -1) throw new Error('Atendimento não encontrado.');
+
     const currentRow = fromSheet.getRange(rowIndex, 1, 1, COLUMNS.ATENDIMENTOS.length).getValues()[0];
     const current = toObject(currentRow, COLUMNS.ATENDIMENTOS);
     Object.keys(updates).forEach(function(key) { current[key] = updates[key]; });
@@ -894,9 +1091,7 @@ function updateAtendimentoUnique_(id, updates, fromSheetName, toSheetName) {
       fromSheet.getRange(rowIndex, 1, 1, COLUMNS.ATENDIMENTOS.length).setValues([newRow]);
     }
     invalidateCache(fromSheetName);
-  } finally {
-    try { lock.releaseLock(); } catch (e) { /* lock não adquirido */ }
-  }
+  });
 }
 
 /**
@@ -968,7 +1163,23 @@ function getStatusColorMap_() {
  */
 function getTimeline(atendimentoId) {
   requireAuth_();
-  return getTimelineInterna_(atendimentoId);
+  // CORREÇÃO DE SEGURANÇA (Fase 1): esta função é pública — pode ser
+  // chamada diretamente pelo navegador com QUALQUER Id. Antes ela só
+  // exigia autenticação, então um Analista autenticado conseguia ler a
+  // timeline de atendimentos de outros analistas (observações, mudanças
+  // de status, nomes) apenas informando o Id. Agora a autorização é
+  // verificada no SERVIDOR, com a mesma regra de getAtendimento.
+  const id = sanitizeInput(atendimentoId);
+  const found = findAtendimento_(id);
+
+  // Id inexistente ou excluído: nada a devolver (não é erro de permissão).
+  if (!found || isTrue_(found.record.Excluido)) return [];
+
+  if (!canAccessAtendimento_(found.record, getActor_())) {
+    throw new Error('Você não tem permissão para consultar o histórico deste atendimento.');
+  }
+
+  return getTimelineInterna_(id);
 }
 
 /**
@@ -1040,8 +1251,15 @@ function buildChangeHistory_(atendimentoId, oldRecord, updates, userName, justif
   const entries = [];
   Object.keys(updates).forEach(function(field) {
     if (ignored.indexOf(field) !== -1) return;
-    const oldValue = comparableValue_(oldRecord[field]);
-    const newValue = comparableValue_(updates[field]);
+    // v4.7: em CamposExtras, compara SÓ os campos visíveis. Os metadados
+    // internos ("_responsavelId"/"_criadoPorId") não são alteração de
+    // negócio e não devem gerar linha no Histórico.
+    const oldValue = field === 'CamposExtras'
+      ? comparableValue_(JSON.stringify(camposExtrasPublicos_(oldRecord[field])))
+      : comparableValue_(oldRecord[field]);
+    const newValue = field === 'CamposExtras'
+      ? comparableValue_(JSON.stringify(camposExtrasPublicos_(updates[field])))
+      : comparableValue_(updates[field]);
     if (oldValue === newValue) return;
     entries.push({
       Id: generateId('HIS'),
@@ -1076,7 +1294,13 @@ function getDashboardData(options) {
   // descartado e os dados vêm DIRETO do Google Sheets (fonte oficial).
   const force = !!(options && options.forceRefresh);
   if (force) invalidateAllCache();
-  const raw = restrictToOwnerIfNeeded_(getActiveAtendimentos_(force), actor);
+  // Leitura TOLERANTE (só aqui): o Dashboard é a porta de entrada e não
+  // pode ficar vazio por uma falha transitória em uma das abas. O que for
+  // lido é exibido e o campo "parcial" avisa o usuário. Relatórios e
+  // Indicadores permanecem em modo ESTRITO — números de relatório não
+  // podem ser parciais sem que isso seja evidente.
+  SERVICE_CONTEXT_.avisosLeitura = [];
+  const raw = restrictToOwnerIfNeeded_(getActiveAtendimentos_(force, true), actor);
   const records = decorateAtendimentos_(raw);
   sortClientRecords_(records, { campo: 'dataAbertura', direcao: 'desc' });
 
@@ -1128,12 +1352,20 @@ function getDashboardData(options) {
     }
   });
 
+  // Avisos de leitura parcial (abas que falharam nesta requisição).
+  const avisos = SERVICE_CONTEXT_.avisosLeitura || [];
+
   return {
     cards: cards,
     porSituacao: porSituacao,
     porCanal: porCanal,
     atendimentos: records,
-    user: actor
+    user: actor,
+    // true = a visão está INCOMPLETA (alguma aba não pôde ser lida).
+    // O frontend avisa o usuário em vez de apresentar números parciais
+    // como se fossem completos.
+    parcial: avisos.length > 0,
+    abasIndisponiveis: avisos
   };
 }
 
@@ -1472,11 +1704,21 @@ function salvarForaSLA(dataChave, valor) {
  * chave (a aba não usa Id). Sob lock, como as demais escritas.
  */
 function updateForaSLAPorData_(dataChave, numero) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-    const sheet = getSpreadsheet().getSheetByName(CONFIG.SHEET_NAMES.INDICADORES_SLA);
-    if (!sheet || sheet.getLastRow() <= 1) return;
+  // Trava reentrante (padronizada na Fase 2B): mesmo mecanismo das demais
+  // gravações. Evita impasse caso um dia esta função passe a ser chamada
+  // de dentro de outra operação que já detenha a trava.
+  withScriptLock_(function() {
+    const sheetName = CONFIG.SHEET_NAMES.INDICADORES_SLA;
+    const sheet = getSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) return;
+
+    // A leitura/regravação é POSICIONAL (índices de COLUMNS). A estrutura
+    // é validada antes — a aba IndicadoresSLA mantém seu formato próprio
+    // (Data | ForaSLA, sem Id); aqui só garantimos que o cabeçalho está
+    // íntegro e na ordem esperada antes de escrever.
+    prepararAbaParaGravacao_(sheet, sheetName, COLUMNS.INDICADORES_SLA);
+
+    if (sheet.getLastRow() <= 1) return;
     const colData = COLUMNS.INDICADORES_SLA.indexOf('Data');
     const colSLA = COLUMNS.INDICADORES_SLA.indexOf('ForaSLA');
     const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.INDICADORES_SLA.length);
@@ -1488,10 +1730,8 @@ function updateForaSLAPorData_(dataChave, numero) {
         break;
       }
     }
-    invalidateCache(CONFIG.SHEET_NAMES.INDICADORES_SLA);
-  } finally {
-    try { lock.releaseLock(); } catch (e) { /* ignore */ }
-  }
+    invalidateCache(sheetName);
+  });
 }
 
 // ============================================================================
@@ -1894,8 +2134,16 @@ function toClientAtendimento_(record, colorMap) {
     situacaoPendencia: String(record.MotivoPendencia || ''),
     motivoPendencia: String(record.MotivoPendencia || ''),
     aguardandoRetorno: String(record.MotivoPendencia || ''),
-    camposExtras: parseCamposExtras_(record.CamposExtras),
+    // v4.7: metadados internos (chaves "_") NÃO vão para o navegador.
+    // Assim eles não aparecem no formulário, no Dashboard, nos filtros,
+    // na busca rápida, nos relatórios nem nas exportações.
+    camposExtras: camposExtrasPublicos_(record.CamposExtras),
     responsavel: String(record.Responsavel || ''),
+    // v4.7 (Fase 2D): Id do responsável — usado apenas para o seletor do
+    // formulário pré-selecionar a pessoa certa (essencial com homônimos).
+    // É um identificador técnico de USUÁRIO, não dado do cliente; o nome,
+    // que é mais identificador, já é enviado acima.
+    responsavelId: String(metadadosAtendimento_(record)._responsavelId || ''),
     tempoResolucao: record.TempoResolucaoHoras === '' ? '' : Number(record.TempoResolucaoHoras || 0),
     observacoes: String(record.Observacoes || ''),
     criadoPor: String(record.CriadoPor || ''),
@@ -1903,6 +2151,21 @@ function toClientAtendimento_(record, colorMap) {
     atualizadoPor: String(record.AtualizadoPor || ''),
     dataAtualizacao: toIso_(record.DataAtualizacao)
   };
+}
+
+/**
+ * Campos personalizados VISÍVEIS ao usuário: o conteúdo de CamposExtras
+ * sem os metadados internos (chaves iniciadas por "_").
+ * @param {string} value - JSON da coluna CamposExtras.
+ * @returns {Object} Apenas os campos criados pelo ADM na ConfigCampos.
+ */
+function camposExtrasPublicos_(value) {
+  const extras = parseCamposExtras_(value);
+  const publicos = {};
+  Object.keys(extras).forEach(function(chave) {
+    if (chave.charAt(0) !== '_') publicos[chave] = extras[chave];
+  });
+  return publicos;
 }
 
 /**
@@ -1980,9 +2243,165 @@ function isSupervisorProfile_(perfil) {
  */
 function canAccessAtendimento_(record, actor) {
   if (isSupervisorProfile_(actor.perfil)) return true;
+
+  // ── 1) Preferência: vínculo por ID ESTÁVEL (metadados internos) ──
+  // Registros criados/editados a partir da v4.7 carregam _responsavelId e
+  // _criadoPorId em CamposExtras. O Id não muda quando o nome é corrigido
+  // e não se confunde entre homônimos.
+  const meta = metadadosAtendimento_(record);
+  const respId = String(meta._responsavelId || '');
+  const criadorId = String(meta._criadoPorId || '');
+  if (respId || criadorId) {
+    const actorId = String(actor.id || '');
+    if (!actorId) return false;
+    return respId === actorId || criadorId === actorId;
+  }
+
+  // ── 2) LEGADO: registros anteriores não têm os metadados ──
+  // Mantém exatamente a regra antiga (comparação por nome), garantindo
+  // que nenhum atendimento histórico deixe de ser acessível.
   const name = normalizeText_(actor.nome);
   if (!name) return false;
   return normalizeText_(record.Responsavel) === name || normalizeText_(record.CriadoPor) === name;
+}
+
+// ============================================================================
+// METADADOS INTERNOS DO ATENDIMENTO (v4.7 — sem alterar o banco)
+// ============================================================================
+/*
+ * POR QUE ISSO EXISTE
+ * -------------------
+ * A propriedade do atendimento era determinada pelo NOME do analista —
+ * frágil: dois homônimos enxergavam os casos um do outro, e corrigir o
+ * nome de alguém fazia a pessoa perder acesso aos próprios registros.
+ *
+ * COMO RESOLVEMOS SEM MEXER NO BANCO
+ * Guardamos o Id do usuário dentro do JSON que já existe na coluna
+ * CamposExtras, com chaves prefixadas por "_" (metadados internos):
+ *     { "agencia": "0001", "_responsavelId": "USR-1", "_criadoPorId": "USR-2" }
+ * Nenhuma coluna nova, nenhuma migração, nenhum SCHEMA_VERSION alterado.
+ *
+ * POR QUE O PREFIXO "_" É SEGURO
+ *  - Campos personalizados têm a chave gerada por slugifyFieldKey_, que
+ *    remove tudo que não seja a-z/0-9 — NUNCA começam com "_";
+ *  - validateAtendimentoInput_ só aceita chaves declaradas na aba
+ *    ConfigCampos, então o navegador NÃO consegue forjar um _responsavelId;
+ *  - toClientAtendimento_ remove as chaves "_" antes de enviar ao
+ *    frontend: os metadados não aparecem em tela, filtros, relatórios,
+ *    Dashboard nem exportações;
+ *  - buildChangeHistory_ ignora as chaves "_" ao comparar, para não poluir
+ *    o Histórico com informação interna.
+ */
+
+/**
+ * Lê os metadados internos de um atendimento (chaves iniciadas por "_").
+ * @param {Object} record - Registro cru da planilha.
+ * @returns {Object} Apenas os metadados (pode vir vazio).
+ */
+function metadadosAtendimento_(record) {
+  const extras = parseCamposExtras_(record && record.CamposExtras);
+  const meta = {};
+  Object.keys(extras).forEach(function(chave) {
+    if (chave.charAt(0) === '_') meta[chave] = extras[chave];
+  });
+  return meta;
+}
+
+/**
+ * Mescla metadados internos no JSON de CamposExtras, PRESERVANDO os
+ * campos personalizados já existentes.
+ * Valor vazio remove a chave (usado quando o vínculo fica ambíguo).
+ * @param {string} camposExtrasJson - JSON atual (pode ser '').
+ * @param {Object} metadados - Ex.: { _responsavelId: 'USR-1' }.
+ * @returns {string} JSON resultante ('' quando não sobra nada).
+ */
+function mesclarMetadadosAtendimento_(camposExtrasJson, metadados) {
+  const obj = parseCamposExtras_(camposExtrasJson);
+  Object.keys(metadados || {}).forEach(function(chave) {
+    const valor = metadados[chave];
+    if (valor === '' || valor === null || valor === undefined) delete obj[chave];
+    else obj[chave] = String(valor);
+  });
+  return Object.keys(obj).length > 0 ? JSON.stringify(obj) : '';
+}
+
+/**
+ * Resolve o Id do usuário a partir do NOME exibido, apenas quando não há
+ * ambiguidade. Devolve '' se ninguém casar OU se houver mais de um
+ * usuário ativo com o mesmo nome — nesses casos o sistema mantém o
+ * comportamento legado por nome, em vez de "chutar" um Id.
+ * @param {string} nome - Nome do usuário.
+ * @returns {string} Id do usuário ou ''.
+ */
+/**
+ * 🔴 Resolve QUEM é o responsável do atendimento — sempre no servidor.
+ *
+ * Ordem de decisão:
+ *   1. Analista NUNCA delega: o responsável é ele mesmo;
+ *   2. Supervisor/ADM enviou um Id? valida (existe, ativo, perfil válido)
+ *      e usa o NOME OFICIAL do cadastro — o nome que veio do navegador é
+ *      ignorado. Isso impede combinações forjadas do tipo
+ *      { responsavelId: 'USR-A', responsavel: 'Outro Usuário' };
+ *   3. Sem Id (compatibilidade com telas antigas): usa o nome, e só grava
+ *      o vínculo por Id quando o nome não for ambíguo.
+ * @param {Object} input - Dados validados do formulário.
+ * @param {Object} actor - Usuário autenticado.
+ * @param {string} nomeFallback - Responsável atual (em edições).
+ * @returns {Object} { nome, id, explicito }.
+ * @throws {Error} Quando o Id enviado é inválido.
+ */
+function resolverResponsavel_(input, actor, nomeFallback) {
+  // Em EDIÇÕES recebemos o responsável atual: ele é preservado, salvo
+  // reatribuição explícita por um Supervisor/ADM.
+  const ehEdicao = nomeFallback !== undefined && nomeFallback !== null && String(nomeFallback) !== '';
+
+  // 1) Analista não escolhe responsável nem assume o caso de outra pessoa.
+  if (!isSupervisorProfile_(actor.perfil)) {
+    if (!ehEdicao) {
+      // Criação: o responsável é o próprio autor — identidade conhecida.
+      return { nome: String(actor.nome || ''), id: String(actor.id || ''), explicito: false };
+    }
+    // Edição: MANTÉM o responsável atual (comportamento histórico — um
+    // analista que criou o caso para outra pessoa não pode tomá-lo para
+    // si ao editar). O Id vem da resolução por NOME e só quando não há
+    // ambiguidade: assim um homônimo que edite um registro legado não
+    // "reivindica" o caso.
+    const nomeAtual = String(nomeFallback);
+    return { nome: nomeAtual, id: resolverUsuarioIdPorNome_(nomeAtual), explicito: false };
+  }
+
+  // 2) Delegação por Id (caminho preferencial, imune a homônimos).
+  const id = sanitizeInput(input.responsavelId);
+  if (id) {
+    const usuario = getById(CONFIG.SHEET_NAMES.USUARIOS, id);
+    if (!usuario) throw new Error('O responsável selecionado não existe.');
+    if (!isTrue_(usuario.Ativo)) throw new Error('O responsável selecionado está inativo.');
+    const perfil = normalizeText_(usuario.Perfil);
+    const perfisValidos = ['analista', 'supervisor', 'gestor', 'adm', 'admin', 'administrador'];
+    if (perfisValidos.indexOf(perfil) === -1) {
+      throw new Error('O responsável selecionado não possui perfil válido para receber atendimentos.');
+    }
+    // O NOME vem do cadastro — nunca do que o navegador enviou.
+    return { nome: String(usuario.Nome || ''), id: String(usuario.Id || ''), explicito: true };
+  }
+
+  // 3) Compatibilidade: apenas o nome (telas antigas ou "Automático").
+  const nome = String(input.responsavel || nomeFallback || actor.nome || '');
+  // Em edição, o Id vem SEMPRE da resolução por nome (sem ambiguidade).
+  // Em criação com "Automático", o responsável é o próprio ator.
+  const idPorNome = (!ehEdicao && normalizeText_(nome) === normalizeText_(actor.nome))
+    ? String(actor.id || '')
+    : resolverUsuarioIdPorNome_(nome);
+  return { nome: nome, id: idPorNome, explicito: false };
+}
+
+function resolverUsuarioIdPorNome_(nome) {
+  const alvo = normalizeText_(nome);
+  if (!alvo) return '';
+  const encontrados = getAll(CONFIG.SHEET_NAMES.USUARIOS).filter(function(u) {
+    return isTrue_(u.Ativo) && normalizeText_(u.Nome) === alvo;
+  });
+  return encontrados.length === 1 ? String(encontrados[0].Id || '') : '';
 }
 
 /**

@@ -222,10 +222,20 @@ var AtendimentoForm = {
       html += '<div class="form-row">';
       html += '  <div class="form-group">';
       html += '    <label class="form-label" for="campo-responsavel">Responsável (delegar a)</label>';
+      // v4.7 (Fase 2D): o VALOR da opção é o Id do usuário; o texto
+      // continua sendo o nome (com Equipe/Perfil quando há homônimos).
+      // Assim dois "João Silva" deixam de ser indistinguíveis — o
+      // servidor recebe o Id e resolve o nome oficial a partir dele.
       html += '    <select id="campo-responsavel" class="form-control">';
       html += '      <option value="">Automático (eu mesmo)</option>';
-      (dd.responsaveis || []).forEach(function(r) {
-        html += '      <option value="' + App.escapeHtml(r) + '"' + (atd.responsavel === r ? ' selected' : '') + '>' + App.escapeHtml(r) + '</option>';
+      (dd.responsaveisOpcoes || []).forEach(function(op) {
+        // Em edições, pré-seleciona pelo Id; se o registro é antigo (sem
+        // Id gravado), recorre ao nome para não perder a seleção.
+        var selecionado = atd.responsavelId
+          ? (String(atd.responsavelId) === String(op.id))
+          : (atd.responsavel === op.nome);
+        html += '      <option value="' + App.escapeHtml(op.id) + '"' + (selecionado ? ' selected' : '') +
+          '>' + App.escapeHtml(op.rotulo) + '</option>';
       });
       html += '    </select>';
       html += '    <small style="color:var(--text-secondary);font-size:12px;margin-top:4px;display:block;">Supervisores e o ADM podem delegar/reatribuir o atendimento a um analista.</small>';
@@ -420,24 +430,41 @@ var AtendimentoForm = {
         self._ultimoCpfAvisado = digitos;
         // Popup apenas informativo: CPF, analista do primeiro cadastro e
         // data do registro. "Entendi" fecha e o cadastro segue normalmente.
-        // Linhas do popup: exibe Subcategoria apenas quando o primeiro
-        // registro possui uma (atendimentos anteriores à v4.6 não têm).
+        // Linhas do popup. O SERVIDOR decide o que pode ser mostrado:
+        // quando o atendimento encontrado pertence a outro analista e o
+        // usuário não tem autorização sobre ele, a resposta vem com
+        // restrito=true e SEM os detalhes (eles nem trafegam). Aqui só
+        // montamos a tela conforme o que foi autorizado.
         var linhas =
-          '<strong>CPF:</strong><span>' + App.escapeHtml(result.cpf || '') + '</span>' +
-          '<strong>Analista:</strong><span>' + App.escapeHtml(result.analista || '—') + '</span>' +
-          '<strong>Data:</strong><span>' + App.formatDateBR(result.dataRegistro) + '</span>' +
-          '<strong>Status:</strong><span>' + App.escapeHtml(result.status || '—') + '</span>' +
-          '<strong>Categoria:</strong><span>' + App.escapeHtml(result.categoria || '—') + '</span>';
-        if (result.subcategoria) {
-          linhas += '<strong>Subcategoria:</strong><span>' + App.escapeHtml(result.subcategoria) + '</span>';
+          '<strong>CPF:</strong><span>' + App.escapeHtml(result.cpf || '') + '</span>';
+        if (result.restrito) {
+          // Aviso mínimo: confirma a existência do cadastro e a data.
+          linhas += '<strong>Data:</strong><span>' + App.formatDateBR(result.dataRegistro) + '</span>';
+        } else {
+          linhas +=
+            '<strong>Analista:</strong><span>' + App.escapeHtml(result.analista || '—') + '</span>' +
+            '<strong>Data:</strong><span>' + App.formatDateBR(result.dataRegistro) + '</span>' +
+            '<strong>Status:</strong><span>' + App.escapeHtml(result.status || '—') + '</span>' +
+            '<strong>Categoria:</strong><span>' + App.escapeHtml(result.categoria || '—') + '</span>';
+          if (result.subcategoria) {
+            linhas += '<strong>Subcategoria:</strong><span>' + App.escapeHtml(result.subcategoria) + '</span>';
+          }
         }
+
+        var introducao = result.restrito
+          ? 'Este CPF já possui atendimento cadastrado.'
+          : 'Este CPF já possui um atendimento registrado.';
+        var complemento = result.restrito
+          ? 'Os detalhes pertencem a outro responsável e não podem ser exibidos. ' +
+            'Este aviso é apenas informativo — o atendimento poderá ser registrado normalmente.'
+          : 'Este aviso é apenas informativo. Caso seja um novo assunto, o atendimento poderá ser registrado normalmente.';
+
         var body =
-          '<p style="font-size:14px;margin-bottom:14px;">Este CPF já possui um atendimento registrado.</p>' +
+          '<p style="font-size:14px;margin-bottom:14px;">' + introducao + '</p>' +
           '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13.5px;">' +
           linhas +
           '</div>' +
-          '<p style="font-size:12.5px;color:var(--text-secondary);margin-top:14px;">' +
-          'Este aviso é apenas informativo. Caso seja um novo assunto, o atendimento poderá ser registrado normalmente.</p>';
+          '<p style="font-size:12.5px;color:var(--text-secondary);margin-top:14px;">' + complemento + '</p>';
         Components.modal({
           title: 'CPF já cadastrado',
           body: body,
@@ -523,7 +550,11 @@ var AtendimentoForm = {
       canal: '', observacoes: '', dataAbertura: '',
       status: (document.getElementById('campo-status') || {}).value || '',
       motivoPendencia: campoSituacao ? (campoSituacao.value || '') : '',
-      responsavel: campoResponsavel ? (campoResponsavel.value || '') : '',
+      // v4.7: o seletor agora carrega o ID do responsável. O nome não é
+      // mais enviado — o servidor o resolve a partir do Id (fonte
+      // confiável), evitando qualquer combinação inconsistente.
+      responsavelId: campoResponsavel ? (campoResponsavel.value || '') : '',
+      responsavel: '',
       camposExtras: {}
     };
 
