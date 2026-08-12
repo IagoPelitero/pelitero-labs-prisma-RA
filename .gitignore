@@ -1,0 +1,22 @@
+# ── Configuração LOCAL de desenvolvimento ──
+# Contém caminhos da máquina de quem desenvolve (usuário, pastas temporárias).
+# Nunca deve ser versionado.
+.claude/
+.clasp.json
+
+# ── Restos de sincronização do OneDrive ──
+# Cópias-sombra da lixeira ("$R…") criadas quando um arquivo é removido.
+# Carregam o conteúdo original, inclusive caminhos locais.
+$R*
+$I*
+
+# ── Editores e sistema operacional ──
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Dependências e logs ──
+node_modules/
+*.log

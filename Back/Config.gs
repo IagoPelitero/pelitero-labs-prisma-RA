@@ -112,8 +112,29 @@ const PROPERTY_KEYS = {
   // v4.7: configuração da fonte de dados do módulo Indicadores Operacionais
   // (JSON com nome da aba/menu, URL da planilha externa, aba de origem,
   // linha inicial e nomes das colunas de Data e Status).
-  INDIC_OP_CONFIG: 'PRISMA_RA_INDIC_OP_CONFIG'
+  INDIC_OP_CONFIG: 'PRISMA_RA_INDIC_OP_CONFIG',
+  // Nomes VISÍVEIS das telas, definidos pelo ADM (JSON {pagina: nome}).
+  // Chave NOVA — nenhuma chave existente foi renomeada ou removida.
+  // Puramente cosmético: não participa de aba, coluna, rota ou data-page.
+  NOMES_TELAS: 'PRISMA_RA_NOMES_TELAS'
 };
+
+// ============================================================================
+// NOMES PADRÃO DAS TELAS
+// Rótulos exibidos quando o ADM não personalizou nada (ou apagou o campo).
+// A CHAVE é o identificador técnico da página (data-page no Index.html) e
+// NUNCA muda — só o texto à direita é editável.
+// ============================================================================
+const TELAS_RENOMEAVEIS = [
+  { pagina: 'dashboard', padrao: 'Dashboard' },
+  { pagina: 'novoAtendimento', padrao: 'Novo Atendimento' },
+  { pagina: 'relatorios', padrao: 'Relatórios' },
+  { pagina: 'indicadores', padrao: 'Indicadores' },
+  // O nome desta tela já era configurável pelo ADM em "Análise de SAC"
+  // (campo abaNome). Ela entra aqui pela MESMA origem, para não existirem
+  // dois lugares gravando o mesmo rótulo.
+  { pagina: 'indicadoresOperacionais', padrao: 'Análise de SAC', fonte: 'indicOp' }
+];
 
 // ============================================================================
 // DEFINIÇÕES DE COLUNAS POR PLANILHA

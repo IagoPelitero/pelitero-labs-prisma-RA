@@ -1,4 +1,4 @@
-# Pelitero Labs Prisma RA
+# PRISMA Gestão Operacional
 
 **Sistema de gestão de atendimentos multicanal** construído sobre Google Apps Script e
 Google Sheets — sem servidores, sem banco de dados externo e sem custo de infraestrutura.
@@ -8,7 +8,13 @@ Desenvolvido por **Pelitero Labs**.
 > Este documento é a referência completa do produto: destina-se tanto ao administrador
 > que vai operá-lo quanto ao desenvolvedor que dará manutenção ou evoluções. Ao final
 > de sua leitura, é possível instalar, configurar, personalizar, manter e entender toda
-> a arquitetura do Prisma RA.
+> a arquitetura do PRISMA.
+>
+> **Nota sobre nomes legados**: identificadores técnicos criados quando o produto se
+> chamava "Prisma RA" — chaves de Script Properties (`PRISMA_RA_*`), chaves de cache e
+> de `localStorage` (`prisma-ra-*`) — foram **mantidos de propósito**. Renomeá-los
+> invalidaria caches e preferências de instalações existentes sem nenhum ganho. A
+> mudança de marca é estritamente visual.
 
 ---
 
@@ -27,8 +33,9 @@ Desenvolvido por **Pelitero Labs**.
 10.1 [Seletores dinâmicos (criar campos sem código)](#101-seletores-dinâmicos-criar-campos-sem-código)
 11. [Dashboards](#11-dashboards)
 12. [Indicadores](#12-indicadores)
-12.1 [Indicadores Operacionais (planilha externa)](#121-indicadores-operacionais-planilha-externa)
+12.1 [Análise de SAC (planilha externa)](#121-análise-de-sac-planilha-externa)
 13. [Personalização](#13-personalização)
+13.1 [Nomes das telas](#131-nomes-das-telas)
 14. [Performance](#14-performance)
 15. [Segurança](#15-segurança)
 16. [Manutenção](#16-manutenção)
@@ -40,8 +47,8 @@ Desenvolvido por **Pelitero Labs**.
 
 ## 1. Visão geral
 
-O **Prisma RA** é um produto da Pelitero Labs para equipes que tratam manifestações de
-clientes recebidas por múltiplos canais — no cenário de referência, uma célula de
+O **PRISMA Gestão Operacional** é um produto da Pelitero Labs para equipes que tratam
+manifestações de clientes recebidas por múltiplos canais — no cenário de referência, uma célula de
 **Reclame Aqui**, com os canais *Reclame Aqui* e *SAC Preventivo*. O sistema registra,
 distribui e acompanha cada atendimento até a conclusão, com trilha de auditoria completa.
 
@@ -68,7 +75,7 @@ manter, nem custo de hospedagem.
 
 ## 2. Arquitetura
 
-O Prisma RA segue uma arquitetura em camadas, com separação clara entre back-end
+O PRISMA segue uma arquitetura em camadas, com separação clara entre back-end
 (Apps Script `.gs`) e front-end (`.html` servidos via `HtmlService`).
 
 ```
@@ -81,8 +88,10 @@ Index.html (shell)                 Code.gs   (doGet, include, menu)      Aba Rec
  └─ Páginas:                       Utils.gs  (helpers puros)             Aba Timeline
      Dashboard / NovoAtendimento                                        Aba Histórico
      Relatorios / Indicadores      google.script.run  ◀──── chamadas     Aba Usuários
-     Configuracoes                 assíncronas do front-end              Aba Produtos
-                                                                         Aba Categorias
+     IndicadoresOperacionais       assíncronas do front-end              Aba Produtos
+     Configuracoes                                                       Aba Categorias
+                                                                         Aba Subcategorias
+                                                                         Aba IndicadoresSLA
 ```
 
 **Princípios de arquitetura:**
@@ -145,13 +154,16 @@ Front/                       Camada de interface (HtmlService)
  ├─ NovoAtendimento.html    Formulário dinâmico de cadastro/edição + timeline
  ├─ Relatorios.html         Relatórios filtráveis com exportação
  ├─ Indicadores.html        Painel analítico (Chart.js), restrito à supervisão
+ ├─ IndicadoresOperacionais.html
+ │                          Análise de SAC: analisa uma 2ª planilha Google (supervisão)
  └─ Configuracoes.html      Administração (produtos, categorias, subcategorias, canais,
-                            usuários e a central de Campos e Seletores dinâmicos)
+                            usuários, Campos e Seletores dinâmicos, Análise de SAC
+                            e Nomes das telas)
 
-.claude/                     Metadados de projeto
+.claude/                     Metadados LOCAIS (não versionados — ver .gitignore)
  ├─ appsscript.json         Manifesto do Apps Script (timezone, escopos, runtime)
  ├─ .clasp.json.example     Modelo para publicação via clasp (CLI)
- └─ .claspignore / .gitignore
+ └─ .claspignore
 
 README.md                    Este documento
 ```
@@ -165,7 +177,7 @@ README.md                    Este documento
 
 ## 5. Autenticação por e-mail
 
-O Prisma RA **não usa login nem senha**. A identidade é sempre a da conta Google que
+O PRISMA **não usa login nem senha**. A identidade é sempre a da conta Google que
 abriu o Web App.
 
 **Fluxo:**
@@ -179,7 +191,7 @@ abriu o Web App.
    sistema exibe:
 
    > **Acesso não autorizado**
-   > Seu e-mail não está cadastrado para utilizar o Prisma RA. Entre em contato com o
+   > Seu e-mail não está cadastrado para utilizar o PRISMA. Entre em contato com o
    > Administrador para solicitar seu acesso.
 
 Não há acesso parcial, tela de login, token de sessão nem senha armazenada. `requireAuth_`
@@ -505,29 +517,54 @@ ilegível com muitas categorias), mas o **percentual continua relativo ao total 
 — não à soma do Top 5. Os rótulos numéricos acompanham o tema (inclusive Dark) e são
 redesenhados ao trocar de tema sem sair da tela.
 
-### 12.1 Indicadores Operacionais (planilha externa)
+### 12.1 Análise de SAC (planilha externa)
 
-*(v4.7)* Módulo **independente** para acompanhar indicadores operacionais que vivem em
-uma planilha Google Sheets **externa** ao Prisma RA (por exemplo, um relatório
-operacional mantido por outra equipe). Restrito à supervisão (Supervisor/ADM). O **nome
-do módulo no menu é configurável** pelo Administrador.
+Módulo **independente** que analisa uma planilha Google Sheets **externa** ao PRISMA (por
+exemplo, um relatório operacional mantido por outra equipe). Restrito à supervisão
+(Supervisor/ADM). O **nome da seção é configurável** pelo Administrador — "Análise de SAC"
+é apenas o padrão.
 
-**Configuração da fonte** — em *Configurações → Indicadores Operacionais* (ADM):
+**Configuração da fonte** — em *Configurações → Análise de SAC* (ADM), em três passos:
+
+**1. Fonte de dados**
 
 | Campo | Descrição |
 | --- | --- |
-| Nome da aba (menu) | Rótulo do item no menu lateral. |
+| Nome da seção (menu) | Rótulo do item no menu lateral e título da tela. |
 | Link da planilha de origem | URL do Google Sheets externo (você precisa ter acesso a ele). |
 | Nome da aba de origem | Aba, dentro da planilha externa, onde estão os dados. |
 | Linha do cabeçalho | Linha onde estão os títulos das colunas (a tabela pode começar em qualquer linha). |
-| Coluna da Data | **Nome** do cabeçalho da coluna de data. |
-| Coluna do Status | **Nome** do cabeçalho da coluna de status. |
+
+**2. Mapeamento das colunas** — o botão **"Ler cabeçalhos da planilha"** lê a origem e
+transforma o mapeamento em listas de seleção, evitando digitar nomes exatos:
+
+| Coluna | Obrigatória | Uso |
+| --- | --- | --- |
+| Data | sim | Eixo temporal de toda a análise. |
+| Status | sim | Base da classificação e da distribuição. |
+| Assunto | não | Gráfico "Top 5 Assuntos". |
+| Subassunto | não | Gráfico "Top 5 Subassuntos". |
+| Quem analisou | não | Gráfico "Casos por Quem analisou". |
+| Outras colunas | não | Ficam disponíveis no seletor **"Analisar por"**. |
+
+Se uma coluna mapeada **deixar de existir** na origem, a análise continua com as demais e
+a tela exibe um aviso nomeando a coluna que sumiu.
+
+**3. Agrupamento de Status** — o sistema lista os valores distintos encontrados e o ADM
+atribui cada um a **Em Aberto**, **Em Análise** ou **Fechado** (*Fechado* e *Rejeitado*
+podem ficar no mesmo grupo). Regras:
+
+- um status **não mapeado nunca é contado como "Em Aberto"** — ele entra em
+  **Não Classificado**, e o painel mostra quais valores estão pendentes de mapeamento;
+- o mesmo status em dois grupos é **recusado** na gravação (contagem ambígua);
+- enquanto o ADM não agrupar nada, vale uma heurística por palavra-chave — assim quem já
+  usava o módulo não vê os números mudarem depois da atualização.
 
 **Estrutura esperada da planilha de origem** — o sistema é resiliente e **não depende de
 posições fixas**:
 
-- as colunas de **Data** e **Status** são localizadas pelo **nome do cabeçalho** — se a
-  ordem das colunas mudar ou surgirem colunas novas, a leitura continua funcionando;
+- as colunas são localizadas pelo **nome do cabeçalho** — se a ordem mudar ou surgirem
+  colunas novas, a leitura continua funcionando;
 - a tabela pode **começar em qualquer linha** (informe a linha do cabeçalho);
 - colunas extras são simplesmente ignoradas.
 
@@ -539,39 +576,41 @@ posições fixas**:
   válida é "arrastada" para baixo enquanto não muda);
 - **espaços extras** são removidos; linhas sem data ou sem status são descartadas.
 
-**Consolidação por data** — para cada data, o painel calcula:
+**Indicadores principais** — cartões do período filtrado: Total de casos, Em Aberto,
+Em Análise, Fechado + Rejeitado, Fora da SLA e Não Classificado.
 
-| Indicador | Como é obtido |
-| --- | --- |
-| **Casos** | Total de registros da data (= soma dos três grupos abaixo). |
-| **Em Aberto** | Status que não caem em "Em Análise" nem "Fechado/Rejeitado". |
-| **Em Análise** | Status contendo "análise". |
-| **Fechado (Fechado + Rejeitado)** | Status contendo fechado, rejeitado, concluído, encerrado, resolvido ou finalizado. |
-| **Fora da SLA** | **Valor manual**, informado pelo usuário (ver abaixo). |
+**Gráficos** — Volume por dia, Distribuição por Status, Top 5 Assuntos, Top 5
+Subassuntos e Casos por Quem analisou. Os rankings exibem **quantidade e percentual sobre
+o total filtrado** (não sobre a soma do Top 5). O seletor **"Analisar por"** aplica o
+mesmo gráfico a qualquer coluna categórica liberada pelo ADM, sem código específico por
+coluna.
 
-A classificação usa palavras-chave normalizadas (sem acento/caixa), de modo a absorver
-variações de escrita da planilha de origem.
+**Filtro de período** — define a base de todos os percentuais e do total de "Fora da SLA".
 
-**Campo manual "Fora da SLA"** — é uma linha editável na própria tabela: o usuário digita
-o valor de cada data e ele é **salvo automaticamente** (aba `IndicadoresSLA` do banco do
-Prisma RA, com chave por data no formato `AAAA-MM-DD`). Por ser persistido no banco do
-sistema — e não na planilha externa — o valor **sobrevive a qualquer releitura** da
-origem.
+**Campo manual "Fora da SLA"** — linha editável na matriz por data, **salva
+automaticamente** na aba `IndicadoresSLA` do banco do PRISMA (chave `AAAA-MM-DD`). Por
+ser persistido no banco do sistema — e não na planilha externa — o valor **sobrevive a
+qualquer releitura** da origem.
 
-**Layout e navegação** — tabela matriz (indicadores nas linhas, datas nas colunas) com
-**scroll horizontal**, **primeira coluna fixa** (nome do indicador) e **cabeçalho fixo**
-(datas) ao rolar, facilitando a leitura quando há muitas datas.
+**Detalhamento por data** — tabela matriz (indicadores nas linhas, datas nas colunas) com
+**scroll horizontal**, **primeira coluna fixa** e **cabeçalho fixo** ao rolar.
 
-**Exportar Excel** — botão que exporta **exatamente a tabela exibida** (datas × Casos, Em
-Aberto, Em Análise, Fechado e Fora da SLA). Usa SheetJS (`.xlsx`); em ambientes sem a
-biblioteca, cai para CSV com BOM/`;`, compatível com **Microsoft Excel** e **LibreOffice**.
+**Exportar Excel** — exporta a matriz exibida **e** os rankings do período (com
+quantidade e percentual). Usa SheetJS (`.xlsx`); sem a biblioteca, cai para CSV com
+BOM/`;`, compatível com **Microsoft Excel** e **LibreOffice**.
 
-**Atualizar Dados** — botão que **relê a planilha externa** ignorando o cache, retrata os
-dados e atualiza a tabela sem recarregar a aplicação.
+**Atualizar Dados** — relê a planilha externa ignorando o cache, sem recarregar a
+aplicação.
 
-**Performance** — o resultado consolidado da planilha externa é **cacheado**
-(`CacheService`, TTL de 5 min); leituras repetidas não tocam a planilha de origem. A
-releitura só acontece sob demanda ("Atualizar Dados") ou quando o cache expira.
+**Performance e privacidade** — a planilha externa é lida em **uma única chamada**
+`getValues()` por consolidação; toda a agregação acontece no servidor e o navegador
+recebe **somente agregações**, nunca as linhas cruas. Colunas não mapeadas jamais
+trafegam. O consolidado é **cacheado** por configuração + período (`CacheService`, TTL de
+5 min), então o tamanho do que trafega acompanha o número de datas e categorias — não o
+volume de linhas da origem.
+
+> A planilha externa é aberta **com a credencial de quem acessa** o sistema. Quem não
+> tiver permissão nela verá um erro de leitura explícito, não uma tela vazia.
 
 ---
 
@@ -587,8 +626,27 @@ releitura só acontece sob demanda ("Atualizar Dados") ou quando o cache expira.
   e persistidos em `localStorage`. Todo o CSS usa **variáveis de tema** (`--bg`,
   `--card-bg`, `--text-primary`, `--surface-muted`, etc.), o que mantém contraste
   consistente em todas as telas.
-- **Identidade**: cores e rótulos centralizados em `Styles.html` (bloco `:root`) e
-  `Config.gs`.
+- **Identidade**: cores centralizadas em `Styles.html` (bloco `:root`); nome do produto em
+  `CONFIG.APP` (`Config.gs`), usado nos títulos, no menu da planilha e no rodapé dos PDFs.
+
+### 13.1 Nomes das telas
+
+O Administrador pode trocar o **nome visível** das telas em *Configurações → Nomes das
+telas* — por exemplo, `Dashboard` → `Resultado do Analista`. São renomeáveis: Dashboard,
+Novo Atendimento, Relatórios, Indicadores e Análise de SAC.
+
+O nome configurado aparece no **menu lateral**, no **tooltip** e no **título da tela**.
+Campo em branco volta ao padrão (há também "Restaurar padrões").
+
+**É estritamente cosmético.** O identificador técnico da página não muda: `data-page`
+continua `dashboard`, e rotas, funções, abas, colunas e integrações seguem intactas. Os
+nomes são gravados em **Script Properties** (`PRISMA_RA_NOMES_TELAS`) — nenhuma aba ou
+coluna nova é criada no Sheets. Enquanto ninguém personalizar nada, a chave sequer é
+gravada.
+
+Só o ADM edita; Supervisor e Analista **recebem** os nomes configurados, respeitando as
+permissões normais de cada tela. O nome da Análise de SAC tem **fonte única**: editá-lo
+aqui ou em *Configurações → Análise de SAC* produz o mesmo resultado.
 
 ---
 
@@ -599,6 +657,10 @@ real, minimizando leituras no Google Sheets:
 
 - **Cache de leitura** (`CacheService`, TTL 5 min): cada aba é lida uma vez e reutilizada;
   escritas invalidam apenas o cache da aba afetada.
+- **Memo por execução**: dentro de uma mesma requisição, releituras da mesma aba são
+  servidas da memória — sem ida ao `CacheService` e sem `JSON.parse` repetido. Seu tempo
+  de vida é **menor** que o do cache de 5 min e é limpo pelas mesmas funções que toda
+  gravação já chama, então nenhuma leitura correta deixa de ser correta.
 - **Bootstrap único**: na abertura, `getBootstrapData` traz usuário + todas as listas de
   apoio em **uma** chamada; as páginas reutilizam esses dados (`App.dropdownData`) em vez
   de consultar o servidor repetidamente.
@@ -682,6 +744,21 @@ ver [Limitações conhecidas](#17-limitações-conhecidas).
 
 ## 19. Histórico de versões
 
+- **PRISMA Gestão Operacional** — **Rebranding visual**: o produto passa a se apresentar
+  como *PRISMA Gestão Operacional / Pelitero Labs* (títulos, menu, cabeçalho, badge `PGO`
+  e rodapé dos PDFs), com o nome centralizado em `CONFIG.APP`. Identificadores técnicos
+  legados (`PRISMA_RA_*`, `prisma-ra-*`) preservados de propósito.
+  **Análise de SAC**: evolução do módulo de indicadores operacionais em um analisador da
+  segunda planilha — mapeamento assistido de colunas (Assunto, Subassunto, Quem analisou
+  e outras), agrupamento configurável de status com contagem de **Não Classificado**
+  (status desconhecido nunca vira "Em Aberto"), filtro de período, gráficos de volume,
+  distribuição e Top 5 com quantidade e percentual, seletor genérico **"Analisar por"**,
+  aviso de coluna configurada ausente e exportação com os rankings. O navegador passa a
+  receber **somente agregações**.
+  **Nomes das telas** configuráveis pelo ADM (ver [13.1](#131-nomes-das-telas)).
+  **Performance**: memo de leitura por execução.
+  **Acessibilidade**: contraste do título do cabeçalho e dos badges corrigido nos quatro
+  temas. Nenhuma aba, coluna ou versão de esquema foi alterada.
 - **v4.7** — **Módulo Indicadores Operacionais**: nova tela (nome configurável pelo ADM)
   que consolida indicadores de uma planilha Google Sheets externa — colunas localizadas
   pelo nome do cabeçalho, tratamento de datas com horário, células mescladas e linhas
@@ -728,6 +805,7 @@ ver [Limitações conhecidas](#17-limitações-conhecidas).
 
 <div align="center">
 
-**Pelitero Labs Prisma RA** — gestão de atendimentos multicanal em Google Workspace.
+**PRISMA Gestão Operacional** — Pelitero Labs
+Gestão de atendimentos multicanal em Google Workspace.
 
 </div>

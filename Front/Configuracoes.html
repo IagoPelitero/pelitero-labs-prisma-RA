@@ -127,6 +127,13 @@ Pages.configuracoes = {
       label: 'Análise de SAC', icon: 'query_stats', adminOnly: true,
       custom: true, customPanel: 'indicOp', fields: []
     },
+    // Nomes VISÍVEIS das telas (EXCLUSIVO do ADM). Formulário único, não é
+    // lista cadastrável. Altera só o rótulo — data-page, rotas e funções
+    // continuam com os nomes técnicos originais.
+    nomesTelas: {
+      label: 'Nomes das telas', icon: 'label', adminOnly: true,
+      custom: true, customPanel: 'nomesTelas', fields: []
+    },
     // Seção "Banco de Dados" (EXCLUSIVA do ADM): não é uma lista
     // cadastrável — exibe o link da planilha Google Sheets usada como
     // base do sistema, para o administrador abrir/editar manualmente
@@ -214,6 +221,7 @@ Pages.configuracoes = {
     if (meta.custom) {
       // v4.7: roteia pelo tipo de painel custom (padrão: Banco de Dados).
       if (meta.customPanel === 'indicOp') this.renderIndicOpPanel(container);
+      else if (meta.customPanel === 'nomesTelas') this.renderNomesTelasPanel(container);
       else this.renderDatabasePanel(container);
       return;
     }
@@ -331,6 +339,91 @@ Pages.configuracoes = {
           'Não foi possível carregar a configuração.', error.message);
       })
       .getIndicadoresOperacionaisConfig();
+  },
+
+  /**
+   * Painel "Nomes das telas" (EXCLUSIVO do ADM). Permite trocar o RÓTULO
+   * visível de cada tela. Campo vazio volta ao nome padrão.
+   *
+   * Só apresentação: o identificador técnico da página (data-page) aparece
+   * na tela apenas como informação e NUNCA muda — rotas, funções, abas,
+   * colunas e integrações seguem intactas.
+   * @param {HTMLElement} container - <div id="config-table">.
+   */
+  renderNomesTelasPanel: function(container) {
+    var self = this;
+    container.innerHTML = Components.emptyState('label', 'Carregando nomes...');
+
+    google.script.run
+      .withSuccessHandler(function(telas) {
+        self._nomesTelas = telas || [];
+        var html = '<div class="card-header"><div class="card-title">' +
+          '<span class="material-icons">label</span>Nomes das telas</div></div>';
+        html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">' +
+          'Defina como cada tela aparece no menu e no seu título. É apenas o nome exibido — ' +
+          'as páginas, permissões e dados do sistema não mudam. ' +
+          '<strong>Deixe em branco para voltar ao nome padrão.</strong></p>';
+
+        html += '<div class="config-form-grid">';
+        self._nomesTelas.forEach(function(t) {
+          var valor = t.personalizado ? t.nome : '';
+          html += '<div class="form-group">';
+          html += '<label class="form-label" for="tela-' + t.pagina + '">' + App.escapeHtml(t.padrao) + '</label>';
+          html += '<input class="form-control" id="tela-' + t.pagina + '" type="text" maxlength="40" value="' +
+            App.escapeHtml(valor) + '" placeholder="' + App.escapeHtml(t.padrao) + '">';
+          html += '<small style="color:var(--text-secondary);font-size:11.5px;">Padrão: ' +
+            App.escapeHtml(t.padrao) + '</small>';
+          html += '</div>';
+        });
+        html += '</div>';
+        html += '<div class="form-actions" style="margin-top:16px;">' +
+          '<button type="button" class="btn btn-primary" id="telas-salvar">💾 Salvar nomes</button>' +
+          '<button type="button" class="btn btn-secondary" id="telas-restaurar">↩️ Restaurar padrões</button></div>';
+
+        container.innerHTML = html;
+
+        var btn = document.getElementById('telas-salvar');
+        if (btn) btn.addEventListener('click', function() { self._salvarNomesTelas(); });
+        var btnR = document.getElementById('telas-restaurar');
+        if (btnR) btnR.addEventListener('click', function() {
+          self._nomesTelas.forEach(function(t) {
+            var el = document.getElementById('tela-' + t.pagina);
+            if (el) el.value = '';
+          });
+          self._salvarNomesTelas();
+        });
+      })
+      .withFailureHandler(function(error) {
+        container.innerHTML = Components.emptyState('error_outline',
+          'Não foi possível carregar os nomes das telas.', error.message);
+      })
+      .getNomesTelas();
+  },
+
+  /** Coleta e salva os nomes visíveis; recarrega o menu ao concluir. */
+  _salvarNomesTelas: function() {
+    var self = this;
+    var payload = {};
+    (self._nomesTelas || []).forEach(function(t) {
+      var el = document.getElementById('tela-' + t.pagina);
+      payload[t.pagina] = el ? el.value : '';
+    });
+    Components.showLoading('Salvando nomes...');
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.hideLoading();
+        Components.toast('Nomes das telas atualizados.', 'success');
+        // Recarrega o bootstrap para o menu refletir os novos rótulos.
+        App.reloadBootstrap(function() {
+          var container = document.getElementById('config-table');
+          if (container && self.active === 'nomesTelas') self.renderNomesTelasPanel(container);
+        });
+      })
+      .withFailureHandler(function(error) {
+        Components.hideLoading();
+        Components.toast('Erro ao salvar: ' + error.message, 'error');
+      })
+      .salvarNomesTelas(payload);
   },
 
   /**

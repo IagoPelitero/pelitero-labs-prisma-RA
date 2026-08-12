@@ -146,6 +146,10 @@ function getBootstrapData() {
   return {
     user: getActor_(),
     formConfig: getFormConfig_(),
+    // Rótulos visíveis das telas (personalizáveis pelo ADM). Vão para
+    // TODOS os perfis — quem só visualiza precisa ver o mesmo nome. As
+    // permissões de cada tela seguem inalteradas.
+    nomesTelas: lerNomesTelas_(),
     moduloIndicadoresOp: {
       abaNome: indicOpCfg.abaNome,
       habilitado: indicOpCfg.habilitado
@@ -1389,6 +1393,107 @@ function getRelatorio(filtros, options) {
   return decorateAtendimentos_(
     applyAtendimentoFilters_(restrictToOwnerIfNeeded_(getActiveAtendimentos_(force), actor), filtros || {})
   );
+}
+
+// ============================================================================
+// NOMES VISÍVEIS DAS TELAS (personalização do ADM)
+// ============================================================================
+/*
+ * Permite ao ADM trocar o RÓTULO das telas (ex.: "Dashboard" →
+ * "Resultado do Analista"). É estritamente cosmético:
+ *   - a página continua sendo identificada por data-page="dashboard";
+ *   - nenhuma rota, função, coluna, aba ou constante muda;
+ *   - nada é gravado no Google Sheets — só em Script Properties.
+ *
+ * A tela de Análise de SAC não é duplicada aqui: seu nome continua saindo
+ * do campo abaNome da própria configuração do módulo, para não haver dois
+ * lugares gravando o mesmo rótulo.
+ */
+
+/**
+ * Nomes visíveis resolvidos de todas as telas renomeáveis.
+ * Campo vazio ou ausente cai automaticamente no padrão.
+ * @returns {Object} { <pagina>: <nome visível> }.
+ */
+function lerNomesTelas_() {
+  let salvo = {};
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(PROPERTY_KEYS.NOMES_TELAS);
+    if (raw) salvo = JSON.parse(raw) || {};
+  } catch (e) {
+    Logger.log('[Telas] Nomes inválidos em Script Properties: ' + e.message);
+  }
+
+  const nomes = {};
+  TELAS_RENOMEAVEIS.forEach(function(tela) {
+    if (tela.fonte === 'indicOp') {
+      // Fonte única: a configuração do próprio módulo.
+      nomes[tela.pagina] = lerIndicOpConfig_().abaNome || tela.padrao;
+      return;
+    }
+    const personalizado = String(salvo[tela.pagina] || '').trim();
+    nomes[tela.pagina] = personalizado || tela.padrao;
+  });
+  return nomes;
+}
+
+/**
+ * (ADM) Nomes atuais + padrões, para a tela de Configurações montar o
+ * formulário e mostrar qual é o padrão de cada campo.
+ * @returns {Object[]} [{ pagina, nome, padrao, personalizado }].
+ */
+function getNomesTelas() {
+  requireAuth_();
+  requireAdmin_();
+  const nomes = lerNomesTelas_();
+  return TELAS_RENOMEAVEIS.map(function(tela) {
+    return {
+      pagina: tela.pagina,
+      padrao: tela.padrao,
+      nome: nomes[tela.pagina],
+      personalizado: nomes[tela.pagina] !== tela.padrao
+    };
+  });
+}
+
+/**
+ * (ADM) Salva os nomes visíveis. Só grava as páginas conhecidas — um nome
+ * enviado para uma página inexistente é ignorado, e campo vazio significa
+ * "voltar ao padrão" (a chave simplesmente não é gravada).
+ * @param {Object} dados - { <pagina>: <nome> }.
+ * @returns {Object} { success, nomes }.
+ */
+function salvarNomesTelas(dados) {
+  requireAuth_();
+  requireAdmin_();
+  const entrada = dados || {};
+  const paraGravar = {};
+
+  TELAS_RENOMEAVEIS.forEach(function(tela) {
+    const valor = sanitizeInput(entrada[tela.pagina]);
+    if (tela.fonte === 'indicOp') {
+      // Espelha no campo que já existe, mantendo uma fonte única.
+      const cfg = lerIndicOpConfig_();
+      const novo = valor || tela.padrao;
+      if (novo !== cfg.abaNome) {
+        cfg.abaNome = novo;
+        delete cfg.habilitado;               // campo derivado, não persistido
+        PropertiesService.getScriptProperties().setProperty(
+          PROPERTY_KEYS.INDIC_OP_CONFIG, JSON.stringify(cfg));
+      }
+      return;
+    }
+    // Vazio ou igual ao padrão → não grava (volta ao padrão sozinho).
+    if (valor && valor !== tela.padrao) paraGravar[tela.pagina] = valor;
+  });
+
+  const props = PropertiesService.getScriptProperties();
+  if (Object.keys(paraGravar).length === 0) {
+    props.deleteProperty(PROPERTY_KEYS.NOMES_TELAS);
+  } else {
+    props.setProperty(PROPERTY_KEYS.NOMES_TELAS, JSON.stringify(paraGravar));
+  }
+  return { success: true, nomes: lerNomesTelas_() };
 }
 
 // ============================================================================

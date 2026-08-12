@@ -84,9 +84,11 @@ var App = {
         App.formConfig = result && result.formConfig ? result.formConfig : [];
         // v4.7: resumo do módulo Indicadores Operacionais (rótulo dinâmico do menu).
         App.moduloIndicadoresOp = result && result.moduloIndicadoresOp ? result.moduloIndicadoresOp : {};
+        // Nomes visíveis das telas definidos pelo ADM (só rótulos).
+        App.nomesTelas = result && result.nomesTelas ? result.nomesTelas : {};
         App.renderUser();
         App.applyRoleVisibility();
-        App.aplicarRotuloIndicOp();
+        App.aplicarNomesTelas();
         if (typeof onSuccess === 'function') onSuccess(result);
       })
       .withFailureHandler(function(error) {
@@ -194,16 +196,38 @@ var App = {
     if (!allowed && this.currentPage === 'configuracoes') this.navigateTo('dashboard');
   },
 
-  // v4.7: aplica o rótulo dinâmico do módulo Indicadores Operacionais no
-  // item de menu (o ADM define o nome em Configurações). O texto vem do
-  // bootstrap (App.moduloIndicadoresOp.abaNome); o tooltip acompanha.
+  // Nome VISÍVEL de uma tela, definido pelo ADM em Configurações. É só o
+  // rótulo: a página continua sendo identificada por data-page (ex.:
+  // "dashboard"), e nenhuma rota ou função muda de nome.
+  // @param {string} pagina - Identificador técnico (data-page).
+  // @param {string} padrao - Nome usado quando não há personalização.
+  nomeTela: function(pagina, padrao) {
+    var nome = (this.nomesTelas || {})[pagina];
+    return (nome && String(nome).trim()) || padrao;
+  },
+
+  // Aplica os rótulos personalizados nos itens do menu lateral (texto e
+  // tooltip). Percorre os próprios itens pelo data-page, então uma tela
+  // nova entra aqui sozinha, sem código específico.
+  aplicarNomesTelas: function() {
+    var self = this;
+    document.querySelectorAll('.sidebar-item[data-page]').forEach(function(item) {
+      var pagina = item.getAttribute('data-page');
+      var label = item.querySelector('.sidebar-label');
+      if (!label) return;
+      // O texto atual do menu é o padrão daquela tela.
+      var padrao = (item.getAttribute('data-nome-padrao') || label.textContent).trim();
+      item.setAttribute('data-nome-padrao', padrao);
+      var nome = self.nomeTela(pagina, padrao);
+      label.textContent = nome;
+      item.setAttribute('data-tooltip', nome);
+    });
+  },
+
+  // Mantida por compatibilidade: o rótulo da Análise de SAC agora chega
+  // junto com os demais em nomesTelas.
   aplicarRotuloIndicOp: function() {
-    var nome = (this.moduloIndicadoresOp && this.moduloIndicadoresOp.abaNome) ||
-      'Indicadores Operacionais';
-    var label = document.getElementById('menu-indic-op-label');
-    if (label) label.textContent = nome;
-    var item = document.getElementById('menu-indic-op');
-    if (item) item.setAttribute('data-tooltip', nome);
+    this.aplicarNomesTelas();
   },
 
   // Abre/fecha o menu lateral (gaveta no celular, encolhido no desktop).

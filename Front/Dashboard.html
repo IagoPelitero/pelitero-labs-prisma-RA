@@ -88,7 +88,7 @@ Pages.dashboard = {
 
     html += '<div class="page-header">';
     html += '  <div>';
-    html += '    <h1 class="page-title">Dashboard</h1>';
+    html += '    <h1 class="page-title">' + App.escapeHtml(App.nomeTela('dashboard', 'Dashboard')) + '</h1>';
     html += '    <p style="color: var(--text-secondary, #6c757d); margin: 4px 0 0 0;">Visão geral dos atendimentos</p>';
     html += '  </div>';
     html += '  <button class="btn btn-primary" onclick="App.navigateTo(\'novoAtendimento\')">➕ Novo Atendimento</button>';

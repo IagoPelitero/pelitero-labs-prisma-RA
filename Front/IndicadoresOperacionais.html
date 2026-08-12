@@ -44,9 +44,10 @@ Pages.indicadoresOperacionais = {
       return;
     }
 
-    // Rótulo dinâmico do módulo (definido pelo ADM), vindo do bootstrap.
-    var titulo = (App.moduloIndicadoresOp && App.moduloIndicadoresOp.abaNome) ||
-      'Análise de SAC';
+    // Rótulo dinâmico do módulo (definido pelo ADM), vindo do bootstrap —
+    // a mesma origem que nomeia o item no menu lateral.
+    var titulo = App.nomeTela('indicadoresOperacionais',
+      (App.moduloIndicadoresOp && App.moduloIndicadoresOp.abaNome) || 'Análise de SAC');
 
     var p = this.state.periodo;
     var html = '';

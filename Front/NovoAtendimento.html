@@ -631,7 +631,11 @@ Pages.novoAtendimento = {
     var atd = self.state.atendimento || {};
     var dd = App.dropdownData || {};
 
-    var titulo = isEdit ? 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || '') : 'Novo Atendimento';
+    // Na criação vale o nome que o ADM deu à tela; na edição o título é
+    // outro (identifica o registro aberto) e continua como está.
+    var titulo = isEdit
+      ? 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || '')
+      : App.escapeHtml(App.nomeTela('novoAtendimento', 'Novo Atendimento'));
 
     var html = '';
     html += '<div class="page-header">';
