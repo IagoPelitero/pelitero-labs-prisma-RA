@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Pelitero Labs Prisma RA — Sistema de Gestão de Atendimentos
+ * PRISMA Gestão Operacional (Pelitero Labs) — Sistema de Gestão de Atendimentos
  * ============================================================================
  * Arquivo: Utils.gs
  * Descrição: Funções utilitárias compartilhadas por todo o sistema.

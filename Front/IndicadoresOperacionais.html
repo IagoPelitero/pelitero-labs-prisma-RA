@@ -1,32 +1,35 @@
 <script>
 /* ============================================================
-   Pelitero Labs Prisma RA — IndicadoresOperacionais.html
-   Pages.indicadoresOperacionais — Painel de indicadores operacionais (v4.7)
+   PRISMA Gestão Operacional (Pelitero Labs) — IndicadoresOperacionais.html
+   Pages.indicadoresOperacionais — Analisador de uma 2ª planilha Google
    Desenvolvido por Pelitero Labs.
    ------------------------------------------------------------
    GUIA PARA QUEM ESTÁ COMEÇANDO
-   Tela independente, restrita à supervisão (Supervisor/ADM). Mostra uma
-   tabela matriz (indicadores nas LINHAS, datas nas COLUNAS) consolidada a
-   partir de uma planilha Google Sheets EXTERNA configurada pelo ADM em
-   Configurações → Indicadores Operacionais.
+   Tela independente, restrita à supervisão (Supervisor/ADM). Analisa uma
+   planilha Google Sheets EXTERNA configurada pelo ADM em
+   Configurações → Análise de SAC. O nome da seção é definido pelo ADM
+   (aparece no menu e no título desta tela).
 
    Fluxo:
-     render()   → desenha o cabeçalho (botões) e dispara a 1ª carga.
-     carregar() → chama getIndicadoresOperacionais no servidor, que lê e
-                  consolida a planilha externa (com cache) e devolve os 4
-                  indicadores automáticos (Casos, Em Aberto, Em Análise,
-                  Fechado+Rejeitado) + a linha manual "Fora da SLA".
-     "Atualizar Dados" → recarrega forçando releitura da planilha externa.
-     "Exportar Excel"  → exporta exatamente a tabela exibida.
+     render()   → desenha cabeçalho, filtro de período e dispara a 1ª carga.
+     carregar() → chama getIndicadoresOperacionais no servidor, que lê a
+                  planilha externa numa ÚNICA leitura, consolida tudo e
+                  devolve SOMENTE AGREGAÇÕES (nunca as linhas cruas).
+     "Atualizar Dados" → força releitura da planilha externa.
+     "Exportar Excel"  → exporta a matriz exibida.
 
-   O servidor localiza as colunas de Data/Status pelo NOME do cabeçalho, trata
-   datas com horário, células mescladas e linhas vazias — o frontend apenas
-   apresenta o resultado já consolidado.
+   O servidor cuida da parte difícil (cabeçalho fora da 1ª linha, datas com
+   hora, células mescladas, linhas vazias, colunas fora de ordem). Aqui só
+   apresentamos: KPIs, gráficos, a matriz por data e a linha manual
+   "Fora da SLA".
    ============================================================ */
 Pages.indicadoresOperacionais = {
   state: {
-    dados: null,     // último resultado carregado (para exportação)
-    carregando: false
+    dados: null,        // último resultado carregado (para exportação)
+    carregando: false,
+    charts: {},         // instâncias do Chart.js, por id de canvas
+    analisarPor: '',    // coluna escolhida no seletor "Analisar por"
+    periodo: { inicio: '', fim: '' }
   },
 
   /**
@@ -43,39 +46,66 @@ Pages.indicadoresOperacionais = {
 
     // Rótulo dinâmico do módulo (definido pelo ADM), vindo do bootstrap.
     var titulo = (App.moduloIndicadoresOp && App.moduloIndicadoresOp.abaNome) ||
-      'Indicadores Operacionais';
+      'Análise de SAC';
 
+    var p = this.state.periodo;
     var html = '';
     html += '<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">';
     html += '  <div>';
     html += '    <h1 class="page-title">' + App.escapeHtml(titulo) + '</h1>';
-    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Indicadores consolidados a partir da planilha operacional externa.</p>';
+    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Análise consolidada a partir da planilha operacional externa.</p>';
     html += '  </div>';
     html += '  <div style="display:flex;gap:10px;flex-wrap:wrap;">';
     html += '    <button class="btn btn-secondary" id="indop-atualizar">🔄 Atualizar Dados</button>';
     html += '    <button class="btn btn-success" id="indop-exportar">📊 Exportar Excel</button>';
     html += '  </div>';
     html += '</div>';
-    html += '<div class="card" id="indop-conteudo">' +
-      Components.emptyState('query_stats', 'Carregando indicadores operacionais...') + '</div>';
+
+    // ── Filtro de período (a base de todos os percentuais) ──
+    html += '<div class="card" style="margin-bottom:16px;">';
+    html += '  <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">';
+    html += '    <div class="form-group" style="margin:0;">' +
+      '<label class="form-label" for="indop-inicio">Período — de</label>' +
+      '<input type="date" class="form-control" id="indop-inicio" value="' + App.escapeHtml(p.inicio) + '"></div>';
+    html += '    <div class="form-group" style="margin:0;">' +
+      '<label class="form-label" for="indop-fim">até</label>' +
+      '<input type="date" class="form-control" id="indop-fim" value="' + App.escapeHtml(p.fim) + '"></div>';
+    html += '    <button class="btn btn-primary" id="indop-filtrar">Aplicar</button>';
+    html += '    <button class="btn btn-secondary" id="indop-limpar">Limpar</button>';
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div id="indop-conteudo">' +
+      Components.emptyState('query_stats', 'Carregando análise...') + '</div>';
 
     container.innerHTML = html;
 
     var self = this;
-    var btnAtualizar = document.getElementById('indop-atualizar');
-    if (btnAtualizar) {
-      btnAtualizar.addEventListener('click', function() { self.carregar(true); });
-    }
-    var btnExportar = document.getElementById('indop-exportar');
-    if (btnExportar) {
-      btnExportar.addEventListener('click', function() { self.exportar(); });
-    }
+    var liga = function(id, fn) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('click', fn);
+    };
+    liga('indop-atualizar', function() { self.carregar(true); });
+    liga('indop-exportar', function() { self.exportar(); });
+    liga('indop-filtrar', function() {
+      self.state.periodo = {
+        inicio: (document.getElementById('indop-inicio') || {}).value || '',
+        fim: (document.getElementById('indop-fim') || {}).value || ''
+      };
+      self.carregar(false);
+    });
+    liga('indop-limpar', function() {
+      self.state.periodo = { inicio: '', fim: '' };
+      var a = document.getElementById('indop-inicio'); if (a) a.value = '';
+      var b = document.getElementById('indop-fim'); if (b) b.value = '';
+      self.carregar(false);
+    });
 
     this.carregar(false);
   },
 
   /**
-   * Busca os indicadores no servidor. forceRefresh=true (botão "Atualizar
+   * Busca a análise no servidor. forceRefresh=true (botão "Atualizar
    * Dados") faz o servidor reler a planilha externa ignorando o cache.
    * @param {boolean} forceRefresh - Releitura forçada.
    */
@@ -87,6 +117,12 @@ Pages.indicadoresOperacionais = {
     var btn = document.getElementById('indop-atualizar');
     if (btn && forceRefresh) { btn.disabled = true; btn.textContent = '🔄 Atualizando...'; }
 
+    var opcoes = {
+      inicio: self.state.periodo.inicio || '',
+      fim: self.state.periodo.fim || ''
+    };
+    if (forceRefresh) opcoes.forceRefresh = true;
+
     google.script.run
       .withSuccessHandler(function(dados) {
         self.state.carregando = false;
@@ -94,7 +130,7 @@ Pages.indicadoresOperacionais = {
         self.state.dados = dados || null;
         self._renderConteudo(dados);
         if (forceRefresh && dados && dados.habilitado) {
-          Components.toast('Indicadores atualizados a partir da planilha. ✓', 'success');
+          Components.toast('Análise atualizada a partir da planilha. ✓', 'success');
         }
       })
       .withFailureHandler(function(err) {
@@ -102,57 +138,310 @@ Pages.indicadoresOperacionais = {
         if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar Dados'; }
         self._renderErro((err && err.message) || 'Erro desconhecido.');
       })
-      .getIndicadoresOperacionais(forceRefresh ? { forceRefresh: true } : null);
+      .getIndicadoresOperacionais(opcoes);
   },
 
   /**
    * Decide o que exibir conforme a resposta: módulo não configurado,
-   * sem dados, ou a tabela consolidada.
+   * sem dados, ou a análise completa.
    * @param {Object} dados - Resposta de getIndicadoresOperacionais.
    */
   _renderConteudo: function(dados) {
     var container = document.getElementById('indop-conteudo');
     if (!container) return;
+    this._destruirCharts();
 
     // Módulo ainda não configurado pelo ADM.
     if (!dados || !dados.habilitado) {
       var msg = App.isAdmin()
-        ? 'Configure a planilha de origem em Configurações → Indicadores Operacionais para ativar este painel.'
+        ? 'Configure a planilha de origem em Configurações → Análise de SAC para ativar este painel.'
         : 'Este painel ainda não foi configurado. Solicite ao administrador a configuração da planilha de origem.';
-      container.innerHTML = Components.emptyState('settings_suggest', msg);
+      container.innerHTML = '<div class="card">' + Components.emptyState('settings_suggest', msg) + '</div>';
       return;
     }
 
-    // Configurado, mas sem nenhuma data consolidada (planilha vazia/sem linhas úteis).
+    // Configurado, mas sem nenhuma linha útil no período.
     if (!dados.datas || dados.datas.length === 0) {
-      container.innerHTML = Components.emptyState('inbox',
-        'Nenhum dado encontrado na planilha de origem. Verifique se há linhas preenchidas nas colunas de Data e Status.');
+      container.innerHTML = '<div class="card">' + Components.emptyState('inbox',
+        'Nenhum dado encontrado para o período selecionado.',
+        'Verifique o período do filtro e se há linhas preenchidas nas colunas de Data e Status.') + '</div>';
       return;
     }
 
-    container.innerHTML = this._tabelaHtml(dados);
+    container.innerHTML =
+      this._kpisHtml(dados) +
+      this._alertaColunasAusentesHtml(dados) +
+      this._alertaNaoClassificadoHtml(dados) +
+      this._graficosHtml(dados) +
+      this._tabelaHtml(dados);
+
+    this._ligarSeletorAnalise(dados);
+    this._renderCharts(dados);
   },
 
   /** Estado de erro, com botão de nova tentativa. */
   _renderErro: function(msg) {
     var container = document.getElementById('indop-conteudo');
     if (!container) return;
+    this._destruirCharts();
     // Remove o prefixo técnico "INDICOP:" da mensagem exibida.
     var texto = String(msg || '').replace(/^INDICOP:\s*/, '');
-    container.innerHTML =
+    container.innerHTML = '<div class="card">' +
       '<div class="empty-state">' +
       '<span class="material-icons" style="color:var(--danger,#E53935)">cloud_off</span>' +
-      '<div class="empty-state-title">Não foi possível carregar os indicadores.</div>' +
+      '<div class="empty-state-title">Não foi possível carregar a análise.</div>' +
       '<div class="empty-state-message">' + App.escapeHtml(texto) + '</div>' +
       '<button class="btn btn-primary" style="margin-top:12px;" onclick="Pages.indicadoresOperacionais.carregar(true)">🔄 Tentar novamente</button>' +
-      '</div>';
+      '</div></div>';
+  },
+
+  /** Cartões com os indicadores principais do período filtrado. */
+  _kpisHtml: function(dados) {
+    var t = dados.totais || {};
+    var cores = Pages.indicadores._cores;
+    var html = '<div class="kpi-grid">';
+    html += Components.kpiCard('folder', App.formatNumber(dados.totalCasos || 0), 'Total de casos', cores[0]);
+    html += Components.kpiCard('mark_email_unread', App.formatNumber(t.emAberto || 0), 'Em Aberto', cores[3]);
+    html += Components.kpiCard('hourglass_top', App.formatNumber(t.emAnalise || 0), 'Em Análise', cores[1]);
+    html += Components.kpiCard('task_alt', App.formatNumber(t.fechado || 0), 'Fechado + Rejeitado', cores[2]);
+    html += Components.kpiCard('timer_off', App.formatNumber(dados.totalForaSLA || 0), 'Fora da SLA', cores[5],
+      null, null, 'Informado manualmente');
+    html += Components.kpiCard('help_outline', App.formatNumber(t.naoClassificado || 0), 'Não Classificado',
+      (t.naoClassificado ? cores[4] : '#9E9E9E'), null, null, 'Status ainda não mapeado');
+    html += '</div>';
+    return html;
   },
 
   /**
-   * Monta a tabela matriz. As LINHAS são os indicadores; as COLUNAS, as
-   * datas (ordenadas). A 1ª coluna e o cabeçalho ficam fixos (CSS
-   * .indop-table). A linha "Fora da SLA" tem inputs editáveis por data,
-   * salvos individualmente no servidor (salvarForaSLA).
+   * Aviso de coluna mapeada que não existe mais no cabeçalho da origem.
+   * O painel continua funcionando (Data e Status bastam), mas a dimensão
+   * correspondente deixa de existir — sem este aviso, o gráfico
+   * simplesmente sumia da tela sem explicação.
+   */
+  _alertaColunasAusentesHtml: function(dados) {
+    var lista = dados.colunasAusentes || [];
+    if (!lista.length) return '';
+    var chips = lista.map(function(nome) {
+      return '<span class="badge badge-neutral">' + App.escapeHtml(nome) + '</span>';
+    }).join(' ');
+    var acao = App.isAdmin()
+      ? 'Reveja o mapeamento em Configurações → Análise de SAC.'
+      : 'Peça ao administrador para revisar o mapeamento em Configurações.';
+    return '<div class="card" style="margin-bottom:16px;border-left:4px solid ' + Pages.indicadores._cores[3] + ';">' +
+      '<div style="display:flex;gap:10px;align-items:flex-start;">' +
+      '<span class="material-icons" style="color:' + Pages.indicadores._cores[3] + '">report_problem</span>' +
+      '<div><strong>Coluna configurada não encontrada na planilha de origem.</strong>' +
+      '<div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;">' + chips + '</div>' +
+      '<div style="font-size:12.5px;color:var(--text-secondary);">' +
+      'A análise continua com as demais colunas. ' + acao + '</div>' +
+      '</div></div></div>';
+  },
+
+  /**
+   * Aviso de status presentes na origem que ainda não foram agrupados pelo
+   * ADM. Existe para o número "Não Classificado" nunca passar despercebido —
+   * um status desconhecido NUNCA é contado como "Em Aberto".
+   */
+  _alertaNaoClassificadoHtml: function(dados) {
+    var lista = dados.statusNaoMapeados || [];
+    if (!lista.length) return '';
+    var amostra = lista.slice(0, 8).map(function(s) {
+      return '<span class="badge badge-neutral">' + App.escapeHtml(s.rotulo) +
+        ' (' + App.formatNumber(s.valor) + ')</span>';
+    }).join(' ');
+    var extra = lista.length > 8 ? ' <em>e outros…</em>' : '';
+    var acao = App.isAdmin()
+      ? 'Agrupe-os em Configurações → Análise de SAC para entrarem nos indicadores.'
+      : 'Peça ao administrador para agrupá-los em Configurações.';
+    return '<div class="card" style="margin-bottom:16px;border-left:4px solid ' + Pages.indicadores._cores[4] + ';">' +
+      '<div style="display:flex;gap:10px;align-items:flex-start;">' +
+      '<span class="material-icons" style="color:' + Pages.indicadores._cores[4] + '">rule</span>' +
+      '<div><strong>Há status não classificados na planilha de origem.</strong>' +
+      '<div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;">' + amostra + extra + '</div>' +
+      '<div style="font-size:12.5px;color:var(--text-secondary);">' + acao + '</div>' +
+      '</div></div></div>';
+  },
+
+  /** Grade de gráficos + seletor "Analisar por". */
+  _graficosHtml: function(dados) {
+    var mapa = dados.mapeamento || {};
+    var cats = dados.categorias || {};
+    var html = '<div class="chart-container">';
+
+    html += '<div class="chart-card chart-wide"><h3>Volume por dia</h3>' +
+      '<div class="chart-canvas-wrap"><canvas id="indop-c-volume"></canvas></div></div>';
+
+    html += '<div class="chart-card"><h3>Distribuição por Status</h3>' +
+      '<div class="chart-canvas-wrap"><canvas id="indop-c-status"></canvas></div></div>';
+
+    if (mapa.assunto && cats[mapa.assunto]) {
+      html += '<div class="chart-card"><h3>Top 5 Assuntos</h3>' +
+        '<div class="chart-canvas-wrap"><canvas id="indop-c-assunto"></canvas></div></div>';
+    }
+    if (mapa.subassunto && cats[mapa.subassunto]) {
+      html += '<div class="chart-card"><h3>Top 5 Subassuntos</h3>' +
+        '<div class="chart-canvas-wrap"><canvas id="indop-c-subassunto"></canvas></div></div>';
+    }
+    if (mapa.analista && cats[mapa.analista]) {
+      html += '<div class="chart-card"><h3>Casos por Quem analisou</h3>' +
+        '<div class="chart-canvas-wrap"><canvas id="indop-c-analista"></canvas></div></div>';
+    }
+
+    // Seletor genérico: qualquer coluna categórica liberada pelo ADM, sem
+    // precisar de um gráfico codificado especificamente para ela.
+    var colunas = dados.colunasAnalise || [];
+    if (colunas.length) {
+      var atual = this.state.analisarPor;
+      if (!colunas.some(function(c) { return c.chave === atual; })) {
+        atual = colunas[0].chave;
+        this.state.analisarPor = atual;
+      }
+      html += '<div class="chart-card chart-wide">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">';
+      html += '<h3 style="margin:0;">Analisar por</h3>';
+      html += '<select id="indop-analisar-por" class="form-control" style="max-width:280px;">';
+      colunas.forEach(function(c) {
+        html += '<option value="' + App.escapeHtml(c.chave) + '"' +
+          (c.chave === atual ? ' selected' : '') + '>' + App.escapeHtml(c.rotulo) + '</option>';
+      });
+      html += '</select></div>';
+      html += '<div class="chart-canvas-wrap"><canvas id="indop-c-generico"></canvas></div></div>';
+    }
+
+    html += '</div>';
+    return html;
+  },
+
+  /** Troca o gráfico genérico quando o supervisor escolhe outra coluna. */
+  _ligarSeletorAnalise: function(dados) {
+    var self = this;
+    var sel = document.getElementById('indop-analisar-por');
+    if (!sel) return;
+    sel.addEventListener('change', function() {
+      self.state.analisarPor = sel.value;
+      self._renderChartGenerico(dados);
+    });
+  },
+
+  /** Destrói as instâncias do Chart.js (evita acúmulo a cada recarga). */
+  _destruirCharts: function() {
+    var charts = this.state.charts || {};
+    Object.keys(charts).forEach(function(id) {
+      try { charts[id].destroy(); } catch (e) { /* já destruído */ }
+    });
+    this.state.charts = {};
+  },
+
+  /** Cria (ou recria) um gráfico num canvas. */
+  _criarChart: function(canvasId, config) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    if (this.state.charts[canvasId]) {
+      try { this.state.charts[canvasId].destroy(); } catch (e) { /* ok */ }
+    }
+    this.state.charts[canvasId] = new Chart(canvas.getContext('2d'), config);
+  },
+
+  /**
+   * Barras horizontais de um ranking já vindo pronto do servidor
+   * ([{rotulo, valor, pct}]). O percentual exibido usa SEMPRE o total de
+   * casos do período filtrado como base (totalBase), não a soma do recorte —
+   * é o que faz "Top 5" significar participação real no conjunto.
+   */
+  _configRanking: function(lista, cor, totalBase, limite) {
+    var itens = (lista || []).slice(0, limite || 5);
+    return {
+      type: 'bar',
+      plugins: [Pages.indicadores._pluginValoresBarras],
+      data: {
+        labels: itens.map(function(i) { return i.rotulo; }),
+        datasets: [{ label: 'Casos', data: itens.map(function(i) { return i.valor; }), backgroundColor: cor }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 64 } },
+        plugins: {
+          legend: { display: false },
+          valoresNasBarras: { totalBase: totalBase },
+          tooltip: Pages.indicadores._tooltipQtdePct(totalBase)
+        },
+        scales: { x: { beginAtZero: true } }
+      }
+    };
+  },
+
+  /** Desenha todos os gráficos do painel. */
+  _renderCharts: function(dados) {
+    if (typeof Chart === 'undefined') {
+      Components.toast('Biblioteca de gráficos ainda não carregou. Tente novamente em alguns segundos.', 'warning');
+      return;
+    }
+    var self = this;
+    var cores = Pages.indicadores._cores;
+    var total = Number(dados.totalCasos) || 0;
+    var mapa = dados.mapeamento || {};
+    var cats = dados.categorias || {};
+
+    // Volume por dia.
+    var volume = dados.volumePorDia || [];
+    self._criarChart('indop-c-volume', {
+      type: 'line',
+      data: {
+        labels: volume.map(function(v) { return v.rotulo; }),
+        datasets: [{
+          label: 'Casos', data: volume.map(function(v) { return v.valor; }),
+          borderColor: cores[0], backgroundColor: cores[0] + '33', tension: 0.3, fill: true
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+
+    // Distribuição por Status (valores brutos da origem).
+    var status = dados.distribuicaoStatus || [];
+    self._criarChart('indop-c-status', {
+      type: 'doughnut',
+      plugins: [Pages.indicadores._pluginValoresPizza],
+      data: {
+        labels: status.map(function(s) { return s.rotulo; }),
+        datasets: [{ data: status.map(function(s) { return s.valor; }), backgroundColor: cores }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' }, tooltip: Pages.indicadores._tooltipQtdePct(total) }
+      }
+    });
+
+    if (mapa.assunto && cats[mapa.assunto]) {
+      self._criarChart('indop-c-assunto', self._configRanking(cats[mapa.assunto], cores[1], total, 5));
+    }
+    if (mapa.subassunto && cats[mapa.subassunto]) {
+      self._criarChart('indop-c-subassunto', self._configRanking(cats[mapa.subassunto], cores[4], total, 5));
+    }
+    if (mapa.analista && cats[mapa.analista]) {
+      self._criarChart('indop-c-analista', self._configRanking(cats[mapa.analista], cores[2], total, 10));
+    }
+    self._renderChartGenerico(dados);
+  },
+
+  /** Gráfico do seletor "Analisar por" (10 maiores da coluna escolhida). */
+  _renderChartGenerico: function(dados) {
+    var coluna = this.state.analisarPor;
+    var lista = (dados.categorias || {})[coluna];
+    if (!lista) return;
+    this._criarChart('indop-c-generico',
+      this._configRanking(lista, Pages.indicadores._cores[6] || '#607D8B',
+        Number(dados.totalCasos) || 0, 10));
+  },
+
+  /**
+   * Matriz por data (indicadores nas LINHAS, datas nas COLUNAS) — a visão
+   * original do módulo, preservada. A linha "Fora da SLA" tem inputs
+   * editáveis por data, salvos individualmente no servidor (salvarForaSLA).
    * @param {Object} dados - Resposta com datas, indicadores e foraSLA.
    * @returns {string} HTML da tabela.
    */
@@ -161,7 +450,6 @@ Pages.indicadoresOperacionais = {
     var ind = dados.indicadores || {};
     var sla = dados.foraSLA || {};
 
-    // Cabeçalho (canto + uma coluna por data).
     var thead = '<thead><tr>';
     thead += '<th class="indop-rowhead">Indicador</th>';
     datas.forEach(function(d) {
@@ -169,20 +457,12 @@ Pages.indicadoresOperacionais = {
     });
     thead += '</tr></thead>';
 
-    // Linhas automáticas (Casos, Em Aberto, Em Análise, Fechado+Rejeitado).
-    var linhasAuto = [
-      { chave: 'casos', rotulo: 'Casos' },
-      { chave: 'emAberto', rotulo: 'Em Aberto' },
-      { chave: 'emAnalise', rotulo: 'Em Análise' },
-      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' }
-    ];
     var tbody = '<tbody>';
-    linhasAuto.forEach(function(linha) {
+    this._linhasMatriz().forEach(function(linha) {
       var mapa = ind[linha.chave] || {};
       tbody += '<tr><td class="indop-rowhead">' + App.escapeHtml(linha.rotulo) + '</td>';
       datas.forEach(function(d) {
-        var v = Number(mapa[d.chave]) || 0;
-        tbody += '<td>' + App.formatNumber(v) + '</td>';
+        tbody += '<td>' + App.formatNumber(Number(mapa[d.chave]) || 0) + '</td>';
       });
       tbody += '</tr>';
     });
@@ -205,7 +485,21 @@ Pages.indicadoresOperacionais = {
         ' — clique em "Atualizar Dados" para reler.</p>';
     }
 
-    return '<div class="indop-scroll"><table class="indop-table">' + thead + tbody + '</table></div>' + rodape;
+    return '<div class="card"><div class="card-header"><div class="card-title">' +
+      '<span class="material-icons">table_chart</span>Detalhamento por data</div></div>' +
+      '<div class="indop-scroll"><table class="indop-table">' + thead + tbody + '</table></div>' +
+      rodape + '</div>';
+  },
+
+  /** Linhas automáticas da matriz (mesma ordem na tela e na exportação). */
+  _linhasMatriz: function() {
+    return [
+      { chave: 'casos', rotulo: 'Casos' },
+      { chave: 'emAberto', rotulo: 'Em Aberto' },
+      { chave: 'emAnalise', rotulo: 'Em Análise' },
+      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' },
+      { chave: 'naoClassificado', rotulo: 'Não Classificado' }
+    ];
   },
 
   /**
@@ -235,9 +529,9 @@ Pages.indicadoresOperacionais = {
   },
 
   /**
-   * Exporta exatamente a tabela exibida (datas × indicadores, incluindo
-   * "Fora da SLA") para Excel. Usa SheetJS (aoa_to_sheet) quando disponível;
-   * senão, um CSV com BOM/;" que abre corretamente no Excel e LibreOffice.
+   * Exporta a matriz exibida (datas × indicadores, incluindo "Fora da SLA")
+   * e os rankings do período. Usa SheetJS quando disponível; senão, um CSV
+   * com BOM/";" que abre corretamente no Excel e LibreOffice.
    */
   exportar: function() {
     var dados = this.state.dados;
@@ -249,16 +543,10 @@ Pages.indicadoresOperacionais = {
     var ind = dados.indicadores || {};
     var sla = dados.foraSLA || {};
 
-    // Monta a matriz como array de arrays (mesma disposição da tela).
+    // Matriz, na mesma disposição da tela.
     var aoa = [];
     aoa.push(['Indicador'].concat(datas.map(function(d) { return d.label; })));
-    var linhas = [
-      { chave: 'casos', rotulo: 'Casos' },
-      { chave: 'emAberto', rotulo: 'Em Aberto' },
-      { chave: 'emAnalise', rotulo: 'Em Análise' },
-      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' }
-    ];
-    linhas.forEach(function(linha) {
+    this._linhasMatriz().forEach(function(linha) {
       var mapa = ind[linha.chave] || {};
       aoa.push([linha.rotulo].concat(datas.map(function(d) { return Number(mapa[d.chave]) || 0; })));
     });
@@ -267,12 +555,24 @@ Pages.indicadoresOperacionais = {
       return (v === undefined || v === null || v === '') ? 0 : Number(v) || 0;
     })));
 
-    var nomeBase = 'indicadores_operacionais_' + new Date().toISOString().slice(0, 10);
+    // Rankings do período (quantidade e percentual), abaixo da matriz.
+    var cats = dados.categorias || {};
+    (dados.colunasAnalise || []).forEach(function(col) {
+      var lista = cats[col.chave];
+      if (!lista || !lista.length) return;
+      aoa.push([]);
+      aoa.push([col.rotulo, 'Casos', '% do total']);
+      lista.slice(0, 10).forEach(function(i) {
+        aoa.push([i.rotulo, i.valor, i.pct + '%']);
+      });
+    });
+
+    var nomeBase = 'analise_operacional_' + new Date().toISOString().slice(0, 10);
 
     if (window.XLSX) {
       var sheet = XLSX.utils.aoa_to_sheet(aoa);
       var wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, sheet, 'Indicadores');
+      XLSX.utils.book_append_sheet(wb, sheet, 'Análise');
       XLSX.writeFile(wb, nomeBase + '.xlsx');
       Components.toast('Arquivo Excel exportado com sucesso!', 'success');
       return;

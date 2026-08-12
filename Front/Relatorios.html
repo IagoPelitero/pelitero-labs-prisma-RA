@@ -1,6 +1,6 @@
 <script>
 /* ============================================================
-   Pelitero Labs Prisma RA — Relatorios.html
+   PRISMA Gestão Operacional (Pelitero Labs) — Relatorios.html
    Pages.relatorios — Relatórios operacionais e exportações
    Desenvolvido por Pelitero Labs.
    ------------------------------------------------------------
@@ -492,7 +492,7 @@ Pages.relatorios = {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(18);
       doc.setFont(undefined, 'bold');
-      doc.text('Pelitero Labs Prisma RA - Relatório de Atendimentos', 14, 14);
+      doc.text('PRISMA Gestão Operacional - Relatório de Atendimentos', 14, 14);
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
       doc.text('Gerado em: ' + new Date().toLocaleString('pt-BR'), 14, 22);
@@ -544,7 +544,7 @@ Pages.relatorios = {
         doc.setPage(p);
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
-        doc.text('Pelitero Labs Prisma RA | Página ' + p + ' de ' + pageCount, 14, doc.internal.pageSize.height - 8);
+        doc.text('Pelitero Labs · PRISMA Gestão Operacional | Página ' + p + ' de ' + pageCount, 14, doc.internal.pageSize.height - 8);
       }
 
       doc.save('relatorio_prisma_ra_' + new Date().toISOString().slice(0, 10) + '.pdf');

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Pelitero Labs Prisma RA — Sistema de Gestão de Atendimentos
+ * PRISMA Gestão Operacional (Pelitero Labs) — Sistema de Gestão de Atendimentos
  * ============================================================================
  * Arquivo: Config.gs
  * Descrição: Constantes de configuração, definições de colunas das planilhas
@@ -51,6 +51,20 @@ const CONFIG = {
   // demais; o bump também invalida os caches do esquema anterior.
   SCHEMA_VERSION: '4.7.0',
   SPREADSHEET_ID: '', // Opcional. Quando vazio, usa Script Properties/planilha vinculada.
+
+  // ── IDENTIDADE VISUAL ─────────────────────────────────────────────────────
+  // APENAS apresentação: títulos de página, menu, cabeçalho e rodapé de PDF.
+  // Nada aqui participa de chave de cache, Script Property, nome de aba ou
+  // coluna — trocar estes textos não altera dados nem quebra IMPORTRANGE.
+  // Os identificadores técnicos legados (PRISMA_RA_*, prisma-ra-*) continuam
+  // como estão de propósito: mudá-los invalidaria caches e preferências.
+  APP: {
+    NOME: 'PRISMA Gestão Operacional',
+    NOME_CURTO: 'PRISMA',
+    FABRICANTE: 'Pelitero Labs',
+    TITULO: 'PRISMA Gestão Operacional — Pelitero Labs'
+  },
+
   SHEET_NAMES: {
     // Abas de atendimento separadas por canal. A aba legada "Atendimentos"
     // é migrada automaticamente para estas abas (migrateLegacyData_).

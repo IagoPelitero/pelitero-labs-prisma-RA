@@ -1,6 +1,6 @@
 <style>
 /* ============================================================
-   Pelitero Labs Prisma RA — Design System & Global Styles
+   PRISMA Gestão Operacional (Pelitero Labs) — Design System & Global Styles
    Desenvolvido por Pelitero Labs.
    ============================================================
    GUIA PARA QUEM ESTÁ COMEÇANDO (leia antes de mexer neste arquivo)
@@ -295,14 +295,20 @@ input, select, textarea, button {
 .sidebar-logo-abbr {
   width: 36px;
   height: 36px;
-  background: var(--primary-blue);
+  /* Tom escuro da paleta do tema (não o --primary-blue): com o branco do
+     texto, o badge fica acima de 9:1 em TODOS os temas. Sobre o
+     --primary-blue, "Brasil" (3,61) e "Dark" (3,68) ficavam abaixo do AA. */
+  background: var(--dark-blue);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 16px;
-  letter-spacing: -0.5px;
+  /* 3 letras ("PGO") num quadrado de 36px: fonte um pouco menor e
+     entreletra mais fechada para o badge não estourar a caixa. */
+  font-size: 14px;
+  letter-spacing: -0.3px;
+  color: #fff;
   flex-shrink: 0;
 }
 
@@ -481,7 +487,9 @@ input, select, textarea, button {
 }
 
 .header-ra-badge {
-  background: linear-gradient(135deg, var(--primary-blue), var(--secondary-blue));
+  /* Mesma razão do .sidebar-logo-abbr: o gradiente claro derrubava o
+     contraste do texto branco nos temas Brasil e Dark. */
+  background: var(--dark-blue);
   color: #fff;
   font-weight: 800;
   font-size: 13px;
@@ -1152,6 +1160,15 @@ input, select, textarea, button {
 .idade-critica {
   background: #FDECEA;
   color: #B3261E;
+}
+
+/* Título do cabeçalho no Dark.
+   .header-title usa var(--dark-blue), que no tema Dark vale #1E3A8A —
+   azul-marinho sobre o cabeçalho escuro (#1F2937), contraste 1.42:1, ou
+   seja, praticamente ilegível. Passa a usar o azul claro do tema, que
+   mantém a identidade e volta a atender o AA. */
+body[data-theme="dark"] .header-title {
+  color: var(--secondary-blue);
 }
 
 /* Variantes Dark dos chips de idade: os fundos pastéis claros acima viram

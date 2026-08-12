@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Pelitero Labs Prisma RA — Sistema de Gestão de Atendimentos
+ * PRISMA Gestão Operacional (Pelitero Labs) — Sistema de Gestão de Atendimentos
  * ============================================================================
  * Arquivo: Code.gs
  * Descrição: Ponto de entrada do aplicativo Google Apps Script.
@@ -64,7 +64,7 @@ function doGet(e) {
     const template = HtmlService.createTemplateFromFile('Index');
     const output = template.evaluate();
     
-    output.setTitle('Pelitero Labs Prisma RA — Sistema de Gestão de Atendimentos');
+    output.setTitle(CONFIG.APP.TITULO);
     output.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     output.addMetaTag('viewport', 'width=device-width, initial-scale=1');
 
@@ -73,7 +73,7 @@ function doGet(e) {
     Logger.log('Erro no doGet: ' + e.message);
     return HtmlService.createHtmlOutput(
       '<h1>Erro ao carregar o sistema</h1>' +
-      '<p>Ocorreu um erro ao inicializar o Prisma RA. ' +
+      '<p>Ocorreu um erro ao inicializar o ' + CONFIG.APP.NOME_CURTO + '. ' +
       'Tente novamente em alguns instantes ou procure o suporte responsável.</p>'
     );
   }
@@ -123,12 +123,12 @@ function getCurrentUser() {
 
 /**
  * Trigger onOpen - executada automaticamente ao abrir a planilha.
- * Adiciona um menu customizado "Prisma RA" com opção de abrir o sistema.
+ * Adiciona um menu customizado com opção de abrir o sistema.
  */
 function onOpen() {
   try {
     SpreadsheetApp.getUi()
-      .createMenu('Prisma RA')
+      .createMenu(CONFIG.APP.NOME_CURTO)
       .addItem('🚀 Abrir Sistema', 'abrirSistema')
       .addSeparator()
       .addItem('🔄 Reinicializar Planilhas', 'menuReinicializar')
@@ -140,7 +140,7 @@ function onOpen() {
 }
 
 /**
- * Abre o sistema Prisma RA como diálogo modal dentro da planilha.
+ * Abre o sistema como diálogo modal dentro da planilha.
  * Alternativa ao acesso via URL do Web App.
  */
 function abrirSistema() {
@@ -150,11 +150,11 @@ function abrirSistema() {
 
     const template = HtmlService.createTemplateFromFile('Index');
     const html = template.evaluate()
-      .setTitle('Prisma RA')
+      .setTitle(CONFIG.APP.NOME_CURTO)
       .setWidth(1400)
       .setHeight(900);
 
-    SpreadsheetApp.getUi().showModalDialog(html, 'Pelitero Labs Prisma RA — Sistema de Gestão de Atendimentos');
+    SpreadsheetApp.getUi().showModalDialog(html, CONFIG.APP.TITULO);
   } catch (e) {
     Logger.log('Erro ao abrir sistema: ' + e.message);
     SpreadsheetApp.getUi().alert('Erro ao abrir o sistema: ' + e.message);
@@ -213,7 +213,7 @@ function menuLimparCache() {
  */
 function setup() {
   try {
-    Logger.log('=== SETUP INICIAL DO PRISMA RA ===');
+    Logger.log('=== SETUP INICIAL DO PRISMA ===');
     initializeSheets();
     Logger.log('Setup concluído com sucesso!');
     Logger.log('Para acessar como Web App, publique o projeto:');
@@ -246,7 +246,7 @@ function configurarPlanilha(spreadsheetId) {
  */
 function testSystem() {
   try {
-    Logger.log('=== TESTE DO SISTEMA PRISMA RA ===');
+    Logger.log('=== TESTE DO SISTEMA PRISMA ===');
     
     // Testa acesso à planilha
     const ss = getSpreadsheet();

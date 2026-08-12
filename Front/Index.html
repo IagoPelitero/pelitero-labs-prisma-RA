@@ -4,9 +4,9 @@
   <base target="_top">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pelitero Labs Prisma RA</title>
+  <title>PRISMA Gestão Operacional — Pelitero Labs</title>
   <!--
-    Pelitero Labs Prisma RA — Index.html (shell da aplicação)
+    PRISMA Gestão Operacional — Index.html (shell da aplicação)
     Desenvolvido por Pelitero Labs.
 
     Este arquivo é apenas a "casca" (shell) do sistema: monta o layout
@@ -35,8 +35,8 @@
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-logo">
-          <div class="sidebar-logo-abbr">RA</div>
-          <span class="sidebar-logo-text">Prisma RA</span>
+          <div class="sidebar-logo-abbr">PGO</div>
+          <span class="sidebar-logo-text">PRISMA</span>
         </div>
         <button class="sidebar-toggle" onclick="App.toggleSidebar()" title="Recolher/expandir menu">
           <span class="material-icons">menu</span>
@@ -59,8 +59,8 @@
         <!-- v4.7: Indicadores Operacionais (planilha externa). Rótulo dinâmico
              definido pelo ADM — App.aplicarRotuloIndicOp() atualiza o texto e o
              tooltip a partir do bootstrap. Restrito à supervisão. -->
-        <li class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-tooltip="Indicadores Operacionais" id="menu-indic-op">
-          <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Indicadores Operacionais</span>
+        <li class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-tooltip="Análise de SAC" id="menu-indic-op">
+          <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Análise de SAC</span>
         </li>
         <li class="sidebar-item" data-page="configuracoes" data-supervisor-only data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
@@ -68,15 +68,15 @@
       </ul>
       <!-- Rodapé do menu: identificação do produto -->
       <div class="sidebar-footer">
-        <div class="sidebar-version">Pelitero Labs Prisma RA</div>
+        <div class="sidebar-version">Pelitero Labs</div>
       </div>
     </nav>
 
     <div class="main-area">
       <header class="header">
         <div class="header-left">
-          <span class="header-ra-badge">RA</span>
-          <span class="header-title">Prisma RA — Gestão de Atendimentos</span>
+          <span class="header-ra-badge">PGO</span>
+          <span class="header-title">PRISMA — Gestão Operacional</span>
         </div>
         <div class="header-right">
           <div class="header-datetime">
@@ -113,10 +113,10 @@
        automaticamente a partir do e-mail autenticado pelo Google. -->
   <div id="access-denied-overlay" class="access-denied-overlay" style="display:none;">
     <div class="access-denied-card">
-      <div class="access-denied-logo">RA</div>
+      <div class="access-denied-logo">PGO</div>
       <div class="access-denied-title">Acesso não autorizado</div>
       <p class="access-denied-message" id="access-denied-message">
-        Seu e-mail não está cadastrado para utilizar o Prisma RA. Entre em
+        Seu e-mail não está cadastrado para utilizar o PRISMA. Entre em
         contato com o Administrador para solicitar seu acesso.
       </p>
     </div>

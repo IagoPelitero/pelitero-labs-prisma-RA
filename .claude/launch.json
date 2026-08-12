@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prisma-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8124", "--directory", "C:/Users/iago2/AppData/Local/Temp/claude/C--Users-iago2-OneDrive-Desktop-pelitero-labs-prisma-RA/2b6179ea-6a44-4f4f-8d06-b73f3d66fef2/scratchpad"],
+      "port": 8124
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Pelitero Labs Prisma RA — Camada de serviços
+ * PRISMA Gestão Operacional (Pelitero Labs) — Camada de serviços
  * ============================================================================
  * Arquivo: Services.gs
  * Descrição: Regras de negócio, validação, timeline, dashboard, relatórios e
@@ -73,7 +73,7 @@ function requireAuth_() {
   }) : null;
 
   if (!user) {
-    throw new Error('AUTH: Seu e-mail não está cadastrado para utilizar o Prisma RA. Entre em contato com o Administrador para solicitar seu acesso.');
+    throw new Error('AUTH: Seu e-mail não está cadastrado para utilizar o ' + CONFIG.APP.NOME_CURTO + '. Entre em contato com o Administrador para solicitar seu acesso.');
   }
 
   SERVICE_CONTEXT_.actor = {
@@ -1396,7 +1396,7 @@ function getRelatorio(filtros, options) {
 // ============================================================================
 /*
  * Acompanha indicadores operacionais a partir de uma planilha Google Sheets
- * EXTERNA, configurada pelo Administrador (fora do banco do Prisma RA).
+ * EXTERNA, configurada pelo Administrador (fora do banco do PRISMA).
  *
  * Resiliência (não depender de posições fixas):
  *  - as colunas de Data e Status são localizadas pelo NOME do cabeçalho, na
@@ -1423,13 +1423,48 @@ const INDIC_OP_CACHE_KEY_ = 'PRISMA_RA_INDIC_OP_CACHE';
 /** Configuração padrão do módulo (antes de o ADM configurar a fonte). */
 function indicOpConfigPadrao_() {
   return {
-    abaNome: 'Indicadores Operacionais',
+    abaNome: 'Análise de SAC',
     planilhaUrl: '',
     abaOrigem: '',
     linhaInicial: 1,
     colunaData: 'Data',
-    colunaStatus: 'Status'
+    colunaStatus: 'Status',
+    // Colunas analíticas (opcionais). Vazio = dimensão simplesmente não
+    // aparece no painel; o módulo continua funcionando só com Data+Status.
+    colunaAssunto: '',
+    colunaSubassunto: '',
+    colunaAnalista: '',
+    // Outras colunas categóricas que o ADM libera para o seletor
+    // "Analisar por" — evita ter um gráfico codificado para cada coluna.
+    colunasExtras: [],
+    // Valores BRUTOS da planilha que representam cada grupo. Enquanto os
+    // três estiverem vazios, vale a heurística por palavra-chave (mantém o
+    // comportamento de quem já usa o módulo hoje).
+    statusEmAberto: [],
+    statusEmAnalise: [],
+    statusFechado: []
   };
+}
+
+/** Normaliza uma lista vinda da configuração (array ou texto separado por ";"). */
+function listaConfigOp_(valor) {
+  let bruta = [];
+  if (Array.isArray(valor)) {
+    bruta = valor;
+  } else if (valor !== undefined && valor !== null && String(valor).trim() !== '') {
+    bruta = String(valor).split(';');
+  }
+  const vistos = {};
+  const saida = [];
+  bruta.forEach(function(item) {
+    const txt = String(item === undefined || item === null ? '' : item).trim();
+    if (!txt) return;
+    const chave = normalizeText_(txt);
+    if (vistos[chave]) return;
+    vistos[chave] = true;
+    saida.push(txt);
+  });
+  return saida;
 }
 
 /**
@@ -1453,7 +1488,16 @@ function lerIndicOpConfig_() {
     abaOrigem: String(salvo.abaOrigem || '').trim(),
     linhaInicial: Math.max(1, parseInt(salvo.linhaInicial, 10) || padrao.linhaInicial),
     colunaData: String(salvo.colunaData || '').trim() || padrao.colunaData,
-    colunaStatus: String(salvo.colunaStatus || '').trim() || padrao.colunaStatus
+    colunaStatus: String(salvo.colunaStatus || '').trim() || padrao.colunaStatus,
+    // Campos novos: ausentes nas configurações já gravadas → viram vazio,
+    // e o painel simplesmente não mostra a dimensão correspondente.
+    colunaAssunto: String(salvo.colunaAssunto || '').trim(),
+    colunaSubassunto: String(salvo.colunaSubassunto || '').trim(),
+    colunaAnalista: String(salvo.colunaAnalista || '').trim(),
+    colunasExtras: listaConfigOp_(salvo.colunasExtras),
+    statusEmAberto: listaConfigOp_(salvo.statusEmAberto),
+    statusEmAnalise: listaConfigOp_(salvo.statusEmAnalise),
+    statusFechado: listaConfigOp_(salvo.statusFechado)
   };
   cfg.habilitado = !!(cfg.planilhaUrl && cfg.abaOrigem);
   return cfg;
@@ -1476,22 +1520,129 @@ function salvarIndicadoresOperacionaisConfig(dados) {
   requireAuth_();
   requireAdmin_();
   const entrada = dados || {};
+  const limparLista = function(v) {
+    return listaConfigOp_(v).map(function(item) { return sanitizeInput(item); })
+      .filter(function(item) { return item !== ''; });
+  };
   const cfg = {
-    abaNome: sanitizeInput(entrada.abaNome) || 'Indicadores Operacionais',
+    abaNome: sanitizeInput(entrada.abaNome) || indicOpConfigPadrao_().abaNome,
     planilhaUrl: sanitizeInput(entrada.planilhaUrl),
     abaOrigem: sanitizeInput(entrada.abaOrigem),
     linhaInicial: Math.max(1, parseInt(entrada.linhaInicial, 10) || 1),
     colunaData: sanitizeInput(entrada.colunaData) || 'Data',
-    colunaStatus: sanitizeInput(entrada.colunaStatus) || 'Status'
+    colunaStatus: sanitizeInput(entrada.colunaStatus) || 'Status',
+    colunaAssunto: sanitizeInput(entrada.colunaAssunto),
+    colunaSubassunto: sanitizeInput(entrada.colunaSubassunto),
+    colunaAnalista: sanitizeInput(entrada.colunaAnalista),
+    colunasExtras: limparLista(entrada.colunasExtras),
+    statusEmAberto: limparLista(entrada.statusEmAberto),
+    statusEmAnalise: limparLista(entrada.statusEmAnalise),
+    statusFechado: limparLista(entrada.statusFechado)
   };
   if (cfg.planilhaUrl && !/docs\.google\.com\/spreadsheets/i.test(cfg.planilhaUrl)) {
     throw new Error('A URL informada não parece ser de uma planilha Google Sheets.');
   }
+  // Um mesmo status em dois grupos tornaria a contagem ambígua.
+  const grupos = [
+    ['Em Aberto', cfg.statusEmAberto], ['Em Análise', cfg.statusEmAnalise], ['Fechado', cfg.statusFechado]
+  ];
+  const donoDoStatus = {};
+  for (let g = 0; g < grupos.length; g++) {
+    const nomeGrupo = grupos[g][0];
+    for (let i = 0; i < grupos[g][1].length; i++) {
+      const chave = normalizeText_(grupos[g][1][i]);
+      if (donoDoStatus[chave] && donoDoStatus[chave] !== nomeGrupo) {
+        throw new Error('O status "' + grupos[g][1][i] + '" está em dois grupos ao mesmo tempo (' +
+          donoDoStatus[chave] + ' e ' + nomeGrupo + '). Deixe-o em apenas um.');
+      }
+      donoDoStatus[chave] = nomeGrupo;
+    }
+  }
   PropertiesService.getScriptProperties().setProperty(
     PROPERTY_KEYS.INDIC_OP_CONFIG, JSON.stringify(cfg));
-  try { CacheService.getScriptCache().remove(INDIC_OP_CACHE_KEY_); } catch (e) { /* ignore */ }
+  limparCacheIndicOp_();
   cfg.habilitado = !!(cfg.planilhaUrl && cfg.abaOrigem);
   return { success: true, config: cfg };
+}
+
+/**
+ * Remove todos os resultados consolidados em cache do módulo.
+ * O cache é fatiado por período (uma chave por faixa de datas consultada),
+ * por isso a limpeza percorre o índice de chaves em uso.
+ */
+function limparCacheIndicOp_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const indice = cache.get(INDIC_OP_CACHE_KEY_ + '_INDICE');
+    const chaves = [INDIC_OP_CACHE_KEY_, INDIC_OP_CACHE_KEY_ + '_INDICE'];
+    if (indice) {
+      try { JSON.parse(indice).forEach(function(k) { chaves.push(k); }); } catch (e) { /* índice ruim */ }
+    }
+    cache.removeAll(chaves);
+  } catch (e) {
+    Logger.log('[IndicOp] Falha ao limpar cache: ' + e.message);
+  }
+}
+
+/**
+ * (ADM) Lê a planilha externa apenas para DESCOBRIR seu formato: quais
+ * colunas existem no cabeçalho e quais valores distintos aparecem na coluna
+ * de status. Serve para o ADM mapear as colunas e agrupar os status
+ * escolhendo em listas, em vez de digitar nomes exatos.
+ *
+ * Aceita os parâmetros do formulário ainda NÃO salvos, para o ADM conseguir
+ * testar a fonte antes de gravar a configuração.
+ * @param {Object} dados - { planilhaUrl, abaOrigem, linhaInicial, colunaStatus }.
+ * @returns {Object} { cabecalhos:[], statusEncontrados:[], totalLinhas }.
+ */
+function getIndicadoresOperacionaisFonte(dados) {
+  requireAuth_();
+  requireAdmin_();
+  const entrada = dados || {};
+  const salvo = lerIndicOpConfig_();
+  const url = sanitizeInput(entrada.planilhaUrl) || salvo.planilhaUrl;
+  const abaOrigem = sanitizeInput(entrada.abaOrigem) || salvo.abaOrigem;
+  const linhaInicial = Math.max(1, parseInt(entrada.linhaInicial, 10) || salvo.linhaInicial);
+  const colunaStatus = sanitizeInput(entrada.colunaStatus) || salvo.colunaStatus;
+
+  if (!url || !abaOrigem) {
+    throw new Error('INDICOP: informe o link da planilha e o nome da aba antes de ler os cabeçalhos.');
+  }
+
+  const leitura = lerAbaExterna_(url, abaOrigem);
+  const valores = leitura.valores;
+  if (valores.length === 0) {
+    return { cabecalhos: [], statusEncontrados: [], totalLinhas: 0 };
+  }
+
+  const linhaCab = Math.min(linhaInicial, valores.length) - 1;
+  const cabecalhos = (valores[linhaCab] || []).map(function(v) {
+    return String(v === undefined || v === null ? '' : v).trim();
+  }).filter(function(v) { return v !== ''; });
+
+  // Valores distintos da coluna de status (o que o ADM precisa agrupar).
+  const idxStatus = indiceColunaOp_(valores[linhaCab] || [], colunaStatus);
+  const vistos = {};
+  const statusEncontrados = [];
+  let totalLinhas = 0;
+  if (idxStatus !== -1) {
+    for (let i = linhaCab + 1; i < valores.length; i++) {
+      const linha = valores[i];
+      if (linhaVaziaOp_(linha)) continue;
+      totalLinhas++;
+      const txt = String(linha[idxStatus] === undefined || linha[idxStatus] === null ? '' : linha[idxStatus]).trim();
+      if (!txt) continue;
+      const chave = normalizeText_(txt);
+      if (vistos[chave]) continue;
+      vistos[chave] = true;
+      statusEncontrados.push(txt);
+      // Trava de segurança: uma coluna que não é de status teria centenas
+      // de valores distintos e não faz sentido listar.
+      if (statusEncontrados.length >= 100) break;
+    }
+  }
+  statusEncontrados.sort(function(a, b) { return a.localeCompare(b, 'pt-BR'); });
+  return { cabecalhos: cabecalhos, statusEncontrados: statusEncontrados, totalLinhas: totalLinhas };
 }
 
 /**
@@ -1527,25 +1678,115 @@ function normalizarDataOp_(valor) {
   return { chave: ano + '-' + mes + '-' + dia, label: dia + '/' + mes + '/' + ano };
 }
 
+/** true quando a linha da planilha externa não tem nenhum valor. */
+function linhaVaziaOp_(linha) {
+  return !linha || linha.every(function(c) {
+    return c === '' || c === null || c === undefined;
+  });
+}
+
 /**
- * Classifica um status BRUTO da planilha externa num dos três grupos do
- * painel, por palavra-chave (sem acento/caixa). A ordem importa: "análise" e
- * "fechado/rejeitado" são testados antes do padrão "Em Aberto".
- * @param {string} statusBruto - Texto do status na origem.
- * @returns {string} 'emAnalise' | 'fechado' | 'emAberto'.
+ * Localiza uma coluna pelo NOME do cabeçalho, ignorando acento, caixa e
+ * espaços extras. É o que permite a planilha de origem mudar a ordem das
+ * colunas sem quebrar a leitura.
+ * @param {Array} linhaCabecalho - Linha de cabeçalho crua.
+ * @param {string} nome - Nome procurado (vazio = coluna não configurada).
+ * @returns {number} Índice 0-based, ou -1.
  */
-function classificarStatusOp_(statusBruto) {
+function indiceColunaOp_(linhaCabecalho, nome) {
+  const alvo = normalizeText_(nome);
+  if (!alvo) return -1;
+  const cabecalhos = (linhaCabecalho || []).map(function(v) { return normalizeText_(v); });
+  return cabecalhos.indexOf(alvo);
+}
+
+/**
+ * Abre a planilha externa e devolve a aba inteira numa ÚNICA chamada
+ * getValues(). Concentrar a leitura aqui garante que o resto do módulo
+ * trabalhe sobre a matriz já em memória, sem novas idas ao Sheets.
+ * @param {string} url - Link da planilha externa.
+ * @param {string} abaOrigem - Nome da aba.
+ * @returns {Object} { valores: Array[][] }.
+ * @throws {Error} 'INDICOP: ...' quando não dá para ler.
+ */
+function lerAbaExterna_(url, abaOrigem) {
+  let planilha;
+  try {
+    planilha = SpreadsheetApp.openByUrl(url);
+  } catch (e) {
+    throw new Error('INDICOP: não foi possível abrir a planilha configurada. ' +
+      'Verifique o link e se você tem acesso a ela. (' + e.message + ')');
+  }
+  const aba = planilha.getSheetByName(abaOrigem);
+  if (!aba) {
+    throw new Error('INDICOP: a aba "' + abaOrigem + '" não existe na planilha de origem.');
+  }
+  if (aba.getLastRow() === 0 || aba.getLastColumn() === 0) return { valores: [] };
+  return { valores: aba.getDataRange().getValues() };
+}
+
+/**
+ * Classifica um status BRUTO num dos grupos do painel.
+ *
+ * REGRA: um status que o sistema não reconhece NUNCA vira "Em Aberto" por
+ * omissão — ele cai em 'naoClassificado', para o ADM/Supervisor perceberem
+ * que existe valor na origem ainda não mapeado.
+ *
+ * Duas fontes de verdade, nesta ordem:
+ *   1. o AGRUPAMENTO CONFIGURADO pelo ADM (lista de valores por grupo);
+ *   2. se nenhum grupo foi configurado ainda, uma heurística por
+ *      palavra-chave — é o comportamento histórico do módulo, mantido para
+ *      quem já usa o painel não ver os números zerarem depois da atualização.
+ * @param {string} statusBruto - Texto do status na origem.
+ * @param {Object} mapa - Índice normalizado {statusNormalizado: grupo}.
+ * @returns {string} 'emAberto' | 'emAnalise' | 'fechado' | 'naoClassificado'.
+ */
+function classificarStatusOp_(statusBruto, mapa) {
   const s = normalizeText_(statusBruto);
-  if (s.indexOf('analise') !== -1) return 'emAnalise';
+  if (!s) return 'naoClassificado';
+
+  if (mapa && mapa.__configurado) {
+    return mapa[s] || 'naoClassificado';
+  }
+
+  // Heurística legada (só vale enquanto o ADM não agrupa os status).
+  if (s.indexOf('analise') !== -1 || s.indexOf('andamento') !== -1) return 'emAnalise';
   if (s.indexOf('fechad') !== -1 || s.indexOf('rejeitad') !== -1 ||
       s.indexOf('conclu') !== -1 || s.indexOf('encerrad') !== -1 ||
       s.indexOf('resolvid') !== -1 || s.indexOf('finaliz') !== -1) return 'fechado';
-  return 'emAberto';
+  if (s.indexOf('abert') !== -1 || s.indexOf('novo') !== -1 ||
+      s.indexOf('pendente') !== -1 || s.indexOf('aguardando') !== -1) return 'emAberto';
+  return 'naoClassificado';
+}
+
+/**
+ * Monta o índice {statusNormalizado: grupo} a partir da configuração.
+ * A marca __configurado distingue "ADM ainda não agrupou nada" de
+ * "ADM agrupou, e o que ficou de fora é não classificado".
+ * @param {Object} cfg - Configuração resolvida.
+ * @returns {Object} Índice de classificação.
+ */
+function mapaStatusOp_(cfg) {
+  const mapa = {};
+  const grupos = [
+    ['emAberto', cfg.statusEmAberto], ['emAnalise', cfg.statusEmAnalise], ['fechado', cfg.statusFechado]
+  ];
+  let total = 0;
+  grupos.forEach(function(par) {
+    (par[1] || []).forEach(function(valor) {
+      const chave = normalizeText_(valor);
+      if (!chave) return;
+      mapa[chave] = par[0];
+      total++;
+    });
+  });
+  mapa.__configurado = total > 0;
+  return mapa;
 }
 
 /** Estrutura vazia dos indicadores automáticos (sem nenhuma data). */
 function emptyIndicadoresOp_() {
-  return { casos: {}, emAberto: {}, emAnalise: {}, fechado: {} };
+  return { casos: {}, emAberto: {}, emAnalise: {}, fechado: {}, naoClassificado: {} };
 }
 
 /**
@@ -1557,85 +1798,240 @@ function emptyIndicadoresOp_() {
  * @returns {Object} { datas:[{chave,label}], indicadores, atualizadoEm }.
  * @throws {Error} 'INDICOP: ...' quando a planilha não pôde ser lida.
  */
-function consolidarIndicadoresOp_(cfg, forceRefresh) {
+function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
   const cache = CacheService.getScriptCache();
+  periodo = periodo || {};
+  // O cache é por CONFIGURAÇÃO + PERÍODO: mudar o mapeamento ou a faixa de
+  // datas nunca pode servir um resultado consolidado com outros critérios.
+  const assinatura = [
+    cfg.planilhaUrl, cfg.abaOrigem, cfg.linhaInicial, cfg.colunaData, cfg.colunaStatus,
+    cfg.colunaAssunto, cfg.colunaSubassunto, cfg.colunaAnalista,
+    (cfg.colunasExtras || []).join('|'),
+    (cfg.statusEmAberto || []).join('|'), (cfg.statusEmAnalise || []).join('|'),
+    (cfg.statusFechado || []).join('|'),
+    periodo.inicio || '', periodo.fim || ''
+  ].join('§');
+  const cacheKey = INDIC_OP_CACHE_KEY_ + '_' + hashCurto_(assinatura);
+
   if (!forceRefresh) {
     try {
-      const cached = cache.get(INDIC_OP_CACHE_KEY_);
+      const cached = cache.get(cacheKey);
       if (cached) return JSON.parse(cached);
     } catch (e) { /* cache ruim nunca impede a leitura */ }
   }
 
-  // ── Abre a planilha externa (roda como o usuário que acessa) ──
-  let planilha;
-  try {
-    planilha = SpreadsheetApp.openByUrl(cfg.planilhaUrl);
-  } catch (e) {
-    throw new Error('INDICOP: não foi possível abrir a planilha configurada. ' +
-      'Verifique o link e se você tem acesso a ela. (' + e.message + ')');
-  }
-  const aba = planilha.getSheetByName(cfg.abaOrigem);
-  if (!aba) {
-    throw new Error('INDICOP: a aba "' + cfg.abaOrigem + '" não existe na planilha de origem.');
-  }
-  if (aba.getLastRow() === 0 || aba.getLastColumn() === 0) {
-    return { datas: [], indicadores: emptyIndicadoresOp_(), atualizadoEm: toIso_(new Date()) };
-  }
+  // ── UMA leitura em lote da planilha externa ──
+  const valores = lerAbaExterna_(cfg.planilhaUrl, cfg.abaOrigem).valores;
+  if (valores.length === 0) return resultadoVazioOp_(cfg);
 
-  const valores = aba.getDataRange().getValues();
   const linhaCabecalho = Math.min(cfg.linhaInicial, valores.length) - 1; // 0-indexed
-  const cabecalhos = (valores[linhaCabecalho] || []).map(function(v) { return normalizeText_(v); });
-  const idxData = cabecalhos.indexOf(normalizeText_(cfg.colunaData));
-  const idxStatus = cabecalhos.indexOf(normalizeText_(cfg.colunaStatus));
+  const cabecalhoBruto = valores[linhaCabecalho] || [];
+  const idxData = indiceColunaOp_(cabecalhoBruto, cfg.colunaData);
+  const idxStatus = indiceColunaOp_(cabecalhoBruto, cfg.colunaStatus);
   if (idxData === -1 || idxStatus === -1) {
     throw new Error('INDICOP: não encontrei as colunas "' + cfg.colunaData + '" e/ou "' +
       cfg.colunaStatus + '" na linha ' + cfg.linhaInicial + ' da planilha de origem.');
   }
 
-  // ── Consolida por data ──
-  const porData = {};       // chave AAAA-MM-DD → { casos, emAberto, emAnalise, fechado }
+  // ── Dimensões categóricas disponíveis para análise ──
+  // Cada uma vira um gráfico sob demanda no seletor "Analisar por", sem
+  // precisar de código específico por coluna.
+  const dimensoes = [];
+  // Colunas que o ADM mapeou mas que NÃO existem mais no cabeçalho da
+  // origem. A leitura continua (Data e Status bastam para o painel), mas o
+  // nome é reportado para a tela avisar — antes a dimensão sumia calada.
+  const colunasAusentes = [];
+  const registrarDimensao = function(rotulo, nomeColuna, fixa) {
+    if (!nomeColuna) return;
+    const idx = indiceColunaOp_(cabecalhoBruto, nomeColuna);
+    if (idx === -1) {
+      if (colunasAusentes.indexOf(nomeColuna) === -1) colunasAusentes.push(nomeColuna);
+      return;
+    }
+    if (dimensoes.some(function(d) { return d.idx === idx; })) return;
+    dimensoes.push({ chave: nomeColuna, rotulo: rotulo, idx: idx, fixa: !!fixa, contagem: {} });
+  };
+  registrarDimensao('Assunto', cfg.colunaAssunto, true);
+  registrarDimensao('Subassunto', cfg.colunaSubassunto, true);
+  registrarDimensao('Quem analisou', cfg.colunaAnalista, true);
+  registrarDimensao('Status', cfg.colunaStatus, true);
+  (cfg.colunasExtras || []).forEach(function(nome) { registrarDimensao(nome, nome, false); });
+
+  const mapa = mapaStatusOp_(cfg);
+  const inicio = String(periodo.inicio || '');
+  const fim = String(periodo.fim || '');
+
+  const porData = {};
   const labelPorChave = {};
+  const distribuicaoStatus = {};
+  const naoMapeados = {};
+  let totalCasos = 0;
   let ultimaData = null;    // forward-fill de células mescladas na coluna Data
+
   for (let i = linhaCabecalho + 1; i < valores.length; i++) {
     const linha = valores[i];
-    // Linha completamente vazia → ignora.
-    const vazia = linha.every(function(c) { return c === '' || c === null || c === undefined; });
-    if (vazia) continue;
+    if (linhaVaziaOp_(linha)) continue;
 
     const dataNorm = normalizarDataOp_(linha[idxData]);
     if (dataNorm) ultimaData = dataNorm;     // atualiza a data corrente
     const data = ultimaData;                 // usa a última válida (célula mesclada)
     const statusTxt = String(linha[idxStatus] === undefined || linha[idxStatus] === null ? '' : linha[idxStatus]).trim();
-    // Sem data válida ou sem status → linha sem conteúdo útil: ignora.
-    if (!data || !statusTxt) continue;
+    if (!data || !statusTxt) continue;       // linha sem conteúdo útil
+
+    // Filtro de período (chave AAAA-MM-DD é comparável como texto).
+    if (inicio && data.chave < inicio) continue;
+    if (fim && data.chave > fim) continue;
 
     if (!porData[data.chave]) {
-      porData[data.chave] = { casos: 0, emAberto: 0, emAnalise: 0, fechado: 0 };
+      porData[data.chave] = { casos: 0, emAberto: 0, emAnalise: 0, fechado: 0, naoClassificado: 0 };
       labelPorChave[data.chave] = data.label;
     }
+    const grupo = classificarStatusOp_(statusTxt, mapa);
     porData[data.chave].casos++;
-    porData[data.chave][classificarStatusOp_(statusTxt)]++;
+    porData[data.chave][grupo]++;
+    totalCasos++;
+
+    distribuicaoStatus[statusTxt] = (distribuicaoStatus[statusTxt] || 0) + 1;
+    if (grupo === 'naoClassificado') {
+      naoMapeados[statusTxt] = (naoMapeados[statusTxt] || 0) + 1;
+    }
+
+    // Uma passada só alimenta TODAS as dimensões.
+    for (let d = 0; d < dimensoes.length; d++) {
+      const dim = dimensoes[d];
+      let v = linha[dim.idx];
+      v = String(v === undefined || v === null ? '' : v).trim();
+      if (!v) v = '(não informado)';
+      dim.contagem[v] = (dim.contagem[v] || 0) + 1;
+    }
   }
 
-  // ── Ordena as datas cronologicamente (chave AAAA-MM-DD é ordenável) ──
+  // ── Séries ordenadas cronologicamente (chave AAAA-MM-DD é ordenável) ──
   const chaves = Object.keys(porData).sort();
   const datas = chaves.map(function(chave) {
     return { chave: chave, label: labelPorChave[chave] };
   });
   const indicadores = emptyIndicadoresOp_();
+  const totais = { casos: 0, emAberto: 0, emAnalise: 0, fechado: 0, naoClassificado: 0 };
   chaves.forEach(function(chave) {
-    indicadores.casos[chave] = porData[chave].casos;
-    indicadores.emAberto[chave] = porData[chave].emAberto;
-    indicadores.emAnalise[chave] = porData[chave].emAnalise;
-    indicadores.fechado[chave] = porData[chave].fechado;
+    ['casos', 'emAberto', 'emAnalise', 'fechado', 'naoClassificado'].forEach(function(campo) {
+      indicadores[campo][chave] = porData[chave][campo];
+      totais[campo] += porData[chave][campo];
+    });
   });
 
-  const resultado = { datas: datas, indicadores: indicadores, atualizadoEm: toIso_(new Date()) };
-  try {
-    const json = JSON.stringify(resultado);
-    if (json.length <= 100000) cache.put(INDIC_OP_CACHE_KEY_, json, CONFIG.CACHE_TTL);
-  } catch (e) { Logger.log('[IndicOp] Falha ao cachear: ' + e.message); }
+  const categorias = {};
+  dimensoes.forEach(function(dim) {
+    categorias[dim.chave] = rankearOp_(dim.contagem, totalCasos);
+  });
+
+  const resultado = {
+    datas: datas,
+    indicadores: indicadores,
+    totais: totais,
+    totalCasos: totalCasos,
+    volumePorDia: chaves.map(function(chave) {
+      return { rotulo: labelPorChave[chave], valor: porData[chave].casos };
+    }),
+    distribuicaoStatus: rankearOp_(distribuicaoStatus, totalCasos),
+    statusNaoMapeados: rankearOp_(naoMapeados, totalCasos).slice(0, 20),
+    categorias: categorias,
+    colunasAnalise: dimensoes.map(function(d) { return { chave: d.chave, rotulo: d.rotulo }; }),
+    colunasAusentes: colunasAusentes,
+    periodo: { inicio: inicio, fim: fim },
+    atualizadoEm: toIso_(new Date())
+  };
+
+  guardarCacheIndicOp_(cacheKey, resultado);
   return resultado;
+}
+
+/** Resultado consolidado vazio (aba de origem sem nenhuma linha). */
+function resultadoVazioOp_(cfg) {
+  return {
+    datas: [], indicadores: emptyIndicadoresOp_(),
+    totais: { casos: 0, emAberto: 0, emAnalise: 0, fechado: 0, naoClassificado: 0 },
+    totalCasos: 0, volumePorDia: [], distribuicaoStatus: [], statusNaoMapeados: [],
+    categorias: {}, colunasAnalise: [], colunasAusentes: [], periodo: { inicio: '', fim: '' },
+    atualizadoEm: toIso_(new Date())
+  };
+}
+
+/**
+ * Converte {valor: quantidade} numa lista ordenada por quantidade, já com o
+ * percentual sobre o total filtrado — é o formato que o Top 5 e os gráficos
+ * consomem direto, sem recálculo no frontend.
+ *
+ * Limita a 100 fatias e agrupa a cauda em "(outros)": uma coluna categórica
+ * com milhares de valores distintos não pode inflar o payload.
+ * @param {Object} contagem - Mapa valor → quantidade.
+ * @param {number} base - Total de casos do período (base do percentual).
+ * @returns {Object[]} [{ rotulo, valor, pct }] em ordem decrescente.
+ */
+function rankearOp_(contagem, base) {
+  const itens = Object.keys(contagem).map(function(rotulo) {
+    return { rotulo: rotulo, valor: contagem[rotulo] };
+  }).sort(function(a, b) {
+    return b.valor - a.valor || a.rotulo.localeCompare(b.rotulo, 'pt-BR');
+  });
+
+  const LIMITE = 100;
+  let lista = itens;
+  if (itens.length > LIMITE) {
+    const cabeca = itens.slice(0, LIMITE);
+    const resto = itens.slice(LIMITE).reduce(function(soma, i) { return soma + i.valor; }, 0);
+    cabeca.push({ rotulo: '(outros)', valor: resto });
+    lista = cabeca;
+  }
+
+  const divisor = Number(base) > 0 ? Number(base) : 0;
+  return lista.map(function(i) {
+    return {
+      rotulo: i.rotulo,
+      valor: i.valor,
+      pct: divisor ? Math.round((i.valor / divisor) * 1000) / 10 : 0
+    };
+  });
+}
+
+/** Hash curto e estável, só para compor chave de cache (não é segurança). */
+function hashCurto_(texto) {
+  let h = 5381;
+  const s = String(texto);
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) & 0x7fffffff;
+  }
+  return h.toString(36);
+}
+
+/**
+ * Grava o consolidado no cache e mantém um ÍNDICE das chaves em uso, para
+ * que salvar a configuração consiga limpar todas as variações de período.
+ */
+function guardarCacheIndicOp_(cacheKey, resultado) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const json = JSON.stringify(resultado);
+    if (json.length > 100000) {
+      Logger.log('[IndicOp] Consolidado grande demais para cache: ' + json.length + ' bytes');
+      return;
+    }
+    cache.put(cacheKey, json, CONFIG.CACHE_TTL);
+
+    const indiceKey = INDIC_OP_CACHE_KEY_ + '_INDICE';
+    let chaves = [];
+    try {
+      const bruto = cache.get(indiceKey);
+      if (bruto) chaves = JSON.parse(bruto) || [];
+    } catch (e) { chaves = []; }
+    if (chaves.indexOf(cacheKey) === -1) {
+      chaves.push(cacheKey);
+      if (chaves.length > 40) chaves = chaves.slice(-40);
+      cache.put(indiceKey, JSON.stringify(chaves), CONFIG.CACHE_TTL);
+    }
+  } catch (e) {
+    Logger.log('[IndicOp] Falha ao cachear: ' + e.message);
+  }
 }
 
 /**
@@ -1652,22 +2048,53 @@ function getIndicadoresOperacionais(options) {
   if (!cfg.habilitado) {
     return { habilitado: false, abaNome: cfg.abaNome };
   }
-  const force = !!(options && options.forceRefresh);
-  const consolidado = consolidarIndicadoresOp_(cfg, force);
+  const opts = options || {};
+  const force = !!opts.forceRefresh;
+  const periodo = {
+    inicio: /^\d{4}-\d{2}-\d{2}$/.test(String(opts.inicio || '')) ? String(opts.inicio) : '',
+    fim: /^\d{4}-\d{2}-\d{2}$/.test(String(opts.fim || '')) ? String(opts.fim) : ''
+  };
+  const consolidado = consolidarIndicadoresOp_(cfg, force, periodo);
 
   // Linha manual "Fora da SLA" (persistida por data na aba IndicadoresSLA).
+  // Comportamento preservado: o valor sobrevive à releitura da origem.
   const foraSLA = {};
+  let totalForaSLA = 0;
   getAll(CONFIG.SHEET_NAMES.INDICADORES_SLA).forEach(function(reg) {
     const chave = String(reg.Data || '').trim();
-    if (chave) foraSLA[chave] = Number(reg.ForaSLA) || 0;
+    if (!chave) return;
+    const valor = Number(reg.ForaSLA) || 0;
+    foraSLA[chave] = valor;
+    // O total só soma as datas que estão no período exibido.
+    if (periodo.inicio && chave < periodo.inicio) return;
+    if (periodo.fim && chave > periodo.fim) return;
+    totalForaSLA += valor;
   });
 
   return {
     habilitado: true,
     abaNome: cfg.abaNome,
+    // Só ADM configura a fonte; o Supervisor apenas visualiza.
+    podeConfigurar: isAdminProfile_(getActor_().perfil),
     datas: consolidado.datas,
     indicadores: consolidado.indicadores,
     foraSLA: foraSLA,
+    totais: consolidado.totais,
+    totalCasos: consolidado.totalCasos,
+    totalForaSLA: totalForaSLA,
+    volumePorDia: consolidado.volumePorDia,
+    distribuicaoStatus: consolidado.distribuicaoStatus,
+    statusNaoMapeados: consolidado.statusNaoMapeados,
+    categorias: consolidado.categorias,
+    colunasAnalise: consolidado.colunasAnalise,
+    colunasAusentes: consolidado.colunasAusentes || [],
+    mapeamento: {
+      assunto: cfg.colunaAssunto,
+      subassunto: cfg.colunaSubassunto,
+      analista: cfg.colunaAnalista,
+      status: cfg.colunaStatus
+    },
+    periodo: consolidado.periodo,
     atualizadoEm: consolidado.atualizadoEm
   };
 }

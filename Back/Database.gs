@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Pelitero Labs Prisma RA — Sistema de Gestão de Atendimentos
+ * PRISMA Gestão Operacional (Pelitero Labs) — Sistema de Gestão de Atendimentos
  * ============================================================================
  * Arquivo: Database.gs
  * Descrição: Camada de acesso a dados (Data Access Layer).
@@ -817,6 +817,38 @@ function getCacheKey(sheetName) {
 }
 
 /**
+ * MEMO POR EXECUÇÃO (otimização de leitura).
+ *
+ * Guarda, em memória, o resultado já lido de cada aba durante UMA única
+ * execução do Apps Script. Motivo: numa mesma requisição a mesma aba é
+ * lida várias vezes (ex.: getBootstrapData lê "Usuários" em activeSorted_
+ * e de novo em getActor_). Sem o memo, cada repetição custa uma ida ao
+ * CacheService (chamada de rede) mais um JSON.parse da aba INTEIRA.
+ *
+ * Por que é seguro: o tempo de vida deste memo é ESTRITAMENTE MENOR que o
+ * do cache de 5 minutos que já existe — ele nasce e morre dentro de uma
+ * execução, e é limpo exatamente pelas mesmas funções (invalidateCache /
+ * invalidateAllCache) que toda gravação já chama. Ou seja, qualquer
+ * leitura que hoje é correta com o CacheService continua correta.
+ *
+ * Não guarda cópia defensiva de propósito: o único consumidor é getAll(),
+ * que apenas LÊ as linhas e constrói objetos novos, sem alterar o array.
+ */
+var SHEET_DATA_MEMO_ = {};
+
+/**
+ * Remove uma aba (ou todas) do memo de execução.
+ * @param {string} [sheetName] - Aba a esquecer. Sem argumento, limpa tudo.
+ */
+function limparMemoExecucao_(sheetName) {
+  if (sheetName === undefined) {
+    SHEET_DATA_MEMO_ = {};
+    return;
+  }
+  delete SHEET_DATA_MEMO_[sheetName];
+}
+
+/**
  * Chave de cache usada por versões anteriores (sem SCHEMA_VERSION).
  * Mantida apenas para LIMPEZA durante a atualização — nunca para leitura.
  * @param {string} sheetName - Nome da planilha
@@ -835,6 +867,7 @@ function getLegacyCacheKey_(sheetName) {
  */
 function invalidateCache(sheetName) {
   try {
+    limparMemoExecucao_(sheetName);
     const cache = CacheService.getScriptCache();
     cache.removeAll([getCacheKey(sheetName), getLegacyCacheKey_(sheetName)]);
     Logger.log('Cache invalidado para: ' + sheetName);
@@ -848,6 +881,7 @@ function invalidateCache(sheetName) {
  */
 function invalidateAllCache() {
   try {
+    limparMemoExecucao_();
     const cache = CacheService.getScriptCache();
     const keys = [];
     Object.values(CONFIG.SHEET_NAMES).forEach(function(name) {
@@ -919,6 +953,13 @@ function getSheetData(sheetName, forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = getCacheKey(sheetName);
 
+  // ── 0. Memo desta execução (sem rede, sem JSON.parse) ──
+  // Serve as releituras da MESMA aba dentro da MESMA requisição.
+  // forceRefresh ignora o memo, exatamente como ignora o cache.
+  if (!forceRefresh && Object.prototype.hasOwnProperty.call(SHEET_DATA_MEMO_, sheetName)) {
+    return SHEET_DATA_MEMO_[sheetName];
+  }
+
   // ── 1. Tenta o cache (somente se não for refresh forçado) ──
   if (!forceRefresh) {
     try {
@@ -926,6 +967,7 @@ function getSheetData(sheetName, forceRefresh) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (isCacheValido_(parsed, sheetName)) {
+          SHEET_DATA_MEMO_[sheetName] = parsed;
           return parsed;
         }
         // Cache inválido/incompatível: descarta e segue para o Sheets.
@@ -951,10 +993,12 @@ function getSheetData(sheetName, forceRefresh) {
       }
 
       if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+        SHEET_DATA_MEMO_[sheetName] = [];
         return []; // aba realmente vazia (sem cabeçalho): não há o que ler
       }
 
       const data = sheet.getDataRange().getValues();
+      SHEET_DATA_MEMO_[sheetName] = data;
 
       // ── 3. Reabastece o cache (limite de 100KB por chave) ──
       try {
