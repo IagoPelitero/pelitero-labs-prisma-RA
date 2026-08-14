@@ -61,6 +61,58 @@ var SERVICE_CONTEXT_ = {};
  * @returns {Object} Ator autenticado { id, email, nome, perfil, equipe }.
  * @throws {Error} 'AUTH: ...' quando o e-mail não está cadastrado/ativo.
  */
+/**
+ * Localiza o usuário ativo pelo e-mail na aba "Usuários" do modelo 4.x.
+ * @param {string} email - E-mail da conta Google autenticada.
+ * @returns {Object|null} Registro do usuário, ou null.
+ */
+function resolverUsuarioLegado_(email) {
+  return getAll(CONFIG.SHEET_NAMES.USUARIOS).find(function(item) {
+    return normalizeText_(item.Email) === normalizeText_(email) && isTrue_(item.Ativo);
+  }) || null;
+}
+
+/**
+ * Localiza o usuário ativo pelo e-mail na aba "Usuários" do PGO 5.0 e
+ * resolve o PERFIL a partir de NivelAcessoId → Configurações
+ * (Tipo = 'NIVEL_ACESSO'), devolvendo o registro no mesmo formato que o
+ * restante do sistema já espera (campo "Perfil").
+ *
+ * ESCOPO DESTA ETAPA: é apenas a leitura mínima que mantém o login
+ * funcionando sobre a base nova. A matriz completa de cargos e níveis de
+ * acesso é assunto de uma etapa posterior — por isso, quando o nível não
+ * puder ser resolvido, o perfil cai em "Analista" (menor privilégio), nunca
+ * em algo mais permissivo.
+ *
+ * @param {string} email - E-mail da conta Google autenticada.
+ * @returns {Object|null} Registro compatível { Id, Nome, Email, Perfil, Equipe }.
+ */
+function resolverUsuarioPGO5_(email) {
+  const usuario = pgo5Ler(PGO5.SHEET_NAMES.USUARIOS).find(function(item) {
+    return normalizeText_(item.Email) === normalizeText_(email) && isTrue_(item.Ativo);
+  });
+  if (!usuario) return null;
+
+  let perfil = '';
+  const nivelId = String(usuario.NivelAcessoId || '').trim();
+  if (nivelId) {
+    const nivel = pgo5Ler(PGO5.SHEET_NAMES.CONFIGURACOES).find(function(cfg) {
+      // normalizeText_ preserva o "_", então o Tipo gravado é 'NIVEL_ACESSO'.
+      return String(cfg.Id || '').trim().toUpperCase() === nivelId.toUpperCase() &&
+        normalizeText_(cfg.Tipo) === 'nivel_acesso';
+    });
+    if (nivel) perfil = String(nivel.Nome || '').trim();
+  }
+
+  return {
+    Id: usuario.Id,
+    Nome: usuario.Nome,
+    Email: usuario.Email,
+    Perfil: perfil || 'Analista',   // sem nível resolvido → menor privilégio
+    Equipe: usuario.Equipe
+  };
+}
+
 function requireAuth_() {
   ensureDatabaseReady();
   if (SERVICE_CONTEXT_.actor && SERVICE_CONTEXT_.authenticated) return SERVICE_CONTEXT_.actor;
@@ -68,9 +120,12 @@ function requireAuth_() {
   let email = '';
   try { email = Session.getActiveUser().getEmail() || ''; } catch (e) { email = ''; }
 
-  const user = email ? getAll(CONFIG.SHEET_NAMES.USUARIOS).find(function(item) {
-    return normalizeText_(item.Email) === normalizeText_(email) && isTrue_(item.Ativo);
-  }) : null;
+  // A aba "Usuários" existe nos DOIS schemas, com colunas diferentes. Numa
+  // base PGO 5.0 o perfil não vem de uma coluna "Perfil" e sim de
+  // NivelAcessoId → Configurações, então a leitura precisa ser específica.
+  const user = email
+    ? (estruturaEhPGO5_() ? resolverUsuarioPGO5_(email) : resolverUsuarioLegado_(email))
+    : null;
 
   if (!user) {
     throw new Error('AUTH: Seu e-mail não está cadastrado para utilizar o ' + CONFIG.APP.NOME_CURTO + '. Entre em contato com o Administrador para solicitar seu acesso.');

@@ -158,6 +158,15 @@ function ensureDatabaseReady() {
   // Nenhuma trava é adquirida aqui — leitura de propriedade é barata.
   if (properties.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) === CONFIG.SCHEMA_VERSION) return;
 
+  // BANCO PGO 5.0: a estrutura nova é criada por inicializarPGO5(), nunca
+  // automaticamente. Sem esta guarda, abrir o sistema sobre uma base 5.0
+  // dispararia initializeSheets() e recriaria as 11 abas do modelo 4.x ao
+  // lado das 5 novas — exatamente o que a fundação não pode fazer.
+  if (estruturaEhPGO5_()) {
+    Logger.log('[PGO5] Base 5.0 detectada — inicialização do esquema 4.x ignorada.');
+    return;
+  }
+
   // PROTEÇÃO CONTRA MIGRAÇÃO CONCORRENTE:
   // sem trava, dois usuários abrindo o sistema ao mesmo tempo logo após
   // uma atualização executariam initializeSheets() em paralelo sobre as
@@ -817,6 +826,55 @@ function getCacheKey(sheetName) {
 }
 
 /**
+ * Pergunta ao Pgo5.gs se estamos sobre um banco 5.0, SEM criar dependência
+ * dura entre os arquivos.
+ *
+ * Por que a checagem de tipo: no Apps Script todos os .gs compartilham o
+ * mesmo escopo, mas um projeto publicado pela metade (Database.gs novo,
+ * Pgo5.gs ainda não enviado) faria esta chamada estourar em TODA requisição
+ * e o sistema 4.x não abriria mais. Na dúvida, responde "não é 5.0" e o
+ * comportamento legado — que é o que existe hoje — segue intacto.
+ * @returns {boolean} true somente com Pgo5.gs presente e base 5.0 detectada.
+ */
+function estruturaEhPGO5_() {
+  if (typeof emBasePGO5_ !== 'function') return false;
+  try {
+    return emBasePGO5_();
+  } catch (e) {
+    Logger.log('[PGO5] Detecção de estrutura indisponível: ' + e.message);
+    return false;
+  }
+}
+
+/**
+ * true quando a aba pedida pertence SOMENTE ao modelo 4.x e o sistema está
+ * rodando sobre um banco PGO 5.0, onde ela não existe.
+ *
+ * "Usuários" e "Atendimentos" ficam de fora da lista de propósito: os dois
+ * nomes existem nos dois schemas, então nunca podem ser tratados como
+ * ausentes por esta regra.
+ * @param {string} sheetName - Nome da aba pedida.
+ * @returns {boolean} true se for leitura de aba legada numa base 5.0.
+ */
+function abaLegadaAusenteEmPGO5_(sheetName) {
+  if (!estruturaEhPGO5_()) return false;
+  const somenteLegado = [
+    CONFIG.SHEET_NAMES.RECLAME_AQUI,
+    CONFIG.SHEET_NAMES.SAC_PREVENTIVO,
+    CONFIG.SHEET_NAMES.CANAIS,
+    CONFIG.SHEET_NAMES.CONFIG_CAMPOS,
+    CONFIG.SHEET_NAMES.TIMELINE,
+    CONFIG.SHEET_NAMES.HISTORICO,
+    CONFIG.SHEET_NAMES.PRODUTOS,
+    CONFIG.SHEET_NAMES.CATEGORIAS,
+    CONFIG.SHEET_NAMES.SUBCATEGORIAS,
+    CONFIG.SHEET_NAMES.INDICADORES_SLA
+  ];
+  if (somenteLegado.indexOf(sheetName) === -1) return false;
+  return !getSpreadsheet().getSheetByName(sheetName);
+}
+
+/**
  * MEMO POR EXECUÇÃO (otimização de leitura).
  *
  * Guarda, em memória, o resultado já lido de cada aba durante UMA única
@@ -953,7 +1011,19 @@ function getSheetData(sheetName, forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = getCacheKey(sheetName);
 
-  // ── 0. Memo desta execução (sem rede, sem JSON.parse) ──
+  // ── 0a. Aba exclusiva do modelo 4.x sobre uma base PGO 5.0 ──
+  // Numa base 5.0 as abas antigas simplesmente não existem, porque os dados
+  // ainda não foram tombados. Isso é AUSÊNCIA DE MIGRAÇÃO, não falha de
+  // leitura: devolver [] faz as telas ainda não migradas mostrarem estado
+  // vazio em vez de um erro fatal. Vale só para abas legadas e só em base
+  // 5.0 — numa base 4.x uma aba faltando continua sendo erro.
+  if (abaLegadaAusenteEmPGO5_(sheetName)) {
+    Logger.log('[PGO5] Aba legada "' + sheetName + '" não existe na base 5.0 — ' +
+      'devolvendo vazio (dados ainda não tombados).');
+    return [];
+  }
+
+  // ── 0b. Memo desta execução (sem rede, sem JSON.parse) ──
   // Serve as releituras da MESMA aba dentro da MESMA requisição.
   // forceRefresh ignora o memo, exatamente como ignora o cache.
   if (!forceRefresh && Object.prototype.hasOwnProperty.call(SHEET_DATA_MEMO_, sheetName)) {
