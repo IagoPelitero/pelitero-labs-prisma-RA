@@ -346,14 +346,20 @@ function pgo5ValidarCabecalho_(aba, esperado) {
  *
  * É idempotente: rodar duas vezes seguidas não duplica nem altera nada.
  *
- * ⚠️ Destinada a ser executada pelo ADMINISTRADOR no editor do Apps Script,
- * como a setup() do modelo 4.x. Não altera nem remove nada existente.
+ * ⚠️ FUNÇÃO INTERNA (sufixo "_"): não é invocável pelo front-end.
+ * O Apps Script só expõe a google.script.run funções SEM "_" no fim, então
+ * este é o próprio mecanismo que impede a chamada a partir do navegador.
+ *
+ * Como usar:
+ *   - base NOVA de desenvolvimento → executar inicializarPGO5Dev() no editor
+ *     do Apps Script (não exige ADM: numa base vazia ainda não há usuários);
+ *   - base JÁ EM USO → executar inicializarPGO5Admin(), que exige perfil ADM.
  *
  * @returns {Object} Relatório SEM dados pessoais:
  *   { schemaVersion, estruturaDetectada, abasCriadas, abasJaExistentes,
  *     abasValidas, erros, sucesso }.
  */
-function inicializarPGO5() {
+function inicializarPGO5_() {
   const relatorio = {
     schemaVersion: PGO5.SCHEMA_VERSION,
     estruturaDetectada: '',
@@ -416,6 +422,64 @@ function inicializarPGO5() {
   Logger.log('[PGO5] Inicialização: ' + relatorio.abasCriadas.length + ' aba(s) criada(s), ' +
     relatorio.abasJaExistentes.length + ' já existente(s).');
   return relatorio;
+}
+
+/**
+ * (EDITOR) Inicializa uma base de DESENVOLVIMENTO nova.
+ *
+ * Sem exigência de perfil de propósito: numa planilha recém-criada ainda não
+ * existe nenhum usuário cadastrado, então pedir ADM tornaria a primeira
+ * instalação impossível. A proteção real é o contexto — esta função só
+ * roda a partir do editor do Apps Script, nunca pelo Web App, porque
+ * chama a implementação interna e recusa executar sobre uma base que já
+ * tenha usuários cadastrados.
+ *
+ * Aponte a planilha sintética pela Script Property do projeto
+ * (configurarPlanilha('<id>')). NUNCA versione esse id.
+ *
+ * @returns {Object} Relatório da inicialização + do seed estrutural.
+ */
+function inicializarPGO5Dev() {
+  const jaTemUsuarios = pgo5PossuiUsuarios_();
+  if (jaTemUsuarios) {
+    throw new Error('PGO5: esta base já possui usuários cadastrados. ' +
+      'Use inicializarPGO5Admin() (exige perfil ADM) em vez da inicialização de desenvolvimento.');
+  }
+  const relatorio = inicializarPGO5_();
+  if (relatorio.sucesso) relatorio.seed = pgo5AplicarSeedEstrutural_();
+  return relatorio;
+}
+
+/**
+ * (ADM) Reexecuta a inicialização sobre uma base já em uso — por exemplo
+ * para recriar uma aba do schema 5.0 removida por engano.
+ * Continua sendo não-destrutiva e idempotente.
+ * @returns {Object} Relatório da inicialização + do seed estrutural.
+ */
+function inicializarPGO5Admin() {
+  requireAuth_();
+  requireAdmin_();
+  const relatorio = inicializarPGO5_();
+  if (relatorio.sucesso) relatorio.seed = pgo5AplicarSeedEstrutural_();
+  return relatorio;
+}
+
+/**
+ * true quando a aba Usuários do PGO 5.0 já tem pelo menos uma linha.
+ * Usado para impedir que a inicialização "de desenvolvimento" seja aplicada
+ * a uma base que já está em uso.
+ * @returns {boolean}
+ */
+function pgo5PossuiUsuarios_() {
+  try {
+    const ss = getSpreadsheet();
+    const aba = ss.getSheetByName(PGO5.SHEET_NAMES.USUARIOS);
+    if (!aba) return false;
+    if (!pgo5ValidarCabecalho_(aba, pgo5Colunas_(PGO5.SHEET_NAMES.USUARIOS)).valido) return false;
+    return aba.getLastRow() > 1;
+  } catch (e) {
+    return false;
+  }
 }
 
 // ============================================================================

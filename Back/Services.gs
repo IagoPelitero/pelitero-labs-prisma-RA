@@ -465,6 +465,13 @@ function getAtendimentoSheetNames_() {
  *        diretamente (usado pelo fallback automático do frontend).
  */
 function getActiveAtendimentos_(forceRefresh, tolerante) {
+  // PONTE PGO 5.0: numa base nova os atendimentos vivem na aba única
+  // "Atendimentos", com IDs no lugar de nomes. Convertê-los aqui, no
+  // formato que o restante do sistema já consome, faz Dashboard, Relatórios
+  // e Indicadores funcionarem sem reescrever nenhum deles — a adaptação
+  // visual definitiva é assunto de uma etapa posterior.
+  if (estruturaEhPGO5_()) return pgo5AtendimentosComoLegado_();
+
   const sheetNames = getAtendimentoSheetNames_();
   let records = [];
   const falhas = [];
