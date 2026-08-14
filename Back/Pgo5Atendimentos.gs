@@ -580,8 +580,7 @@ function listarAtendimentosPGO5_() {
  * funcionando sem serem reescritos: eles recebem exatamente os campos que
  * já sabem consumir. A adaptação visual definitiva é de outra etapa.
  *
- * Cliente e CPF vêm de ValoresAtendimento (não têm coluna no 5.0) e entram
- * no registro pelos mesmos nomes de antes.
+ * Cliente e CPF vêm das colunas estruturais de Atendimentos.
  *
  * @returns {Object[]} Registros no formato legado.
  */
@@ -615,11 +614,9 @@ function pgo5AtendimentosComoLegado_() {
     const respId = String(a.ResponsavelId || '').trim();
     const criadorId = String(a.CriadoPorId || '').trim();
 
-    // Campos dinâmicos que não são Cliente/CPF viram CamposExtras, como no 4.x.
+    // Todo campo dinâmico vira CamposExtras, como no 4.x.
     const extras = {};
-    Object.keys(din).forEach(function(k) {
-      if (k !== 'cliente' && k !== 'cpf') extras[k] = din[k];
-    });
+    Object.keys(din).forEach(function(k) { extras[k] = din[k]; });
     extras._responsavelId = respId;
     extras._criadoPorId = criadorId;
 
@@ -628,8 +625,8 @@ function pgo5AtendimentosComoLegado_() {
       NumeroRA: String(a.Protocolo || ''),
       DataAbertura: a.DataAbertura,
       Canal: pgo5Rotulo_(rotulos, a.CanalId, ''),
-      Cliente: din.cliente === undefined ? '' : din.cliente,
-      CPF: din.cpf === undefined ? '' : din.cpf,
+      Cliente: String(a.Cliente || ''),
+      CPF: String(a.CPF || ''),
       Produto: pgo5Rotulo_(rotulos, a.ProdutoId, ''),
       Categoria: pgo5Rotulo_(rotulos, a.CategoriaId, ''),
       Subcategoria: pgo5Rotulo_(rotulos, a.SubcategoriaId, ''),

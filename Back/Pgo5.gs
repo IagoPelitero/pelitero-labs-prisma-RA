@@ -65,6 +65,12 @@ const COLUMNS_PGO5 = {
     'Id',
     'DataAbertura',
     'Protocolo',
+    // Cliente e CPF são ESTRUTURAIS: identificam o atendimento e são usados
+    // por busca, checagem de duplicidade e relatórios. Ficar em
+    // ValoresAtendimento obrigaria a percorrer a tabela de valores para
+    // qualquer consulta por cliente.
+    'Cliente',
+    'CPF',
     'CanalId',
     'ProdutoId',
     'CategoriaId',
@@ -440,13 +446,28 @@ function inicializarPGO5_() {
  * @returns {Object} Relatório da inicialização + do seed estrutural.
  */
 function inicializarPGO5Dev() {
-  const jaTemUsuarios = pgo5PossuiUsuarios_();
-  if (jaTemUsuarios) {
+  // GUARDA TÉCNICA (não é só convenção): o Web App é publicado como
+  // "executar como eu", então para um visitante o usuário ATIVO (quem
+  // acessa) é diferente do EFETIVO (o dono do script). No editor os dois
+  // são a mesma conta. Chamadas vindas do navegador de terceiros param aqui.
+  let ativo = '';
+  let efetivo = '';
+  try { ativo = Session.getActiveUser().getEmail() || ''; } catch (e) { ativo = ''; }
+  try { efetivo = Session.getEffectiveUser().getEmail() || ''; } catch (e) { efetivo = ''; }
+  if (!ativo || !efetivo || normalizeText_(ativo) !== normalizeText_(efetivo)) {
+    throw new Error('PGO5: a inicialização de desenvolvimento só pode ser executada pelo ' +
+      'dono do projeto, no editor do Apps Script.');
+  }
+
+  if (pgo5PossuiUsuarios_()) {
     throw new Error('PGO5: esta base já possui usuários cadastrados. ' +
       'Use inicializarPGO5Admin() (exige perfil ADM) em vez da inicialização de desenvolvimento.');
   }
   const relatorio = inicializarPGO5_();
-  if (relatorio.sucesso) relatorio.seed = pgo5AplicarSeedEstrutural_();
+  if (relatorio.sucesso) {
+    relatorio.ajusteSchema = ajustarSchemaClienteCpfPGO5_();
+    relatorio.seed = pgo5AplicarSeedEstrutural_();
+  }
   return relatorio;
 }
 
@@ -460,7 +481,11 @@ function inicializarPGO5Admin() {
   requireAuth_();
   requireAdmin_();
   const relatorio = inicializarPGO5_();
-  if (relatorio.sucesso) relatorio.seed = pgo5AplicarSeedEstrutural_();
+  if (relatorio.sucesso) {
+    relatorio.ajusteSchema = ajustarSchemaClienteCpfPGO5_();
+    relatorio.seed = pgo5AplicarSeedEstrutural_();
+    relatorio.conversaoClienteCpf = converterClienteCpfDinamicosPGO5_();
+  }
   return relatorio;
 }
 
@@ -480,6 +505,149 @@ function pgo5PossuiUsuarios_() {
   } catch (e) {
     return false;
   }
+}
+
+// ============================================================================
+// AJUSTE DE DESENVOLVIMENTO — Cliente/CPF estruturais
+// ============================================================================
+/*
+ * Durante as Etapas 1 e 2 a aba Atendimentos nasceu com 15 colunas, sem
+ * Cliente e CPF. O schema aprovado passou a ter 17. Como o 5.0 ainda não foi
+ * publicado, não há versão nova: só é preciso levar as bases SINTÉTICAS de
+ * desenvolvimento do formato antigo para o atual.
+ *
+ * Isto NÃO é tombamento: não toca em nada do 4.x e só reconhece duas formas
+ * exatas — a de 15 colunas e a de 17. Qualquer outra estrutura falha e é
+ * reportada, nunca "consertada" às cegas.
+ */
+
+/** Cabeçalho de Atendimentos usado nas Etapas 1 e 2 (antes de Cliente/CPF). */
+function pgo5AtendimentosSchemaAntigo_() {
+  return ['Id', 'DataAbertura', 'Protocolo', 'CanalId', 'ProdutoId', 'CategoriaId',
+    'SubcategoriaId', 'StatusId', 'AguardandoRetornoId', 'ResponsavelId', 'Observacoes',
+    'CriadoPorId', 'DataCriacao', 'AtualizadoPorId', 'DataAtualizacao'];
+}
+
+/**
+ * (ADM) Acrescenta Cliente e CPF à aba Atendimentos de uma base PGO 5.0 de
+ * desenvolvimento criada antes da correção de schema.
+ *
+ * Preserva todas as linhas: cada registro é remapeado pelo NOME da coluna,
+ * então nenhum valor troca de lugar. A aba não é apagada nem recriada.
+ *
+ * @returns {Object} { estado, linhasPreservadas, erro }.
+ *   estado: 'JA_ATUALIZADO' | 'CONVERTIDO' | 'ESTRUTURA_DESCONHECIDA'.
+ */
+function ajustarSchemaClienteCpfPGO5() {
+  requireAuth_();
+  requireAdmin_();
+  return ajustarSchemaClienteCpfPGO5_();
+}
+
+/** Implementação interna (também usada pelos wrappers de inicialização). */
+function ajustarSchemaClienteCpfPGO5_() {
+  const nome = PGO5.SHEET_NAMES.ATENDIMENTOS;
+  const atual = pgo5Colunas_(nome);
+  const antigo = pgo5AtendimentosSchemaAntigo_();
+
+  const aba = getSpreadsheet().getSheetByName(nome);
+  if (!aba) return { estado: 'ESTRUTURA_DESCONHECIDA', linhasPreservadas: 0, erro: 'Aba "' + nome + '" não existe.' };
+
+  if (pgo5ValidarCabecalho_(aba, atual).valido) {
+    return { estado: 'JA_ATUALIZADO', linhasPreservadas: Math.max(0, aba.getLastRow() - 1), erro: '' };
+  }
+  const conferenciaAntiga = pgo5ValidarCabecalho_(aba, antigo);
+  if (!conferenciaAntiga.valido) {
+    return {
+      estado: 'ESTRUTURA_DESCONHECIDA', linhasPreservadas: 0,
+      erro: 'A aba "' + nome + '" não está nem no formato de 15 colunas nem no de 17. ' +
+        'Nada foi alterado. Divergência: ' + conferenciaAntiga.divergencia
+    };
+  }
+
+  return withScriptLock_(function() {
+    const ultimaLinha = aba.getLastRow();
+    const dados = ultimaLinha > 1 ? aba.getRange(2, 1, ultimaLinha - 1, antigo.length).getValues() : [];
+
+    // Remapeia pelo NOME da coluna: as colunas novas nascem vazias e nenhum
+    // valor existente muda de posição.
+    const linhas = dados.map(function(linha) {
+      const registro = {};
+      antigo.forEach(function(col, i) { registro[col] = linha[i]; });
+      return atual.map(function(col) {
+        return registro[col] === undefined ? '' : registro[col];
+      });
+    });
+
+    aba.getRange(1, 1, 1, atual.length).setValues([atual]);
+    if (linhas.length > 0) aba.getRange(2, 1, linhas.length, atual.length).setValues(linhas);
+    aplicarFormatoCabecalho_(aba, atual.length);
+    limparMemoEstrutura_();
+    limparMemoExecucao_(nome);
+
+    Logger.log('[PGO5] Aba Atendimentos ajustada para 17 colunas. ' +
+      linhas.length + ' linha(s) preservada(s).');
+    return { estado: 'CONVERTIDO', linhasPreservadas: linhas.length, erro: '' };
+  });
+}
+
+/**
+ * (ADM) Move Cliente/CPF que ficaram em ValoresAtendimento para as colunas
+ * estruturais do atendimento, e remove SOMENTE essas linhas dinâmicas.
+ *
+ * Idempotente: rodar de novo não encontra nada para converter. Nenhum outro
+ * valor dinâmico é tocado.
+ *
+ * @returns {Object} { atendimentosAtualizados, valoresRemovidos }.
+ */
+function converterClienteCpfDinamicosPGO5() {
+  requireAuth_();
+  requireAdmin_();
+  return converterClienteCpfDinamicosPGO5_();
+}
+
+/** Implementação interna da conversão de Cliente/CPF dinâmicos. */
+function converterClienteCpfDinamicosPGO5_() {
+  return withScriptLock_(function() {
+    const catalogo = pgo5CatalogoBruto_();
+
+    // Só campos cujo Nome técnico é reconhecidamente cliente/cpf.
+    const alvo = {};
+    catalogo.CAMPO.forEach(function(c) {
+      const n = String(c.Nome || '').trim();
+      if (n === 'cliente' || n === 'cpf') {
+        alvo[String(c.Id || '').toUpperCase()] = n === 'cliente' ? 'Cliente' : 'CPF';
+      }
+    });
+
+    const relatorio = { atendimentosAtualizados: 0, valoresRemovidos: 0 };
+    if (Object.keys(alvo).length === 0) return relatorio;
+
+    const porAtendimento = {};
+    const aRemover = [];
+    pgo5Ler(PGO5.SHEET_NAMES.VALORES_ATENDIMENTO).forEach(function(v) {
+      const coluna = alvo[String(v.CampoId || '').toUpperCase()];
+      if (!coluna) return;
+      const at = String(v.AtendimentoId || '').trim();
+      if (!at) return;
+      if (!porAtendimento[at]) porAtendimento[at] = {};
+      porAtendimento[at][coluna] = v.Valor;
+      aRemover.push(v.Id);
+    });
+
+    Object.keys(porAtendimento).forEach(function(id) {
+      const ok = pgo5AtualizarPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, id, porAtendimento[id]);
+      if (ok) relatorio.atendimentosAtualizados++;
+    });
+    aRemover.forEach(function(id) {
+      if (pgo5ExcluirPorId(PGO5.SHEET_NAMES.VALORES_ATENDIMENTO, id)) relatorio.valoresRemovidos++;
+    });
+
+    // Nenhum valor é registrado em log: Cliente e CPF são dado pessoal.
+    Logger.log('[PGO5] Conversão Cliente/CPF: ' + relatorio.atendimentosAtualizados +
+      ' atendimento(s) atualizado(s), ' + relatorio.valoresRemovidos + ' linha(s) dinâmica(s) removida(s).');
+    return relatorio;
+  });
 }
 
 // ============================================================================

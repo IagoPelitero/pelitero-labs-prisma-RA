@@ -58,13 +58,14 @@ const PGO5_TIPOS_CAMPO = [
  * Qualquer campo cujo Nome não esteja aqui é DINÂMICO e vai para
  * ValoresAtendimento.
  *
- * "Cliente" e "CPF" NÃO aparecem nesta lista de propósito: o schema 5.0
- * aprovado não tem coluna para eles, então são campos dinâmicos — o que
- * também concentra o dado pessoal numa única tabela.
+ * Um campo cujo Nome não esteja aqui é dinâmico e vai para
+ * ValoresAtendimento — é o caso do "Resumo" do SAC Reclamação.
  */
 const PGO5_CAMPOS_ESTRUTURAIS = {
   dataAbertura: 'DataAbertura',
   protocolo: 'Protocolo',
+  cliente: 'Cliente',
+  cpf: 'CPF',
   produto: 'ProdutoId',
   categoria: 'CategoriaId',
   subcategoria: 'SubcategoriaId',
