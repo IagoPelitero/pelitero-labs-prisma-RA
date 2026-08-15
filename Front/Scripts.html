@@ -86,6 +86,7 @@ var App = {
         App.moduloIndicadoresOp = result && result.moduloIndicadoresOp ? result.moduloIndicadoresOp : {};
         // Nomes visíveis das telas definidos pelo ADM (só rótulos).
         App.nomesTelas = result && result.nomesTelas ? result.nomesTelas : {};
+        App.schemaBanco = (result && result.schemaBanco) ? result.schemaBanco : 'LEGADO';
         App.renderUser();
         App.applyRoleVisibility();
         App.aplicarNomesTelas();
@@ -167,6 +168,16 @@ var App = {
     var profile = document.getElementById('current-user-profile');
     if (name) name.textContent = this.user.nome || 'Usuário';
     if (profile) profile.textContent = this.user.perfil || 'Analista';
+  },
+
+  // Banco por trás desta instalação: 'LEGADO' (4.x) ou 'PGO5'. Vem do
+  // bootstrap; na dúvida assume 4.x, que é o comportamento já existente.
+  schemaBanco: 'LEGADO',
+
+  // true quando a instalação já roda sobre o banco PGO 5.0 — é o que faz
+  // o Novo Atendimento usar o motor dinâmico em vez do formulário antigo.
+  usandoPGO5: function() {
+    return String(this.schemaBanco || '').toUpperCase() === 'PGO5';
   },
 
   // Indica se o usuário logado é ADM (acesso total).
@@ -409,6 +420,15 @@ var App = {
     var match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (match) {
       return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    }
+    // Data SEM hora que já passou por uma serialização (ex.: "2026-08-15"
+    // virou "2026-08-15T00:00:00.000Z"). Lida como UTC, ela recuaria um dia
+    // em qualquer fuso a oeste de Greenwich — o usuário digitava 15/08 e a
+    // tabela mostrava 14/08. Meia-noite exata em UTC só acontece nesse
+    // caso: uma data com hora real do fuso do projeto nunca cai aí.
+    var soData = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T00:00:00(\.000)?Z$/);
+    if (soData) {
+      return new Date(Number(soData[1]), Number(soData[2]) - 1, Number(soData[3]));
     }
     var d = new Date(value);
     return isNaN(d.getTime()) ? null : d;

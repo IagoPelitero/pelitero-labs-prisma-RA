@@ -201,6 +201,11 @@ function getBootstrapData() {
   return {
     user: getActor_(),
     formConfig: getFormConfig_(),
+    // Qual banco está por trás desta instalação: 'LEGADO' (4.x) ou 'PGO5'.
+    // O front precisa saber para escolher entre o formulário do modelo
+    // antigo e o motor dinâmico do 5.0 — sem isso ele teria de descobrir
+    // por tentativa e erro a cada abertura de tela.
+    schemaBanco: (typeof detectarEstruturaBanco_ === 'function') ? detectarEstruturaBanco_() : 'LEGADO',
     // Rótulos visíveis das telas (personalizáveis pelo ADM). Vão para
     // TODOS os perfis — quem só visualiza precisa ver o mesmo nome. As
     // permissões de cada tela seguem inalteradas.

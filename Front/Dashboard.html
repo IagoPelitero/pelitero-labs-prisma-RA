@@ -597,6 +597,24 @@ Pages.dashboard = {
    * @returns {Object[]} Colunas { campo, label, base }.
    */
   _colunasTabela: function() {
+    // BANCO PGO 5.0: a sequência das colunas é definida pelo PO e é fixa.
+    // Cliente e CPF continuam existindo no registro (busca, duplicidade),
+    // mas ficam fora da tabela por decisão de produto.
+    if (App.usandoPGO5 && App.usandoPGO5()) {
+      return [
+        { campo: 'dataAbertura', label: 'Data', base: true },
+        { campo: '_idade', label: 'Aberto há', base: true },
+        { campo: 'numeroRA', label: 'Protocolo', base: true },
+        { campo: 'produto', label: 'Produto', base: true },
+        { campo: 'categoria', label: 'Categoria', base: true },
+        { campo: 'subcategoria', label: 'Subcategoria', base: true },
+        { campo: 'responsavel', label: 'Responsável', base: true },
+        { campo: 'situacaoPendencia', label: 'Aguardando retorno', base: true },
+        { campo: 'canal', label: 'Canal', base: true },
+        { campo: 'observacoes', label: 'Observações', base: true }
+      ];
+    }
+
     var fixas = [
       { campo: 'dataAbertura', label: 'Data', base: true },
       // Coluna virtual "Aberto há": idade do caso em dias, com badge de
@@ -640,7 +658,9 @@ Pages.dashboard = {
     if (col.campo === 'status') return Components.statusBadge(item.status, item.statusCor || null);
     if (col.campo === 'situacaoPendencia') return App.escapeHtml(item.situacaoPendencia || '—');
     if (col.campo === 'cliente') return App.escapeHtml(item.cliente || '');
-    if (col.campo === 'numeroRA') return '<strong>' + App.escapeHtml(item.numeroRA || '') + '</strong>';
+    if (col.campo === 'numeroRA') {
+      return item.numeroRA ? ('<strong>' + App.escapeHtml(item.numeroRA) + '</strong>') : '—';
+    }
 
     var valor = col.base ? item[col.campo] : (item.camposExtras || {})[col.campo];
     valor = valor === undefined || valor === null ? '' : String(valor);
@@ -833,6 +853,16 @@ Pages.dashboard = {
    */
   abrirEdicao: function(atendimento) {
     var self = this;
+
+    // BANCO PGO 5.0: o formulário é montado pela configuração do canal, e
+    // cada canal tem campos diferentes — não cabe no modal de campos fixos
+    // do 4.x. A edição abre na tela do motor dinâmico, já no canal salvo.
+    // Lá também não existe justificativa: ela foi removida da edição.
+    if (App.usandoPGO5 && App.usandoPGO5()) {
+      App.navigateTo('novoAtendimento', atendimento.id);
+      return;
+    }
+
     Components.showLoading('Carregando atendimento...');
     google.script.run
       .withSuccessHandler(function(result) {
@@ -1011,20 +1041,30 @@ Pages.dashboard = {
   excluir: function(id) {
     var self = this;
     Components.showLoading('Excluindo atendimento...');
-    google.script.run
-      .withSuccessHandler(function(result) {
-        Components.hideLoading();
-        if (result && result.success) {
-          Components.toast('Atendimento excluído com sucesso.', 'success');
-          self.carregarDados();
-        } else {
-          Components.toast((result && result.message) || 'Erro ao excluir atendimento.', 'error');
-        }
-      })
-      .withFailureHandler(function(err) {
-        Components.hideLoading();
-        Components.toast('Erro ao excluir: ' + err.message, 'error');
-      })
+
+    var aoConcluir = function(result) {
+      Components.hideLoading();
+      if (result && result.success) {
+        Components.toast('Atendimento excluído com sucesso.', 'success');
+        self.carregarDados();
+      } else {
+        Components.toast((result && result.message) || 'Erro ao excluir atendimento.', 'error');
+      }
+    };
+    var aoFalhar = function(err) {
+      Components.hideLoading();
+      Components.toast('Erro ao excluir: ' + ((err && err.message) || ''), 'error');
+    };
+
+    // No PGO 5.0 a exclusão é FÍSICA e remove também os ValoresAtendimento
+    // daquele registro — eles pertencem só a ele. Nenhuma configuração é
+    // tocada. O caminho 4.x segue com a exclusão lógica de sempre.
+    if (App.usandoPGO5 && App.usandoPGO5()) {
+      google.script.run.withSuccessHandler(aoConcluir).withFailureHandler(aoFalhar)
+        .excluirAtendimentoPGO5(id);
+      return;
+    }
+    google.script.run.withSuccessHandler(aoConcluir).withFailureHandler(aoFalhar)
       .excluirAtendimento(id);
   }
 };

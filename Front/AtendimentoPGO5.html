@@ -1,0 +1,577 @@
+<script>
+/* ============================================================
+   PRISMA Gestão Operacional (Pelitero Labs) — AtendimentoPGO5.html
+   Motor de formulário dinâmico do PGO 5.0
+   Desenvolvido por Pelitero Labs.
+   ------------------------------------------------------------
+   GUIA PARA QUEM ESTÁ COMEÇANDO
+
+   No modelo 4.x cada canal tinha um formulário praticamente fixo no
+   HTML. No PGO 5.0 existe UM ÚNICO MOTOR: a aba "Formulário" da planilha
+   diz quais campos cada canal tem, e este arquivo apenas desenha o que
+   vier de lá.
+
+     getFormularioPGO5()  →  canal escolhido  →  campos daquele canal
+                          →  renderizador genérico  →  inputs na tela
+
+   Cadastrar um quarto canal com campos configurados passa a funcionar
+   sem tocar em código.
+
+   NÃO existe formulário de reserva escrito aqui. Se um canal não tiver
+   campos configurados, a tela diz isso — nunca inventa campos.
+   ============================================================ */
+
+var FormularioPGO5 = {
+
+  /**
+   * Campos que possuem coluna própria na aba Atendimentos.
+   * A chave é o NOME TÉCNICO do campo — nunca o rótulo, que o ADM pode
+   * renomear à vontade ("CPF" → "CPF do Cliente") sem quebrar nada.
+   */
+  ESTRUTURAIS: {
+    dataAbertura: 'DataAbertura', protocolo: 'Protocolo',
+    cliente: 'Cliente', cpf: 'CPF',
+    produto: 'ProdutoId', categoria: 'CategoriaId', subcategoria: 'SubcategoriaId',
+    status: 'StatusId', aguardandoRetorno: 'AguardandoRetornoId',
+    responsavel: 'ResponsavelId', observacoes: 'Observacoes'
+  },
+
+  /** Id do elemento de um campo (prefixo evita colisão com o form 4.x). */
+  idDoCampo: function(campo) { return 'pgo5-campo-' + campo.nome; },
+
+  /** Todas as categorias ativas, de todos os produtos, sem repetir. */
+  _todasCategorias: function(hierarquia) {
+    var mapa = (hierarquia && hierarquia.categoriasPorProduto) || {};
+    var saida = [];
+    Object.keys(mapa).forEach(function(produtoId) {
+      (mapa[produtoId] || []).forEach(function(c) { saida.push(c); });
+    });
+    return saida;
+  },
+
+  /**
+   * Opções que um campo deve oferecer.
+   *
+   * Produto, Categoria, Subcategoria, Status, Aguardando e Responsável
+   * são alimentados pelo CATÁLOGO (a cascata é resolvida aqui no
+   * navegador). Os demais seletores usam as opções configuradas no
+   * próprio campo. Nenhuma lista é fixa no código.
+   *
+   * @param {Object} campo - Campo vindo do backend.
+   * @param {Object} dados - Resposta de getFormularioPGO5.
+   * @param {Object} estado - { produtoId, categoriaId } já escolhidos.
+   * @returns {Object[]} [{ id, rotulo }].
+   */
+  opcoesDoCampo: function(campo, dados, estado) {
+    var h = dados.hierarquia || {};
+    var e = estado || {};
+    switch (campo.nome) {
+      case 'produto': return h.produtos || [];
+      case 'categoria':
+        // Nem todo canal tem Produto no formulário — o SAC Reclamação, por
+        // exemplo, começa direto em Categoria. Sem Produto para filtrar,
+        // oferecemos TODAS as categorias ativas; do contrário o campo
+        // ficaria permanentemente vazio e inutilizável.
+        if (!e.temProduto) return this._todasCategorias(h);
+        return e.produtoId ? ((h.categoriasPorProduto || {})[e.produtoId] || []) : [];
+      case 'subcategoria':
+        return e.categoriaId ? ((h.subcategoriasPorCategoria || {})[e.categoriaId] || []) : [];
+      case 'status': return dados.status || [];
+      case 'aguardandoRetorno': return dados.aguardando || [];
+      case 'responsavel': return dados.responsaveis || [];
+      default: return campo.opcoes || [];
+    }
+  },
+
+  /**
+   * Desenha UM campo, qualquer que seja o tipo.
+   * @param {Object} campo - Campo do backend.
+   * @param {*} valor - Valor atual (edição) ou '' (criação).
+   * @param {Object} dados - Resposta de getFormularioPGO5.
+   * @param {Object} estado - Seleções da cascata.
+   * @returns {string} HTML do grupo do campo.
+   */
+  campoHtml: function(campo, valor, dados, estado) {
+    var id = this.idDoCampo(campo);
+    var obrigatorio = campo.obrigatorio ? ' <span class="required">*</span>' : '';
+    var v = (valor === undefined || valor === null) ? '' : valor;
+    if (v === '' && campo.valorPadrao) v = campo.valorPadrao;
+
+    var html = '<div class="form-group" data-campo="' + App.escapeHtml(campo.nome) + '">';
+    html += '<label class="form-label" for="' + id + '">' +
+      App.escapeHtml(campo.rotulo) + obrigatorio + '</label>';
+    html += this.controleHtml(campo, v, dados, estado, id);
+    html += '</div>';
+    return html;
+  },
+
+  /** Desenha apenas o controle de entrada, conforme o tipo. */
+  controleHtml: function(campo, v, dados, estado, id) {
+    var ph = campo.placeholder ? ' placeholder="' + App.escapeHtml(campo.placeholder) + '"' : '';
+    var req = campo.obrigatorio ? ' required' : '';
+    var val = App.escapeHtml(String(v));
+    var tipo = campo.tipo;
+
+    // ── Campos de escolha ──
+    if (tipo === 'select' || tipo === 'multiselect' || tipo === 'radio') {
+      var opcoes = this.opcoesDoCampo(campo, dados, estado);
+
+      if (tipo === 'radio') {
+        if (!opcoes.length) return '<div class="pgo5-sem-opcoes">Nenhuma opção disponível.</div>';
+        var r = '<div class="pgo5-radio-grupo" id="' + id + '">';
+        opcoes.forEach(function(o, i) {
+          var oid = id + '-' + i;
+          r += '<label class="pgo5-radio" for="' + oid + '">' +
+            '<input type="radio" id="' + oid + '" name="' + id + '" value="' + App.escapeHtml(o.id) + '"' +
+            (String(v) === String(o.id) ? ' checked' : '') + '> ' + App.escapeHtml(o.rotulo) + '</label>';
+        });
+        return r + '</div>';
+      }
+
+      var multi = tipo === 'multiselect';
+      // multiselect chega como JSON de array (formato que o backend grava).
+      var selecionados = [];
+      if (multi) {
+        try { selecionados = JSON.parse(v || '[]'); } catch (e) { selecionados = []; }
+        if (!Array.isArray(selecionados)) selecionados = [];
+      }
+
+      var s = '<select class="form-control" id="' + id + '"' + req +
+        (multi ? ' multiple size="' + Math.min(6, Math.max(3, opcoes.length)) + '"' : '') + '>';
+      if (!multi) {
+        s += '<option value="">' + (opcoes.length ? 'Selecione' : 'Nenhuma opção disponível') + '</option>';
+      }
+      opcoes.forEach(function(o) {
+        var sel = multi
+          ? (selecionados.indexOf(String(o.id)) !== -1)
+          : (String(v) === String(o.id));
+        s += '<option value="' + App.escapeHtml(o.id) + '"' + (sel ? ' selected' : '') + '>' +
+          App.escapeHtml(o.rotulo) + '</option>';
+      });
+      return s + '</select>';
+    }
+
+    if (tipo === 'checkbox') {
+      var marcado = (v === true || String(v).toLowerCase() === 'true');
+      return '<label class="pgo5-checkbox"><input type="checkbox" id="' + id + '"' +
+        (marcado ? ' checked' : '') + '> ' + App.escapeHtml(campo.placeholder || 'Sim') + '</label>';
+    }
+
+    if (tipo === 'textarea') {
+      return '<textarea class="form-control" id="' + id + '" rows="3"' + ph + req + '>' + val + '</textarea>';
+    }
+
+    // ── Campos de digitação ──
+    // O type do input é só conforto de digitação: quem valida de verdade
+    // é o backend, que revalida todo valor recebido.
+    var mapaTipo = {
+      number: 'number', integer: 'number', decimal: 'number',
+      moeda: 'text', percentual: 'number',
+      date: 'date', datetime: 'datetime-local', time: 'time',
+      email: 'email', telefone: 'tel', cpf: 'text', text: 'text'
+    };
+    var htmlType = mapaTipo[tipo] || 'text';
+    var extra = '';
+    if (tipo === 'integer') extra = ' step="1"';
+    if (tipo === 'decimal' || tipo === 'percentual') extra = ' step="any"';
+    if (tipo === 'percentual') extra += ' min="0" max="100"';
+    if (tipo === 'cpf') extra = ' maxlength="14" inputmode="numeric"';
+    if (tipo === 'telefone') extra = ' maxlength="15" inputmode="numeric"';
+    // datetime-local usa "T" entre data e hora.
+    if (tipo === 'datetime') val = val.replace(' ', 'T');
+
+    return '<input class="form-control" type="' + htmlType + '" id="' + id + '" value="' + val + '"' +
+      ph + req + extra + '>';
+  },
+
+  /**
+   * Lê a tela e devolve { nomeDoCampo: valor } no formato que o backend
+   * espera. Não valida aqui: a validação final é do servidor.
+   * @param {Object[]} campos - Campos renderizados.
+   * @returns {Object} Valores coletados.
+   */
+  coletar: function(campos) {
+    var self = this;
+    var valores = {};
+    campos.forEach(function(campo) {
+      var id = self.idDoCampo(campo);
+
+      if (campo.tipo === 'radio') {
+        var marcado = document.querySelector('input[name="' + id + '"]:checked');
+        valores[campo.nome] = marcado ? marcado.value : '';
+        return;
+      }
+      var el = document.getElementById(id);
+      if (!el) { valores[campo.nome] = ''; return; }
+
+      if (campo.tipo === 'checkbox') { valores[campo.nome] = !!el.checked; return; }
+      if (campo.tipo === 'multiselect') {
+        // Array de ids — o backend grava como JSON determinístico.
+        valores[campo.nome] = Array.prototype.slice.call(el.selectedOptions || [])
+          .map(function(o) { return o.value; });
+        return;
+      }
+      valores[campo.nome] = el.value;
+    });
+    return valores;
+  },
+
+  /** true se o campo grava numa coluna própria de Atendimentos. */
+  ehEstrutural: function(nomeCampo) {
+    return Object.prototype.hasOwnProperty.call(this.ESTRUTURAIS, nomeCampo);
+  }
+};
+
+/* ============================================================
+   Pages.novoAtendimentoPGO5 — a tela em si
+   ============================================================ */
+Pages.novoAtendimentoPGO5 = {
+  state: {
+    fase: 'carregando',   // carregando | semCanais | escolherCanal | semCampos | formulario | erro
+    dados: null,          // resposta de getFormularioPGO5
+    canalId: null,
+    campos: [],
+    atendimentoId: null,  // preenchido em edição
+    valores: {},
+    historicos: [],
+    salvando: false,
+    erro: ''
+  },
+
+  /**
+   * Abre a tela. Sem id, é um atendimento novo (passa pela escolha de
+   * canal). Com id, entra direto em edição, no canal já salvo.
+   * @param {string} [atendimentoId] - Id para edição.
+   */
+  render: function(atendimentoId) {
+    var self = this;
+    self.state = {
+      fase: 'carregando', dados: null, canalId: null, campos: [],
+      atendimentoId: atendimentoId || null, valores: {}, historicos: [],
+      salvando: false, erro: ''
+    };
+    self._pintar();
+
+    // UMA chamada traz canais, campos de cada canal, hierarquia, status,
+    // aguardando e responsáveis. A cascata roda local, sem novas idas.
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.dados = dados || {};
+        if (self.state.atendimentoId) { self._carregarParaEdicao(); return; }
+        self._decidirCanal();
+      })
+      .withFailureHandler(function(err) {
+        self.state.fase = 'erro';
+        self.state.erro = (err && err.message) || 'Não foi possível carregar o formulário.';
+        self._pintar();
+      })
+      .getFormularioPGO5();
+  },
+
+  /** Aplica a regra de 0 / 1 / vários canais. */
+  _decidirCanal: function() {
+    var canais = (this.state.dados && this.state.dados.canais) || [];
+    if (canais.length === 0) { this.state.fase = 'semCanais'; this._pintar(); return; }
+    if (canais.length === 1) { this._selecionarCanal(canais[0].id); return; }
+    this.state.fase = 'escolherCanal';
+    this._pintar();
+  },
+
+  /** Fixa o canal e monta o formulário dele. */
+  _selecionarCanal: function(canalId) {
+    this.state.canalId = canalId;
+    this.state.campos = ((this.state.dados.camposPorCanal || {})[canalId]) || [];
+    this.state.fase = this.state.campos.length ? 'formulario' : 'semCampos';
+    this._pintar();
+  },
+
+  /** Carrega um atendimento existente e abre direto no canal salvo. */
+  _carregarParaEdicao: function() {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(registro) {
+        if (!registro) {
+          Components.toast('Atendimento não encontrado.', 'error');
+          App.navigateTo('dashboard');
+          return;
+        }
+        self.state.valores = registro.valores || {};
+        self.state.historicos = registro.historicos || [];
+        self.state.canalId = registro.canalId;
+        self.state.campos = ((self.state.dados.camposPorCanal || {})[registro.canalId]) || [];
+        self.state.fase = self.state.campos.length ? 'formulario' : 'semCampos';
+        self._pintar();
+      })
+      .withFailureHandler(function(err) {
+        Components.toast('Erro ao carregar atendimento: ' + ((err && err.message) || ''), 'error');
+        App.navigateTo('dashboard');
+      })
+      .obterAtendimentoPGO5(self.state.atendimentoId);
+  },
+
+  /** Desenha a fase atual. */
+  _pintar: function() {
+    var container = document.getElementById('app');
+    if (!container) return;
+    var s = this.state;
+    var titulo = s.atendimentoId
+      ? 'Editar Atendimento'
+      : App.nomeTela('novoAtendimento', 'Novo Atendimento');
+
+    var html = '<div class="page-header"><h1 class="page-title">' +
+      App.escapeHtml(titulo) + '</h1></div>';
+
+    if (s.fase === 'carregando') {
+      html += '<div class="card skeleton-loading" style="min-height:260px;"></div>';
+    } else if (s.fase === 'erro') {
+      html += '<div class="card">' + Components.emptyState('cloud_off',
+        'Não foi possível carregar o formulário.', App.escapeHtml(s.erro)) + '</div>';
+    } else if (s.fase === 'semCanais') {
+      html += '<div class="card">' + Components.emptyState('inbox',
+        'Nenhum canal está disponível para registro.',
+        App.isAdmin()
+          ? 'Cadastre ou reative um canal em Configurações para começar a registrar atendimentos.'
+          : 'Solicite ao administrador a liberação de um canal de atendimento.') + '</div>';
+    } else if (s.fase === 'escolherCanal') {
+      html += this._canaisHtml();
+    } else if (s.fase === 'semCampos') {
+      html += '<div class="card">' + Components.emptyState('build',
+        'Este canal ainda não possui formulário configurado.',
+        App.isAdmin()
+          ? 'Configure os campos deste canal em Configurações.'
+          : 'Solicite ao administrador a configuração dos campos deste canal.') +
+        (s.atendimentoId ? '' : '<div class="form-actions"><button type="button" class="btn btn-secondary" id="pgo5-trocar-canal">← Trocar canal</button></div>') +
+        '</div>';
+    } else {
+      html += this._formularioHtml();
+    }
+
+    container.innerHTML = html;
+    this._ligarEventos();
+  },
+
+  /** Cards de escolha de canal — a quantidade vem do backend. */
+  _canaisHtml: function() {
+    var canais = this.state.dados.canais || [];
+    var html = '<div class="card pgo5-escolha-canal">';
+    html += '<h2 class="pgo5-escolha-titulo">Selecione o canal do atendimento</h2>';
+    html += '<p class="pgo5-escolha-ajuda">O formulário é montado conforme o canal escolhido.</p>';
+    html += '<div class="pgo5-canais-grid">';
+    canais.forEach(function(c) {
+      html += '<button type="button" class="pgo5-canal-card" data-canal="' + App.escapeHtml(c.id) + '">' +
+        '<span class="material-icons">forum</span>' +
+        '<span class="pgo5-canal-nome">' + App.escapeHtml(c.rotulo) + '</span></button>';
+    });
+    html += '</div></div>';
+    return html;
+  },
+
+  /** O formulário montado a partir dos campos do canal. */
+  _formularioHtml: function() {
+    var s = this.state;
+    var estado = {
+      produtoId: s.valores.produto || '',
+      categoriaId: s.valores.categoria || '',
+      // Este canal tem campo Produto? Define se Categoria filtra ou lista tudo.
+      temProduto: s.campos.some(function(c) { return c.nome === 'produto'; })
+    };
+
+    var canal = (s.dados.canais || []).find(function(c) { return c.id === s.canalId; });
+    var nomeCanal = canal ? canal.rotulo : '';
+
+    var html = '<div class="card">';
+    html += '<div class="pgo5-form-cabecalho">';
+    html += '<span class="pgo5-canal-badge">' + App.escapeHtml(nomeCanal || 'Canal') + '</span>';
+    // "Trocar canal" só faz sentido antes de um atendimento existir.
+    if (!s.atendimentoId && (s.dados.canais || []).length > 1) {
+      html += '<button type="button" class="btn btn-secondary btn-sm" id="pgo5-trocar-canal">← Trocar canal</button>';
+    }
+    html += '</div>';
+
+    html += '<form id="pgo5-form" autocomplete="off"><div class="form-grid">';
+    s.campos.forEach(function(campo) {
+      // O Analista não delega: mostra o próprio nome, sem seletor editável.
+      if (campo.nome === 'responsavel' && !s.dados.podeDelegar) {
+        var eu = (s.dados.responsaveis || [])[0];
+        html += '<div class="form-group"><label class="form-label">' +
+          App.escapeHtml(campo.rotulo) + '</label>' +
+          '<input class="form-control" type="text" value="' +
+          App.escapeHtml(eu ? eu.rotulo : '') + '" disabled></div>';
+        return;
+      }
+      html += FormularioPGO5.campoHtml(campo, s.valores[campo.nome], s.dados, estado);
+    });
+    html += '</div>';
+
+    html += '<div class="form-actions">';
+    html += '<button type="button" class="btn btn-primary" id="pgo5-salvar">💾 Salvar</button>';
+    html += '<button type="button" class="btn btn-secondary" id="pgo5-cancelar">Cancelar</button>';
+    if (s.atendimentoId) {
+      html += '<button type="button" class="btn btn-danger" id="pgo5-excluir" style="margin-left:auto;">🗑 Excluir</button>';
+    }
+    html += '</div></form>';
+
+    // Valores de campos que saíram da configuração: aparecem como leitura,
+    // para o histórico do atendimento não ficar invisível.
+    if (s.historicos && s.historicos.length) {
+      html += '<div class="pgo5-historicos"><h3>Campos removidos da configuração</h3>';
+      html += '<p class="pgo5-escolha-ajuda">Preservados para consulta; não são editáveis.</p><ul>';
+      s.historicos.forEach(function(h) {
+        html += '<li><strong>' + App.escapeHtml(h.rotulo) + ':</strong> ' +
+          App.escapeHtml(String(h.valor === null || h.valor === undefined ? '' : h.valor)) + '</li>';
+      });
+      html += '</ul></div>';
+    }
+
+    html += '</div>';
+    return html;
+  },
+
+  /** Liga os eventos da fase atual. */
+  _ligarEventos: function() {
+    var self = this;
+    var s = self.state;
+
+    document.querySelectorAll('.pgo5-canal-card').forEach(function(botao) {
+      botao.addEventListener('click', function() {
+        self._selecionarCanal(botao.getAttribute('data-canal'));
+      });
+    });
+
+    var trocar = document.getElementById('pgo5-trocar-canal');
+    if (trocar) trocar.addEventListener('click', function() {
+      s.canalId = null; s.campos = []; s.valores = {};
+      s.fase = 'escolherCanal'; self._pintar();
+    });
+
+    if (s.fase !== 'formulario') return;
+
+    // Cascata: resolvida no navegador, sem nova chamada ao servidor.
+    var selProduto = document.getElementById('pgo5-campo-produto');
+    if (selProduto) selProduto.addEventListener('change', function() {
+      s.valores.produto = selProduto.value;
+      s.valores.categoria = '';       // troca de produto invalida a escolha anterior
+      s.valores.subcategoria = '';
+      self._redesenharCascata();
+    });
+    var selCategoria = document.getElementById('pgo5-campo-categoria');
+    if (selCategoria) selCategoria.addEventListener('change', function() {
+      s.valores.categoria = selCategoria.value;
+      s.valores.subcategoria = '';
+      self._redesenharCascata();
+    });
+
+    var salvar = document.getElementById('pgo5-salvar');
+    if (salvar) salvar.addEventListener('click', function() { self._salvar(); });
+
+    var cancelar = document.getElementById('pgo5-cancelar');
+    if (cancelar) cancelar.addEventListener('click', function() { App.navigateTo('dashboard'); });
+
+    var excluir = document.getElementById('pgo5-excluir');
+    if (excluir) excluir.addEventListener('click', function() { self._excluir(); });
+  },
+
+  /**
+   * Redesenha só os seletores de Categoria e Subcategoria, preservando o
+   * que o usuário já digitou nos demais campos.
+   */
+  _redesenharCascata: function() {
+    var s = this.state;
+    // Guarda o que está na tela antes de mexer no DOM.
+    var atuais = FormularioPGO5.coletar(s.campos);
+    Object.keys(atuais).forEach(function(k) {
+      if (k !== 'categoria' && k !== 'subcategoria') s.valores[k] = atuais[k];
+    });
+
+    var estado = {
+      produtoId: s.valores.produto || '', categoriaId: s.valores.categoria || '',
+      temProduto: s.campos.some(function(c) { return c.nome === 'produto'; })
+    };
+    ['categoria', 'subcategoria'].forEach(function(nome) {
+      var campo = s.campos.find(function(c) { return c.nome === nome; });
+      if (!campo) return;
+      var grupo = document.querySelector('.form-group[data-campo="' + nome + '"]');
+      if (!grupo) return;
+      var id = FormularioPGO5.idDoCampo(campo);
+      var novo = FormularioPGO5.controleHtml(campo, s.valores[nome] || '', s.dados, estado, id);
+      var label = grupo.querySelector('.form-label');
+      grupo.innerHTML = (label ? label.outerHTML : '') + novo;
+    });
+    this._ligarEventos();
+  },
+
+  /** Envia a criação ou a atualização — sempre uma requisição só. */
+  _salvar: function() {
+    var self = this;
+    var s = self.state;
+    if (s.salvando) return;              // trava contra duplo clique
+
+    var valores = FormularioPGO5.coletar(s.campos);
+    // O Analista não delega: o backend fixa o responsável nele mesmo.
+    if (!s.dados.podeDelegar) delete valores.responsavel;
+
+    self._travarBotao(true);
+
+    var aoFalhar = function(err) {
+      self._travarBotao(false);
+      Components.toast(((err && err.message) || 'Não foi possível salvar.'), 'error');
+    };
+
+    if (s.atendimentoId) {
+      google.script.run
+        .withSuccessHandler(function() {
+          self._travarBotao(false);
+          Components.toast('Atendimento atualizado. ✓', 'success');
+          App.navigateTo('dashboard');
+        })
+        .withFailureHandler(aoFalhar)
+        .atualizarAtendimentoPGO5(s.atendimentoId, {
+          valores: valores,
+          responsavelId: valores.responsavel || ''
+        });
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler(function() {
+        self._travarBotao(false);
+        Components.toast('Atendimento criado com sucesso! ✓', 'success');
+        // Estado limpo: nova escolha de canal, sem resquício do anterior.
+        self.render();
+      })
+      .withFailureHandler(aoFalhar)
+      .criarAtendimentoPGO5({
+        canalId: s.canalId,
+        valores: valores,
+        responsavelId: valores.responsavel || ''
+      });
+  },
+
+  /** Exclui o atendimento aberto, após confirmação. */
+  _excluir: function() {
+    var self = this;
+    var id = self.state.atendimentoId;
+    if (!id) return;
+    Components.confirm('Excluir este atendimento? Esta ação não pode ser desfeita.', function() {
+      google.script.run
+        .withSuccessHandler(function() {
+          Components.toast('Atendimento excluído.', 'success');
+          App.navigateTo('dashboard');
+        })
+        .withFailureHandler(function(err) {
+          Components.toast(((err && err.message) || 'Não foi possível excluir.'), 'error');
+        })
+        .excluirAtendimentoPGO5(id);
+    }, 'Excluir atendimento');
+  },
+
+  /** Liga/desliga o botão Salvar (evita envio duplicado). */
+  _travarBotao: function(travado) {
+    this.state.salvando = travado;
+    var botao = document.getElementById('pgo5-salvar');
+    if (!botao) return;
+    botao.disabled = travado;
+    botao.textContent = travado ? 'Salvando...' : '💾 Salvar';
+  }
+};
+</script>

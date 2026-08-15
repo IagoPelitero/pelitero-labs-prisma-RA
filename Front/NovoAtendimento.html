@@ -592,6 +592,15 @@ Pages.novoAtendimento = {
    */
   render: function(atendimentoId) {
     var self = this;
+
+    // BANCO PGO 5.0: o formulário não é mais fixo por canal — quem monta a
+    // tela é o motor dinâmico, a partir da aba "Formulário". O caminho
+    // abaixo continua servindo as instalações 4.x, sem alteração.
+    if (App.usandoPGO5 && App.usandoPGO5()) {
+      Pages.novoAtendimentoPGO5.render(atendimentoId);
+      return;
+    }
+
     self.state.atendimentoId = atendimentoId || null;
     self.state.atendimento = null;
     self.state.timeline = [];

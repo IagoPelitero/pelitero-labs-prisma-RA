@@ -133,6 +133,10 @@
   <?!= include('Components'); ?>
   <?!= include('Dashboard'); ?>
   <?!= include('NovoAtendimento'); ?>
+  <!-- Motor de formulário dinâmico do PGO 5.0. Carregado depois do
+       NovoAtendimento porque a página do 4.x delega para ele quando a
+       instalação já está no banco 5.0. -->
+  <?!= include('AtendimentoPGO5'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>
