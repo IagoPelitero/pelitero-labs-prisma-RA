@@ -597,8 +597,23 @@ function salvarItemCatalogoPGO5(tipo, dados, id) {
     return { success: true, id: registroId };
   }
 
-  // Criação: o Nome nasce do rótulo (chave interna de itens criados pelo ADM).
-  linha.Nome = rotulo;
+  // Criação: o Nome é a CHAVE TÉCNICA e define para onde o dado vai.
+  // Por padrão nasce do rótulo, mas o ADM pode informar a sua própria
+  // (ex.: rótulo "Resumo do Caso" com chave "resumoCaso").
+  //
+  // Usar uma chave ESTRUTURAL aqui é legítimo e necessário: é assim que um
+  // canal novo ganha Data, Protocolo, Status etc. O que não pode é haver
+  // duas chaves iguais no mesmo canal — aí a gravação ficaria ambígua.
+  // (Na EDIÇÃO a chave nunca muda, então um campo estrutural jamais deixa
+  // de apontar para a sua coluna.)
+  linha.Nome = sanitizeInput(entrada.nome) || rotulo;
+  if (t === PGO5_TIPOS.CAMPO) {
+    const irmao = pgo5CatalogoBruto_().CAMPO.find(function(c) {
+      return String(c.CanalId || '').trim() === linha.CanalId &&
+        normalizeText_(c.Nome) === normalizeText_(linha.Nome);
+    });
+    if (irmao) throw new Error('Já existe um campo com a chave "' + linha.Nome + '" neste canal.');
+  }
   if (!linha.Ordem) linha.Ordem = pgo5ProximaOrdem_(t, pai || linha.CanalId);
   const novo = pgo5Inserir(PGO5.SHEET_NAMES.FORMULARIO, linha);
   return { success: true, id: String(novo.Id || '') };

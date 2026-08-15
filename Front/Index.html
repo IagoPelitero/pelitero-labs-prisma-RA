@@ -137,6 +137,10 @@
        NovoAtendimento porque a página do 4.x delega para ele quando a
        instalação já está no banco 5.0. -->
   <?!= include('AtendimentoPGO5'); ?>
+  <!-- Administração do catálogo do PGO 5.0. Carregado depois do
+       Configuracoes porque a tela do 4.x delega para ele quando a
+       instalação já está no banco 5.0. -->
+  <?!= include('ConfiguracoesPGO5'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>

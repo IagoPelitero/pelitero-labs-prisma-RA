@@ -180,6 +180,35 @@ var App = {
     return String(this.schemaBanco || '').toUpperCase() === 'PGO5';
   },
 
+  // Catálogo do PGO 5.0 (canais, campos, status, aguardando, hierarquia).
+  // Guardado aqui porque mais de uma tela precisa dele — o formulário e a
+  // troca rápida de status no Dashboard — e não faz sentido buscar duas
+  // vezes a mesma coisa.
+  formularioPGO5: null,
+
+  /**
+   * Entrega o catálogo do PGO 5.0, buscando no servidor só na primeira vez.
+   * @param {Function} aoCarregar - Recebe o catálogo.
+   * @param {Function} [aoFalhar] - Recebe o erro.
+   * @param {boolean} [recarregar] - true força nova busca (após configurar).
+   */
+  carregarFormularioPGO5: function(aoCarregar, aoFalhar, recarregar) {
+    var self = this;
+    if (self.formularioPGO5 && !recarregar) { aoCarregar(self.formularioPGO5); return; }
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.formularioPGO5 = dados || {};
+        aoCarregar(self.formularioPGO5);
+      })
+      .withFailureHandler(function(err) {
+        if (aoFalhar) aoFalhar(err);
+      })
+      .getFormularioPGO5();
+  },
+
+  /** Descarta o catálogo em memória (usado após alterar Configurações). */
+  invalidarFormularioPGO5: function() { this.formularioPGO5 = null; },
+
   // Indica se o usuário logado é ADM (acesso total).
   isAdmin: function() {
     var profile = String((this.user || {}).perfil || '').toLowerCase();

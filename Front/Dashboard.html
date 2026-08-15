@@ -960,6 +960,15 @@ Pages.dashboard = {
    */
   alterarStatus: function(atendimento) {
     var self = this;
+
+    // BANCO PGO 5.0: status e "aguardando" são REGISTROS do catálogo, e a
+    // coluna guarda o ID — nunca o texto. O caminho 4.x abaixo trabalha
+    // com nomes e continua valendo para as instalações antigas.
+    if (App.usandoPGO5 && App.usandoPGO5()) {
+      self._alterarStatusPGO5(atendimento);
+      return;
+    }
+
     var dd = App.dropdownData || {};
     var statusList = dd.status || ['Pendente', 'Em análise', 'Concluído'];
     var situacoes = dd.situacoesPendencia || ['Área', 'Cliente'];
@@ -1038,6 +1047,92 @@ Pages.dashboard = {
    * Exclusão lógica a partir da tabela.
    * @param {string} id - Id do atendimento.
    */
+  /**
+   * Troca rápida de Status no banco PGO 5.0.
+   *
+   * As listas vêm do catálogo (não do dropdownData do 4.x) e o que é
+   * enviado ao servidor é o ID do registro escolhido. Só status ATIVOS
+   * podem ser escolhidos; o valor atual de um caso histórico continua
+   * visível mesmo que tenha sido desativado.
+   * @param {Object} atendimento - Linha do Dashboard (formato do cliente).
+   */
+  _alterarStatusPGO5: function(atendimento) {
+    var self = this;
+    Components.showLoading('Carregando opções...');
+
+    App.carregarFormularioPGO5(function(cat) {
+      Components.hideLoading();
+      var statusAtivos = cat.status || [];
+      var aguardando = cat.aguardando || [];
+
+      // O status atual pode ter sido desativado depois: continua exibido,
+      // marcado, para o usuário entender o que o caso tem hoje.
+      // O ID do status vem do CATÁLOGO, casando pelo rótulo que a própria
+      // linha exibe — os dois saem da mesma fonte, então batem sempre.
+      // (Metadados prefixados com "_" não chegam ao cliente: o servidor
+      // remove tudo o que começa com underscore antes de enviar.)
+      var atualPorRotulo = statusAtivos.find(function(s) { return s.rotulo === atendimento.status; });
+      var atualId = atualPorRotulo ? atualPorRotulo.id : '';
+      var listaStatus = statusAtivos.slice();
+      // Status desativado depois: continua visível para o usuário entender
+      // a situação atual, mas não é uma escolha válida de destino.
+      if (!atualId && atendimento.status) {
+        listaStatus.unshift({ id: '', rotulo: atendimento.status + ' (inativo)' });
+      }
+
+      var body = '<div class="form-group"><label class="form-label" for="pgo5-quick-status">Status</label>';
+      body += '<select id="pgo5-quick-status" class="form-control">';
+      listaStatus.forEach(function(s) {
+        body += '<option value="' + App.escapeHtml(s.id) + '"' +
+          (s.id === atualId ? ' selected' : '') + '>' + App.escapeHtml(s.rotulo) + '</option>';
+      });
+      body += '</select></div>';
+
+      body += '<div class="form-group"><label class="form-label" for="pgo5-quick-aguardando">Aguardando Retorno de</label>';
+      body += '<select id="pgo5-quick-aguardando" class="form-control"><option value="">Selecione</option>';
+      var agAtual = aguardando.find(function(a) { return a.rotulo === atendimento.situacaoPendencia; });
+      var aguardandoAtual = agAtual ? agAtual.id : '';
+      aguardando.forEach(function(a) {
+        body += '<option value="' + App.escapeHtml(a.id) + '"' +
+          (a.id === aguardandoAtual ? ' selected' : '') + '>' + App.escapeHtml(a.rotulo) + '</option>';
+      });
+      body += '</select></div>';
+
+      Components.modal({
+        title: 'Alterar status — ' + App.escapeHtml(atendimento.numeroRA || ''),
+        body: body,
+        confirmText: 'Salvar',
+        cancelText: 'Cancelar',
+        onConfirm: function() {
+          var statusId = document.getElementById('pgo5-quick-status').value;
+          var aguardandoId = document.getElementById('pgo5-quick-aguardando').value;
+          self._salvarStatusPGO5(atendimento.id, statusId, aguardandoId);
+        }
+      });
+    }, function(err) {
+      Components.hideLoading();
+      Components.toast('Não foi possível carregar as opções: ' +
+        ((err && err.message) || ''), 'error');
+    });
+  },
+
+  /** Persiste a troca de status no PGO 5.0 (grava ID, nunca texto). */
+  _salvarStatusPGO5: function(id, statusId, aguardandoId) {
+    var self = this;
+    Components.showLoading('Salvando...');
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.hideLoading();
+        Components.toast('Status atualizado. ✓', 'success');
+        self.carregarDados();
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível alterar o status.'), 'error');
+      })
+      .alterarStatusAtendimentoPGO5(id, statusId, aguardandoId);
+  },
+
   excluir: function(id) {
     var self = this;
     Components.showLoading('Excluindo atendimento...');

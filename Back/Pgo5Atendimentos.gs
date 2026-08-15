@@ -437,6 +437,54 @@ function atualizarAtendimentoPGO5(id, dados) {
 }
 
 /**
+ * Altera SOMENTE o Status (e o "Aguardando Retorno") de um atendimento.
+ *
+ * Existe separada de atualizarAtendimentoPGO5 porque a troca rápida pelo
+ * Dashboard não passa pelo formulário: revalidar todos os campos
+ * obrigatórios ali impediria mudar o status de um registro que ainda está
+ * incompleto. Aqui só o que foi pedido é tocado.
+ *
+ * Grava o ID do status, nunca o texto. Não altera CriadoPorId,
+ * ResponsavelId nem qualquer outro dado.
+ *
+ * @param {string} id - Id do atendimento.
+ * @param {string} statusId - Id do STATUS escolhido (precisa estar ativo).
+ * @param {string} [aguardandoId] - Id do AGUARDANDO, quando aplicável.
+ * @returns {Object} { success, id }.
+ */
+function alterarStatusAtendimentoPGO5(id, statusId, aguardandoId) {
+  const ator = requireAuth_();
+  const atendimentoId = String(id || '').trim();
+
+  const atual = pgo5ObterPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, atendimentoId);
+  if (!atual) throw new Error('Atendimento não encontrado.');
+  pgo5AssertPodeAcessar_(ator, atual);
+
+  const catalogo = pgo5CatalogoBruto_();
+  const novoStatus = String(statusId || '').trim();
+  // Só status ATIVO pode ser escolhido — o histórico continua legível, mas
+  // não se move um caso para uma situação que a operação desativou.
+  const status = pgo5Status_(catalogo).find(function(s) { return s.id === novoStatus; });
+  if (!status) throw new Error('Selecione um status válido.');
+
+  const novoAguardando = String(aguardandoId || '').trim();
+  if (novoAguardando) {
+    const ag = pgo5Aguardando_(catalogo).find(function(a) { return a.id === novoAguardando; });
+    if (!ag) throw new Error('Selecione uma opção válida de "Aguardando Retorno".');
+  }
+
+  return withScriptLock_(function() {
+    pgo5AtualizarPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, atendimentoId, {
+      StatusId: novoStatus,
+      AguardandoRetornoId: novoAguardando,
+      AtualizadoPorId: String(ator.id),
+      DataAtualizacao: toIso_(new Date())
+    });
+    return { success: true, id: atendimentoId };
+  });
+}
+
+/**
  * Exclui FISICAMENTE um atendimento e os seus ValoresAtendimento.
  *
  * Isto NÃO é cascade de configuração: os valores pertencem ao próprio

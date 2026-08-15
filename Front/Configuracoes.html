@@ -161,6 +161,15 @@ Pages.configuracoes = {
 
   render: function(container) {
     container = container || document.getElementById('app');
+
+    // BANCO PGO 5.0: o catálogo vive na aba "Formulário" e é administrado
+    // pela tela própria do 5.0. O caminho abaixo continua servindo as
+    // instalações 4.x exatamente como antes.
+    if (App.usandoPGO5 && App.usandoPGO5()) {
+      Pages.configuracoesPGO5.render(container);
+      return;
+    }
+
     container.innerHTML =
       '<div class="page-header"><div><h1 class="page-title">Configurações</h1>' +
       '<p class="page-subtitle">Administração operacional sem alteração de código.</p></div></div>' +

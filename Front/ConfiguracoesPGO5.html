@@ -1,0 +1,411 @@
+<script>
+/* ============================================================
+   PRISMA Gestão Operacional (Pelitero Labs) — ConfiguracoesPGO5.html
+   Administração do catálogo do PGO 5.0
+   Desenvolvido por Pelitero Labs.
+   ------------------------------------------------------------
+   GUIA PARA QUEM ESTÁ COMEÇANDO
+
+   Esta tela é o painel do ADM sobre a aba "Formulário" da planilha —
+   a mesma que o motor de Novo Atendimento lê. Mexer aqui muda o
+   formulário na hora seguinte, sem tocar em código.
+
+   Oito seções, todas gravando na MESMA aba (nenhuma aba nova):
+
+     Canais    → os canais de atendimento
+     Campos    → os campos de cada canal
+     Opções    → as escolhas de um campo select/radio/multiselect
+     Produtos  → Produto
+     Categorias    → pertencem a um Produto
+     Subcategorias → pertencem a uma Categoria
+     Status        → as 3 situações (editáveis, mas não criáveis)
+     Aguardando    → "Aguardando Retorno de" (livre)
+
+   EXCLUIR É FÍSICO E NUNCA EM CASCATA: apagar uma Categoria remove só a
+   linha dela; subcategorias, atendimentos e valores continuam onde estão.
+   ============================================================ */
+
+Pages.configuracoesPGO5 = {
+
+  /** Definição de cada seção: rótulo, ícone e o que ela aceita. */
+  SECOES: [
+    { tipo: 'CANAL', label: 'Canais', icone: 'hub' },
+    { tipo: 'CAMPO', label: 'Campos', icone: 'dynamic_form' },
+    { tipo: 'OPCAO', label: 'Opções', icone: 'list' },
+    { tipo: 'PRODUTO', label: 'Produtos', icone: 'inventory_2' },
+    { tipo: 'CATEGORIA', label: 'Categorias', icone: 'category' },
+    { tipo: 'SUBCATEGORIA', label: 'Subcategorias', icone: 'account_tree' },
+    { tipo: 'STATUS', label: 'Status', icone: 'flag' },
+    { tipo: 'AGUARDANDO', label: 'Aguardando Retorno', icone: 'schedule' }
+  ],
+
+  /** De qual seção vem o "pai" de cada tipo. */
+  PAI_DE: { OPCAO: 'CAMPO', CATEGORIA: 'PRODUTO', SUBCATEGORIA: 'CATEGORIA' },
+
+  /** Rótulo da coluna "pai" em cada seção. */
+  ROTULO_PAI: { OPCAO: 'Campo', CATEGORIA: 'Produto', SUBCATEGORIA: 'Categoria' },
+
+  state: { catalogo: null, ativa: 'CANAL', carregando: false },
+
+  /** Abre a tela. Só o ADM chega aqui — o servidor revalida em cada ação. */
+  render: function(container) {
+    var self = this;
+    container = container || document.getElementById('app');
+    if (!App.isAdmin()) { App.navigateTo('dashboard'); return; }
+
+    // Estado sempre limpo ao abrir a tela. Sem isso, uma gravação que ficou
+    // pelo caminho (o usuário navegou antes da resposta chegar) deixaria a
+    // trava de concorrência ligada para sempre, e as ações seguintes
+    // passariam a não fazer nada — em silêncio.
+    self.state.carregando = false;
+
+    container.innerHTML = self._cabecalhoHtml() +
+      '<div class="card">' + Components.emptyState('settings', 'Carregando configurações...') + '</div>';
+    self._carregar();
+  },
+
+  /** Busca o catálogo inteiro numa chamada e desenha. */
+  _carregar: function(manterSecao) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(cat) {
+        self.state.catalogo = cat || { itens: {}, regras: {}, tiposCampo: [] };
+        if (!manterSecao) self.state.ativa = 'CANAL';
+        self._pintar();
+      })
+      .withFailureHandler(function(err) {
+        var app = document.getElementById('app');
+        if (app) app.innerHTML = self._cabecalhoHtml() + '<div class="card">' +
+          Components.emptyState('error_outline', 'Não foi possível carregar as configurações.',
+            App.escapeHtml((err && err.message) || '')) + '</div>';
+      })
+      .getCatalogoPGO5();
+  },
+
+  _cabecalhoHtml: function() {
+    return '<div class="page-header"><div>' +
+      '<h1 class="page-title">Configurações</h1>' +
+      '<p class="page-subtitle">O que você define aqui é o que o formulário mostra.</p>' +
+      '</div></div>';
+  },
+
+  /** Desenha a navegação lateral + a tabela da seção ativa. */
+  _pintar: function() {
+    var self = this;
+    var container = document.getElementById('app');
+    if (!container) return;
+
+    var regras = (self.state.catalogo.regras || {})[self.state.ativa] || {};
+    var podeCriar = regras.podeCriar !== false;
+
+    var html = '<div class="page-header"><div>' +
+      '<h1 class="page-title">Configurações</h1>' +
+      '<p class="page-subtitle">O que você define aqui é o que o formulário mostra.</p></div>' +
+      (podeCriar ? '<button class="btn btn-primary" id="pgo5cfg-novo">+ Novo registro</button>' : '') +
+      '</div>';
+
+    html += '<div class="config-layout"><aside class="config-nav">';
+    self.SECOES.forEach(function(s) {
+      var qtd = ((self.state.catalogo.itens || {})[s.tipo] || []).length;
+      html += '<button class="config-nav-item' + (self.state.ativa === s.tipo ? ' active' : '') +
+        '" data-secao="' + s.tipo + '">' +
+        '<span class="material-icons">' + s.icone + '</span><span>' + s.label + '</span>' +
+        '<span class="config-count">' + qtd + '</span></button>';
+    });
+    html += '</aside><section class="card config-content">' + self._tabelaHtml() + '</section></div>';
+
+    container.innerHTML = html;
+    self._ligarEventos();
+  },
+
+  /** Tabela da seção ativa. */
+  _tabelaHtml: function() {
+    var self = this;
+    var tipo = self.state.ativa;
+    var itens = (self.state.catalogo.itens || {})[tipo] || [];
+    var secao = self.SECOES.find(function(s) { return s.tipo === tipo; });
+    var regras = (self.state.catalogo.regras || {})[tipo] || {};
+
+    var html = '<div class="card-header"><div class="card-title">' +
+      '<span class="material-icons">' + secao.icone + '</span>' + secao.label + '</div></div>';
+    html += '<p class="pgo5cfg-ajuda">' + self._ajudaDaSecao(tipo) + '</p>';
+
+    if (!itens.length) {
+      return html + Components.emptyState('inbox', 'Nenhum registro cadastrado nesta seção.',
+        regras.podeCriar === false ? '' : 'Use "+ Novo registro" para começar.');
+    }
+
+    var temPai = !!self.PAI_DE[tipo];
+    html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>';
+    html += '<th>Ordem</th><th>Rótulo</th>';
+    if (tipo === 'CAMPO') html += '<th>Chave técnica</th><th>Canal</th><th>Tipo</th><th>Obrigatório</th>';
+    if (temPai) html += '<th>' + self.ROTULO_PAI[tipo] + '</th>';
+    html += '<th>Situação</th><th class="pgo5cfg-acoes-col">Ações</th></tr></thead><tbody>';
+
+    itens.forEach(function(item, i) {
+      html += '<tr data-id="' + App.escapeHtml(item.id) + '">';
+      html += '<td>' + (item.ordem || i + 1) + '</td>';
+      html += '<td><strong>' + App.escapeHtml(item.rotulo) + '</strong></td>';
+      if (tipo === 'CAMPO') {
+        html += '<td><code class="pgo5cfg-chave">' + App.escapeHtml(item.nome) + '</code>' +
+          (item.estrutural ? ' <span class="badge badge-neutral">estrutural</span>' : '') + '</td>';
+        html += '<td>' + App.escapeHtml(item.paiRotulo || '-') + '</td>';
+        html += '<td>' + App.escapeHtml(item.tipoCampo || 'text') + '</td>';
+        html += '<td>' + (item.obrigatorio ? 'Sim' : 'Não') + '</td>';
+      }
+      if (temPai) html += '<td>' + App.escapeHtml(item.paiRotulo || 'Sem dados') + '</td>';
+      html += '<td>' + (item.ativo
+        ? '<span class="badge badge-success">Ativo</span>'
+        : '<span class="badge badge-neutral">Inativo</span>') + '</td>';
+
+      html += '<td class="pgo5cfg-acoes">';
+      html += self._botao('editar', item.id, 'edit', 'Editar');
+      html += self._botao('alternar', item.id, item.ativo ? 'toggle_on' : 'toggle_off',
+        item.ativo ? 'Desativar' : 'Ativar');
+      html += self._botao('subir', item.id, 'arrow_upward', 'Mover para cima');
+      html += self._botao('descer', item.id, 'arrow_downward', 'Mover para baixo');
+      if (regras.podeExcluir !== false) {
+        html += self._botao('excluir', item.id, 'delete', 'Excluir');
+      }
+      html += '</td></tr>';
+    });
+
+    return html + '</tbody></table></div>';
+  },
+
+  _botao: function(acao, id, icone, titulo) {
+    return '<button type="button" class="btn-icon pgo5cfg-acao" data-acao="' + acao +
+      '" data-id="' + App.escapeHtml(id) + '" title="' + titulo + '" aria-label="' + titulo + '">' +
+      '<span class="material-icons">' + icone + '</span></button>';
+  },
+
+  /** Texto curto explicando o efeito de cada seção. */
+  _ajudaDaSecao: function(tipo) {
+    var textos = {
+      CANAL: 'Cada canal ativo vira uma opção na abertura de Novo Atendimento.',
+      CAMPO: 'Os campos de cada canal, na ordem em que aparecem no formulário. A chave técnica dos campos estruturais é fixa; o rótulo pode ser alterado à vontade.',
+      OPCAO: 'As escolhas de um campo do tipo seleção, múltipla escolha ou opção única.',
+      PRODUTO: 'Primeiro nível da classificação. Sem produto cadastrado, o seletor nasce vazio.',
+      CATEGORIA: 'Pertencem a um Produto e só aparecem quando ele é escolhido.',
+      SUBCATEGORIA: 'Pertencem a uma Categoria e só aparecem quando ela é escolhida.',
+      STATUS: 'As três situações do atendimento. Nesta versão podem ser renomeadas, reordenadas e desativadas — não criadas nem excluídas.',
+      AGUARDANDO: 'Opções de "Aguardando Retorno de". Podem ser criadas livremente.'
+    };
+    return textos[tipo] || '';
+  },
+
+  _ligarEventos: function() {
+    var self = this;
+    document.querySelectorAll('.config-nav-item[data-secao]').forEach(function(b) {
+      b.addEventListener('click', function() {
+        self.state.ativa = b.getAttribute('data-secao');
+        self._pintar();
+      });
+    });
+    var novo = document.getElementById('pgo5cfg-novo');
+    if (novo) novo.addEventListener('click', function() { self._abrirFormulario(null); });
+
+    document.querySelectorAll('.pgo5cfg-acao').forEach(function(b) {
+      b.addEventListener('click', function() {
+        self._executarAcao(b.getAttribute('data-acao'), b.getAttribute('data-id'));
+      });
+    });
+  },
+
+  _itemPorId: function(id) {
+    return ((this.state.catalogo.itens || {})[this.state.ativa] || [])
+      .find(function(i) { return i.id === id; }) || null;
+  },
+
+  _executarAcao: function(acao, id) {
+    var self = this;
+    var item = self._itemPorId(id);
+    if (!item) return;
+
+    if (acao === 'editar') { self._abrirFormulario(item); return; }
+
+    if (acao === 'alternar') {
+      self._salvar(Object.assign({}, self._dadosDoItem(item), { ativo: !item.ativo }), id);
+      return;
+    }
+    if (acao === 'subir' || acao === 'descer') {
+      self._chamar('moverItemCatalogoPGO5',
+        [self.state.ativa, id, acao === 'subir' ? 'cima' : 'baixo'],
+        'Ordem atualizada.');
+      return;
+    }
+    if (acao === 'excluir') {
+      Components.confirm(
+        'Excluir "' + App.escapeHtml(item.rotulo) + '"? Somente este registro é removido — ' +
+        'nada relacionado é apagado junto.',
+        function() {
+          self._chamar('excluirItemCatalogoPGO5', [self.state.ativa, id], 'Registro excluído.');
+        }, 'Excluir registro');
+    }
+  },
+
+  /** Converte um item da tabela no payload que o backend espera. */
+  _dadosDoItem: function(item) {
+    return {
+      rotulo: item.rotulo, ativo: item.ativo, ordem: item.ordem,
+      paiId: item.paiId, canalId: item.canalId,
+      tipoCampo: item.tipoCampo, obrigatorio: item.obrigatorio,
+      placeholder: item.placeholder, valorPadrao: item.valorPadrao
+    };
+  },
+
+  /** Modal de criação/edição da seção ativa. */
+  _abrirFormulario: function(item) {
+    var self = this;
+    var tipo = self.state.ativa;
+    var edicao = !!item;
+    var it = item || {};
+    var itens = self.state.catalogo.itens || {};
+
+    var body = '<div class="form-group"><label class="form-label" for="pgo5cfg-rotulo">Rótulo <span class="required">*</span></label>' +
+      '<input class="form-control" id="pgo5cfg-rotulo" type="text" value="' +
+      App.escapeHtml(it.rotulo || '') + '" placeholder="Como aparece na tela"></div>';
+
+    // Vínculo com o pai (Opção→Campo, Categoria→Produto, Subcategoria→Categoria).
+    var tipoPai = self.PAI_DE[tipo];
+    if (tipoPai) {
+      var pais = itens[tipoPai] || [];
+      body += '<div class="form-group"><label class="form-label" for="pgo5cfg-pai">' +
+        self.ROTULO_PAI[tipo] + ' <span class="required">*</span></label>' +
+        '<select class="form-control" id="pgo5cfg-pai">' +
+        '<option value="">' + (pais.length ? 'Selecione' : 'Nenhum cadastrado') + '</option>';
+      pais.forEach(function(p) {
+        body += '<option value="' + App.escapeHtml(p.id) + '"' +
+          (String(it.paiId) === p.id ? ' selected' : '') + '>' + App.escapeHtml(p.rotulo) + '</option>';
+      });
+      body += '</select></div>';
+    }
+
+    if (tipo === 'CAMPO') {
+      var canais = itens.CANAL || [];
+      body += '<div class="form-group"><label class="form-label" for="pgo5cfg-canal">Canal <span class="required">*</span></label>' +
+        '<select class="form-control" id="pgo5cfg-canal"' + (edicao ? '' : '') + '>' +
+        '<option value="">' + (canais.length ? 'Selecione' : 'Nenhum canal cadastrado') + '</option>';
+      canais.forEach(function(c) {
+        body += '<option value="' + App.escapeHtml(c.id) + '"' +
+          (String(it.canalId) === c.id ? ' selected' : '') + '>' + App.escapeHtml(c.rotulo) + '</option>';
+      });
+      body += '</select></div>';
+
+      // Chave técnica: livre na criação de campo dinâmico, protegida quando
+      // o campo é estrutural (mudá-la faria o dado deixar de ir para a
+      // coluna certa de Atendimentos).
+      body += '<div class="form-group"><label class="form-label" for="pgo5cfg-nome">Chave técnica</label>' +
+        '<input class="form-control" id="pgo5cfg-nome" type="text" value="' +
+        App.escapeHtml(it.nome || '') + '"' + (edicao ? ' disabled' : '') +
+        ' placeholder="Opcional — ex.: resumoCaso"></div>';
+      body += '<small class="pgo5cfg-nota">' + (edicao
+        ? (it.estrutural
+          ? 'Campo estrutural: a chave técnica é fixa porque define a coluna de destino. O rótulo pode ser alterado.'
+          : 'A chave técnica não muda após a criação — outros registros já apontam para ela.')
+        : 'Em branco, a chave é gerada a partir do rótulo. Chaves de campos estruturais são reservadas.') +
+        '</small>';
+
+      var tipos = self.state.catalogo.tiposCampo || [];
+      body += '<div class="form-group"><label class="form-label" for="pgo5cfg-tipoCampo">Tipo do campo</label>' +
+        '<select class="form-control" id="pgo5cfg-tipoCampo">';
+      tipos.forEach(function(t) {
+        body += '<option value="' + t + '"' + ((it.tipoCampo || 'text') === t ? ' selected' : '') +
+          '>' + t + '</option>';
+      });
+      body += '</select></div>';
+
+      body += '<div class="form-group"><label class="pgo5-checkbox"><input type="checkbox" id="pgo5cfg-obrigatorio"' +
+        (it.obrigatorio ? ' checked' : '') + '> Preenchimento obrigatório</label></div>';
+      body += '<div class="form-group"><label class="form-label" for="pgo5cfg-placeholder">Texto de apoio</label>' +
+        '<input class="form-control" id="pgo5cfg-placeholder" type="text" value="' +
+        App.escapeHtml(it.placeholder || '') + '"></div>';
+      body += '<div class="form-group"><label class="form-label" for="pgo5cfg-valorPadrao">Valor padrão</label>' +
+        '<input class="form-control" id="pgo5cfg-valorPadrao" type="text" value="' +
+        App.escapeHtml(it.valorPadrao || '') + '"></div>';
+    }
+
+    body += '<div class="form-group"><label class="form-label" for="pgo5cfg-ordem">Ordem</label>' +
+      '<input class="form-control" id="pgo5cfg-ordem" type="number" min="0" value="' +
+      App.escapeHtml(String(it.ordem || '')) + '" placeholder="Deixe em branco para ir ao fim"></div>';
+    body += '<div class="form-group"><label class="pgo5-checkbox"><input type="checkbox" id="pgo5cfg-ativo"' +
+      (edicao ? (it.ativo ? ' checked' : '') : ' checked') + '> Ativo</label></div>';
+
+    var secao = self.SECOES.find(function(s) { return s.tipo === tipo; });
+    Components.modal({
+      title: (edicao ? 'Editar' : 'Novo') + ' — ' + secao.label,
+      body: body,
+      confirmText: 'Salvar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        var dados = self._coletarFormulario(tipo, it);
+        if (!dados.rotulo) {
+          Components.toast('Informe o rótulo.', 'warning');
+          return false;   // mantém o modal aberto
+        }
+        self._salvar(dados, edicao ? it.id : null);
+      }
+    });
+  },
+
+  /** Lê o modal. */
+  _coletarFormulario: function(tipo, it) {
+    var valor = function(id) {
+      var e = document.getElementById(id);
+      return e ? String(e.value || '').trim() : '';
+    };
+    var marcado = function(id) {
+      var e = document.getElementById(id);
+      return !!(e && e.checked);
+    };
+    var dados = {
+      rotulo: valor('pgo5cfg-rotulo'),
+      ordem: valor('pgo5cfg-ordem'),
+      ativo: marcado('pgo5cfg-ativo')
+    };
+    if (this.PAI_DE[tipo]) dados.paiId = valor('pgo5cfg-pai');
+    if (tipo === 'CAMPO') {
+      dados.canalId = valor('pgo5cfg-canal') || it.canalId || '';
+      dados.nome = valor('pgo5cfg-nome');
+      dados.tipoCampo = valor('pgo5cfg-tipoCampo');
+      dados.obrigatorio = marcado('pgo5cfg-obrigatorio');
+      dados.placeholder = valor('pgo5cfg-placeholder');
+      dados.valorPadrao = valor('pgo5cfg-valorPadrao');
+    }
+    return dados;
+  },
+
+  _salvar: function(dados, id) {
+    this._chamar('salvarItemCatalogoPGO5', [this.state.ativa, dados, id || ''],
+      id ? 'Registro atualizado.' : 'Registro criado.');
+  },
+
+  /**
+   * Chama o backend e recarrega o catálogo. O sucesso só é anunciado depois
+   * da resposta do servidor — nunca antes.
+   */
+  _chamar: function(funcao, args, mensagemOk) {
+    var self = this;
+    if (self.state.carregando) return;
+    self.state.carregando = true;
+    Components.showLoading('Salvando...');
+
+    var run = google.script.run
+      .withSuccessHandler(function() {
+        self.state.carregando = false;
+        Components.hideLoading();
+        Components.toast(mensagemOk, 'success');
+        // O formulário lê o mesmo catálogo: descartar o que está em memória
+        // faz a próxima abertura de Novo Atendimento já vir atualizada.
+        App.invalidarFormularioPGO5();
+        self._carregar(true);
+      })
+      .withFailureHandler(function(err) {
+        self.state.carregando = false;
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível concluir a operação.'), 'error');
+      });
+    run[funcao].apply(run, args);
+  }
+};
+</script>

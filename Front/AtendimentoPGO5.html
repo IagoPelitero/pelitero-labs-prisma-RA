@@ -257,6 +257,9 @@ Pages.novoAtendimentoPGO5 = {
     google.script.run
       .withSuccessHandler(function(dados) {
         self.state.dados = dados || {};
+        // Compartilha com o resto do sistema (a troca rápida de status no
+        // Dashboard usa o mesmo catálogo e não precisa buscá-lo de novo).
+        App.formularioPGO5 = self.state.dados;
         if (self.state.atendimentoId) { self._carregarParaEdicao(); return; }
         self._decidirCanal();
       })
