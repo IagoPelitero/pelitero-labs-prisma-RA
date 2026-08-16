@@ -27,9 +27,27 @@
    vazar instâncias do Chart.js.
    ============================================================ */
 Pages.indicadores = {
+  /**
+   * De qual lista do resumo agregado sai cada gráfico.
+   *
+   * A chave é o campo que a tela já usava no banco 4.x; o valor é o nome da
+   * lista devolvida por obterProdutividadeEquipePGO5. Assim os dois bancos
+   * alimentam os MESMOS gráficos.
+   */
+  MAPA_AGRUPAMENTO: {
+    responsavel: 'porResponsavel',
+    canal: 'porCanal',
+    produto: 'porProduto',
+    categoria: 'porCategoria',
+    status: 'porStatus'
+  },
+
   state: {
     dados: [],
-    charts: {} // instâncias Chart.js ativas, por id de canvas
+    charts: {}, // instâncias Chart.js ativas, por id de canvas
+    // Resumo agregado vindo do servidor (só no PGO 5.0). Quando existe, a
+    // tela lê daqui em vez de contar linha por linha.
+    agregado: null
   },
 
   // Paleta usada em todos os gráficos (mantém identidade entre temas).
@@ -74,8 +92,10 @@ Pages.indicadores = {
   render: function(container) {
     container = container || document.getElementById('app');
 
-    // Permissão: tela exclusiva da supervisão (regra também no servidor).
-    if (!App.isSupervisor()) {
+    // Quem entra é decidido por PERMISSÃO no PGO 5.0 e pelo perfil no 4.x.
+    // Em ambos os casos isto é só conforto visual: o servidor recusa a
+    // chamada de quem não tem acesso (ver obterEscopoProdutividade_).
+    if (!this._podeEntrar()) {
       App.navigateTo('dashboard');
       return;
     }
@@ -85,8 +105,9 @@ Pages.indicadores = {
 
     html += '<div class="page-header">';
     html += '  <div>';
-    html += '    <h1 class="page-title">' + App.escapeHtml(App.nomeTela('indicadores', 'Indicadores')) + '</h1>';
-    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Visão analítica da operação — todos os gráficos respondem aos filtros.</p>';
+    html += '    <h1 class="page-title">' +
+      App.escapeHtml(App.nomeTela('indicadores', 'Produtividade Equipe')) + '</h1>';
+    html += '    <p style="color:var(--text-secondary);margin-top:4px;">Quanto a equipe produziu, por quem e em qual período — todos os gráficos respondem aos filtros.</p>';
     html += '  </div>';
     html += '</div>';
 
@@ -247,6 +268,22 @@ Pages.indicadores = {
   },
 
   // Lê os valores atuais dos filtros no formato aceito pelo servidor.
+  /**
+   * Diz se a interface deve abrir a tela para este usuário.
+   *
+   * No PGO 5.0 quem manda são as permissões de produtividade; no banco 4.x,
+   * que não tem nível de acesso, continua valendo o perfil de supervisão.
+   *
+   * @returns {boolean} true quando a tela pode ser exibida.
+   */
+  _podeEntrar: function() {
+    if (App.schemaBanco === 'PGO5') {
+      return AcessoPGO5.podeNaInterface('produtividadeEquipe') ||
+        AcessoPGO5.podeNaInterface('produtividadeTodos');
+    }
+    return App.isSupervisor();
+  },
+
   getFiltros: function() {
     var self = this;
     var filtros = {};
@@ -290,6 +327,30 @@ Pages.indicadores = {
       if (self.state.dados.length === 0) self._renderEstadoErro();
     };
 
+    // BANCO PGO 5.0: UMA chamada devolve KPIs, agrupamentos e a evolução
+    // diária já somados no servidor. Antes a tela baixava TODOS os
+    // atendimentos e contava no navegador — lento e desnecessário, já que
+    // nenhum gráfico precisa da linha individual.
+    if (App.schemaBanco === 'PGO5') {
+      google.script.run
+        .withSuccessHandler(function(resumo) {
+          if (!resumo || typeof resumo !== 'object') {
+            falhou({ message: 'Resposta inválida do servidor.' });
+            return;
+          }
+          self.state.agregado = resumo;
+          self.state.dados = [];          // no 5.0 a tela não guarda linhas
+          self.renderCards();
+          self.renderCharts();
+          if (tentativa > 1) {
+            Components.toast('Produtividade atualizada a partir do Google Sheets. ✓', 'success');
+          }
+        })
+        .withFailureHandler(falhou)
+        .obterProdutividadeEquipePGO5(self.getFiltros());
+      return;
+    }
+
     google.script.run
       .withSuccessHandler(function(dados) {
         // Resposta inesperada (não-array) é FALHA, não "sem registros".
@@ -298,6 +359,7 @@ Pages.indicadores = {
           return;
         }
         self.state.dados = dados;
+        self.state.agregado = null;
         self.renderCards();
         self.renderCharts();
         // Confirmação apenas quando houve recuperação após falha real.
@@ -378,6 +440,17 @@ Pages.indicadores = {
     var container = document.getElementById('ind-cards');
     if (!container) return;
 
+    // No PGO 5.0 os números já vêm somados do servidor.
+    if (self.state.agregado) {
+      const k = self.state.agregado.kpis || {};
+      container.innerHTML =
+        Components.kpiCard('assignment', App.formatNumber(k.total || 0), 'Total', '#0046C0') +
+        Components.kpiCard('hourglass_empty', App.formatNumber(k.pendentes || 0), 'Pendentes', '#FF9800') +
+        Components.kpiCard('person_search', App.formatNumber(k.emAnalise || 0), 'Em análise', '#2196F3') +
+        Components.kpiCard('check_circle', App.formatNumber(k.concluidos || 0), 'Concluídos', '#43A047');
+      return;
+    }
+
     var resumo = { total: 0, pendentes: 0, emAnalise: 0, concluidos: 0, area: 0, cliente: 0 };
     self.state.dados.forEach(function(item) {
       resumo.total++;
@@ -410,6 +483,16 @@ Pages.indicadores = {
    * @returns {Object} { labels: string[], valores: number[] }.
    */
   _agruparPor: function(campo) {
+    // PGO 5.0: o agrupamento já veio pronto do servidor. O formato de saída
+    // é o mesmo dos dois lados, então os gráficos não mudam.
+    if (this.state.agregado) {
+      var lista = this.state.agregado[this.MAPA_AGRUPAMENTO[campo]] || [];
+      return {
+        labels: lista.map(function(item) { return item.rotulo; }),
+        valores: lista.map(function(item) { return item.quantidade; })
+      };
+    }
+
     var grupos = {};
     this.state.dados.forEach(function(item) {
       var chave = String(item[campo] || '—');
@@ -428,6 +511,15 @@ Pages.indicadores = {
    * @returns {Object} { labels, valores, chaves }.
    */
   _agruparPorDia: function() {
+    if (this.state.agregado) {
+      var serie = this.state.agregado.evolucaoDiaria || [];
+      return {
+        chaves: serie.map(function(dia) { return dia.data; }),
+        labels: serie.map(function(dia) { return dia.data.slice(8, 10) + '/' + dia.data.slice(5, 7); }),
+        valores: serie.map(function(dia) { return dia.quantidade; })
+      };
+    }
+
     var grupos = {};
     this.state.dados.forEach(function(item) {
       var d = App.parseDate(item.dataAbertura);

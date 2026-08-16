@@ -647,9 +647,30 @@ function listarAtendimentosPGO5_() {
  *
  * Cliente e CPF vêm das colunas estruturais de Atendimentos.
  *
- * @returns {Object[]} Registros no formato legado.
+ * @returns {Object[]} Registros no formato legado, já recortados por escopo.
  */
 function pgo5AtendimentosComoLegado_() {
+  // O Dashboard e as telas operacionais consomem esta ponte com o escopo de
+  // LEITURA (verProprios/verEquipe/verTodos). As telas analíticas têm escopo
+  // próprio e por isso chamam pgo5ConverterParaLegado_ diretamente, passando
+  // a lista que já recortaram — ver Pgo5Analitico.gs.
+  return pgo5ConverterParaLegado_(pgo5FiltrarAtendimentosPorEscopo_(
+    getActor_(), pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS), 'ver'));
+}
+
+/**
+ * Converte uma lista de atendimentos do PGO 5.0 para o formato do 4.x.
+ *
+ * ⚠️ NÃO APLICA NENHUM RECORTE DE PERMISSÃO.
+ * Quem chama é responsável por entregar apenas os registros que o usuário
+ * pode ver. Isso é proposital: cada tela tem o seu escopo (leitura,
+ * relatórios, produtividade) e embutir um deles aqui obrigaria as outras a
+ * contorná-lo.
+ *
+ * @param {Object[]} registros Linhas cruas da aba Atendimentos.
+ * @returns {Object[]} Registros no formato legado, com IDs já em nomes.
+ */
+function pgo5ConverterParaLegado_(registros) {
   const catalogo = pgo5CatalogoBruto_();
   const rotulos = pgo5MapaRotulos_(catalogo);
 
@@ -673,13 +694,7 @@ function pgo5AtendimentosComoLegado_() {
     if (nome) dinamicosPorAtendimento[chave][nome] = v.Valor;
   });
 
-  // O Dashboard, os Relatórios e os Indicadores consomem esta ponte. O
-  // recorte precisa acontecer AQUI, no servidor — mandar tudo e filtrar no
-  // navegador exporia dados fora do escopo do usuário.
-  const permitidos = pgo5FiltrarAtendimentosPorEscopo_(
-    getActor_(), pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS), 'ver');
-
-  return permitidos.map(function(a) {
+  return (registros || []).map(function(a) {
     const id = String(a.Id || '');
     const din = dinamicosPorAtendimento[id.toUpperCase()] || {};
     const respId = String(a.ResponsavelId || '').trim();

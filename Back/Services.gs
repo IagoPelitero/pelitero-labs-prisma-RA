@@ -225,7 +225,7 @@ function getBootstrapData() {
       abaNome: indicOpCfg.abaNome,
       habilitado: indicOpCfg.habilitado
     },
-    dropdownData: {
+    dropdownData: montarDropdownData_({
       produtos: pluck_(produtos, 'Nome'),
       categorias: pluck_(categorias, 'Nome'),
       categoriasPorProduto: categoriasPorProduto,
@@ -249,8 +249,83 @@ function getBootstrapData() {
       // E-mail não é exposto aqui, por não ser necessário.
       responsaveisOpcoes: montarOpcoesResponsavel_(usuarios),
       statusCores: getStatusColorMap_()
-    }
+    })
   };
+}
+
+/**
+ * Ajusta as listas dos filtros conforme o banco da instalação.
+ *
+ * POR QUE ISTO EXISTE
+ * As listas do 4.x saem das abas Produtos, Categorias e Subcategorias, que
+ * NÃO existem no PGO 5.0 — lá tudo isso mora na aba Formulário. Sem esta
+ * ponte, os filtros de Dashboard e Relatórios apareceriam vazios numa
+ * instalação nova, e o usuário não conseguiria filtrar por produto.
+ *
+ * O formato devolvido é exatamente o mesmo nos dois bancos, então nenhuma
+ * tela precisa saber onde está rodando.
+ *
+ * @param {Object} listasLegado Listas já montadas a partir das abas 4.x.
+ * @returns {Object} As listas que o front deve usar.
+ */
+function montarDropdownData_(listasLegado) {
+  if (!estruturaEhPGO5_() || typeof pgo5Hierarquia_ !== 'function') return listasLegado;
+
+  const catalogo = pgo5CatalogoBruto_();
+  const hierarquia = pgo5Hierarquia_(catalogo);
+  const rotulos = function(lista) {
+    return (lista || []).map(function(item) { return item.rotulo; });
+  };
+
+  // Cascatas indexadas por NOME: é assim que os filtros comparam, já que o
+  // atendimento é exibido com o rótulo e não com o Id.
+  const categoriasPorProduto = {};
+  const subcategoriasPorProdutoCategoria = {};
+  const todasCategorias = [];
+  const todasSubcategorias = [];
+
+  hierarquia.produtos.forEach(function(produto) {
+    const categorias = hierarquia.categoriasPorProduto[produto.id] || [];
+    categoriasPorProduto[produto.rotulo] = rotulos(categorias);
+    subcategoriasPorProdutoCategoria[produto.rotulo] = {};
+
+    categorias.forEach(function(categoria) {
+      todasCategorias.push(categoria.rotulo);
+      const subs = hierarquia.subcategoriasPorCategoria[categoria.id] || [];
+      subcategoriasPorProdutoCategoria[produto.rotulo][categoria.rotulo] = rotulos(subs);
+      subs.forEach(function(sub) { todasSubcategorias.push(sub.rotulo); });
+    });
+  });
+
+  const semRepetir = function(lista) {
+    return lista.filter(function(nome, i, todos) { return nome && todos.indexOf(nome) === i; });
+  };
+
+  const atualizado = {};
+  Object.keys(listasLegado).forEach(function(chave) { atualizado[chave] = listasLegado[chave]; });
+  atualizado.produtos = rotulos(hierarquia.produtos);
+  atualizado.categorias = semRepetir(todasCategorias);
+  atualizado.subcategorias = semRepetir(todasSubcategorias);
+  atualizado.categoriasPorProduto = categoriasPorProduto;
+  atualizado.subcategoriasPorProdutoCategoria = subcategoriasPorProdutoCategoria;
+  atualizado.status = rotulos(pgo5Status_(catalogo));
+  atualizado.situacoesPendencia = rotulos(pgo5Aguardando_(catalogo));
+  atualizado.canais = rotulos(pgo5Canais_(catalogo));
+
+  // O filtro de Responsável só pode oferecer quem o usuário realmente
+  // enxerga. Antes vinha a lista inteira de usuários ativos: um analista
+  // via o nome de todos os colegas no seletor, mesmo sem acesso a nenhum
+  // atendimento deles. Isso é o organograma da operação vazando por um
+  // filtro. O recorte usa o escopo de LEITURA, que é o mesmo aplicado aos
+  // dados do Dashboard — as telas analíticas têm o próprio escopo e pedem
+  // a lista delas em getFiltrosAnaliticosPGO5.
+  const visiveis = listarResponsaveisDoEscopo_(
+    getActor_(), obterEscopoAtendimentos_(atorComoUsuario_(getActor_()), 'ver'));
+  atualizado.responsaveis = visiveis.map(function(pessoa) { return pessoa.nome; });
+  atualizado.responsaveisOpcoes = visiveis.map(function(pessoa) {
+    return { id: pessoa.id, nome: pessoa.nome, rotulo: pessoa.nome };
+  });
+  return atualizado;
 }
 
 /**
@@ -567,7 +642,7 @@ function applyAtendimentoFilters_(records, filtros) {
   };
 
   return records.filter(function(record) {
-    const opened = asDate_(record.DataAbertura);
+    const opened = normalizarDataParaFiltro_(asDate_(record.DataAbertura));
     if (start && (!opened || opened < start)) return false;
     if (end && (!opened || opened > end)) return false;
 
@@ -1463,6 +1538,14 @@ function getDashboardData(options) {
  */
 function getRelatorio(filtros, options) {
   requireAuth_();
+
+  // BANCO PGO 5.0: a tela tem escopo PRÓPRIO (relatoriosProprios /
+  // relatoriosEquipe / relatoriosTodos), diferente do escopo de leitura das
+  // telas operacionais. Quem responde é o motor analítico.
+  if (estruturaEhPGO5_() && typeof getRelatorioPGO5 === 'function') {
+    return getRelatorioPGO5(filtros);
+  }
+
   const actor = getActor_();
   // Mesmo fallback do Dashboard: { forceRefresh: true } ignora o cache e
   // consulta o Google Sheets diretamente (Indicadores/Relatórios).
@@ -2265,24 +2348,25 @@ function getIndicadoresOperacionais(options) {
 
   // Linha manual "Fora da SLA" (persistida por data na aba IndicadoresSLA).
   // Comportamento preservado: o valor sobrevive à releitura da origem.
-  const foraSLA = {};
+  // No PGO 5.0 não existe a aba IndicadoresSLA: o valor manual vira uma
+  // linha de Configurações com Tipo='SLA' (ver Pgo5Analitico.gs). Nenhuma
+  // aba nova foi criada, e o comportamento visível é o mesmo.
+  const foraSLA = lerValoresForaSla_();
   let totalForaSLA = 0;
-  getAll(CONFIG.SHEET_NAMES.INDICADORES_SLA).forEach(function(reg) {
-    const chave = String(reg.Data || '').trim();
-    if (!chave) return;
-    const valor = Number(reg.ForaSLA) || 0;
-    foraSLA[chave] = valor;
+  Object.keys(foraSLA).forEach(function(chave) {
     // O total só soma as datas que estão no período exibido.
     if (periodo.inicio && chave < periodo.inicio) return;
     if (periodo.fim && chave > periodo.fim) return;
-    totalForaSLA += valor;
+    totalForaSLA += foraSLA[chave];
   });
 
   return {
     habilitado: true,
     abaNome: cfg.abaNome,
-    // Só ADM configura a fonte; o Supervisor apenas visualiza.
-    podeConfigurar: isAdminProfile_(getActor_().perfil),
+    // Quem pode MEXER na fonte é decidido pela permissão configurarAnaliseSac
+    // no PGO 5.0 — o nome do nível é livre e não serve como critério. No 4.x
+    // continua sendo o perfil ADM, que é o único conceito que existe lá.
+    podeConfigurar: podeConfigurarAnaliseSac_(),
     datas: consolidado.datas,
     indicadores: consolidado.indicadores,
     foraSLA: foraSLA,
@@ -2321,6 +2405,12 @@ function salvarForaSLA(dataChave, valor) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(chave)) throw new Error('Data inválida.');
   let numero = Number(valor);
   if (!isFinite(numero) || numero < 0) numero = 0;
+
+  // PGO 5.0: grava em Configurações (Tipo='SLA'), pois a aba IndicadoresSLA
+  // não existe no banco novo e criar uma sexta aba está proibido.
+  if (estruturaEhPGO5_() && typeof salvarForaSlaPGO5_ === 'function') {
+    return salvarForaSlaPGO5_(chave, numero);
+  }
 
   const existente = getAll(CONFIG.SHEET_NAMES.INDICADORES_SLA).some(function(reg) {
     return String(reg.Data || '').trim() === chave;
@@ -3214,4 +3304,104 @@ function indexBy_(items, field) {
  */
 function pluck_(items, field) {
   return items.map(function(item) { return String(item[field] || ''); }).filter(function(value) { return value; });
+}
+
+
+// ============================================================================
+// PONTES DA ETAPA 4 — o mesmo endpoint servindo os dois bancos
+// ============================================================================
+
+/**
+ * Valores manuais de "Fora da SLA", venham eles de onde vierem.
+ *
+ * No PGO 5.0 ficam em Configurações (Tipo='SLA'); no 4.x continuam na aba
+ * IndicadoresSLA. Quem chama não precisa saber em qual banco está.
+ *
+ * @returns {Object} { 'AAAA-MM-DD': quantidade }.
+ */
+function lerValoresForaSla_() {
+  if (estruturaEhPGO5_() && typeof lerForaSlaPGO5_ === 'function') {
+    return lerForaSlaPGO5_();
+  }
+
+  const valores = {};
+  getAll(CONFIG.SHEET_NAMES.INDICADORES_SLA).forEach(function(registro) {
+    const chave = String(registro.Data || '').trim();
+    if (!chave) return;
+    valores[chave] = Number(registro.ForaSLA) || 0;
+  });
+  return valores;
+}
+
+/**
+ * Diz se o usuário pode alterar a configuração da Análise de SAC.
+ *
+ * ⚠️ NÃO CONFUNDIR COM VER O LINK DA FONTE
+ * São duas permissões diferentes e de propósito:
+ *
+ *   configurarAnaliseSac → mexer no mapeamento de colunas, status e período
+ *   visualizarFonteSac   → ver o ENDEREÇO da planilha externa (e ainda
+ *                          exige PIN, ver Pgo5Seguranca.gs)
+ *
+ * Quem ajusta a análise não precisa, necessariamente, ter o link da
+ * planilha de origem em mãos.
+ *
+ * @returns {boolean} true quando o usuário pode configurar.
+ */
+function podeConfigurarAnaliseSac_() {
+  if (estruturaEhPGO5_() && typeof usuarioTemPermissao_ === 'function') {
+    return usuarioTemPermissao_(atorComoUsuario_(getActor_()), 'configurarAnaliseSac');
+  }
+  return isAdminProfile_(getActor_().perfil);
+}
+
+/**
+ * Ajusta uma data lida do banco para comparar com o filtro de período.
+ *
+ * O PROBLEMA QUE ISTO RESOLVE
+ * O PGO 5.0 grava a data de abertura como meia-noite UTC
+ * ("2026-08-12T00:00:00.000Z"), porque é uma data SEM hora — o operador
+ * escolheu um dia, não um instante. Já parseInputDate_ monta o começo do
+ * período como meia-noite no fuso do servidor. Em América/São_Paulo (UTC-3)
+ * a meia-noite local acontece 3 horas DEPOIS da meia-noite UTC, então
+ * "2026-08-12T00:00:00Z" ficava ANTES do início do dia 12 e o atendimento
+ * sumia do próprio dia dele.
+ *
+ * A solução é a mesma que o front já usa: quando o valor é exatamente
+ * meia-noite UTC, ele representa um DIA, não um instante — e é remontado
+ * como meia-noite local daquele mesmo dia do calendário.
+ *
+ * Datas com hora de verdade (ex.: DataCriacao) não são tocadas.
+ *
+ * @param {Date|null} data Data lida do registro.
+ * @returns {Date|null} A data pronta para comparação, ou null.
+ */
+function normalizarDataParaFiltro_(data) {
+  if (!data) return null;
+
+  const ehMeiaNoiteUtc = data.getUTCHours() === 0 && data.getUTCMinutes() === 0 &&
+    data.getUTCSeconds() === 0 && data.getUTCMilliseconds() === 0;
+  if (!ehMeiaNoiteUtc) return data;
+
+  return new Date(data.getUTCFullYear(), data.getUTCMonth(), data.getUTCDate(), 0, 0, 0, 0);
+}
+
+/**
+ * Converte uma data em chave de dia ("AAAA-MM-DD") para agrupar por data.
+ *
+ * Usa as mesmas regras de normalizarDataParaFiltro_, para o agrupamento e o
+ * filtro concordarem sobre a qual dia cada atendimento pertence — sem isso,
+ * um registro poderia entrar no período filtrado e aparecer em outro dia
+ * do gráfico.
+ *
+ * @param {Date|null} data Data lida do registro.
+ * @returns {string} Chave no formato AAAA-MM-DD, ou '' se não houver data.
+ */
+function chaveDoDia_(data) {
+  const normalizada = normalizarDataParaFiltro_(data);
+  if (!normalizada) return '';
+  const doisDigitos = function(numero) { return (numero < 10 ? '0' : '') + numero; };
+  return normalizada.getFullYear() + '-' +
+    doisDigitos(normalizada.getMonth() + 1) + '-' +
+    doisDigitos(normalizada.getDate());
 }

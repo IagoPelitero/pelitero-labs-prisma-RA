@@ -154,6 +154,41 @@ Pages.relatorios = {
 
     var cpfField = document.getElementById('rel-cpf');
     if (cpfField) cpfField.addEventListener('input', function() { App.maskCPF(this); });
+
+    this._carregarFiltrosDoEscopo();
+  },
+
+  /**
+   * No PGO 5.0, refina os filtros com o escopo DA TELA DE RELATÓRIOS.
+   *
+   * O bootstrap traz listas montadas com o escopo de LEITURA, que serve ao
+   * Dashboard. Relatórios pode ter alcance diferente — alguém com
+   * relatoriosTodos e verEquipe, por exemplo, precisa poder filtrar por
+   * pessoas que não aparecem no Dashboard dele. Uma chamada só resolve, e
+   * o servidor decide quem entra na lista.
+   *
+   * A tela continua utilizável se a chamada falhar: os selects já foram
+   * preenchidos com as listas do bootstrap.
+   */
+  _carregarFiltrosDoEscopo: function() {
+    if (App.schemaBanco !== 'PGO5') return;
+
+    google.script.run
+      .withSuccessHandler(function(filtros) {
+        if (!filtros) return;
+        var nomes = (filtros.responsaveis || []).map(function(p) { return p.nome; });
+        App.fillSelect('rel-analista', nomes, 'Todos');
+        if (filtros.produtos) App.fillSelect('rel-produto', filtros.produtos, 'Todos');
+        if (filtros.categorias) App.fillSelect('rel-categoria', filtros.categorias, 'Todas');
+        if (filtros.subcategorias) App.fillSelect('rel-subcategoria', filtros.subcategorias, 'Todas');
+        if (filtros.aguardandoRetorno) App.fillSelect('rel-situacao', filtros.aguardandoRetorno, 'Todas');
+      })
+      .withFailureHandler(function(err) {
+        // Sem acesso à tela o servidor recusa — e a própria consulta vai
+        // recusar também, com uma mensagem clara. Aqui só registramos.
+        console.error('[Relatórios] Filtros do escopo:', (err && err.message) || err);
+      })
+      .getFiltrosAnaliticosPGO5('relatorios');
   },
 
   _filtroIds: {

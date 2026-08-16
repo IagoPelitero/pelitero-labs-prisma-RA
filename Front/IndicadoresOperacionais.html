@@ -24,6 +24,31 @@
    "Fora da SLA".
    ============================================================ */
 Pages.indicadoresOperacionais = {
+
+  /**
+   * Diz se a interface deve abrir a tela de Análise de SAC.
+   *
+   * @returns {boolean} true quando o usuário tem acesso à análise.
+   */
+  _podeEntrar: function() {
+    if (App.schemaBanco === 'PGO5') return AcessoPGO5.podeNaInterface('analiseSac');
+    return App.isSupervisor();
+  },
+
+  /**
+   * Diz se o usuário pode MEXER na configuração da análise.
+   *
+   * ⚠️ Não confundir com ver o link da planilha de origem: são permissões
+   * diferentes (configurarAnaliseSac × visualizarFonteSac, esta última
+   * ainda protegida por PIN). Quem ajusta o mapeamento das colunas não
+   * recebe o endereço da fonte junto.
+   *
+   * @returns {boolean} true quando pode configurar.
+   */
+  _podeConfigurar: function() {
+    if (App.schemaBanco === 'PGO5') return AcessoPGO5.podeNaInterface('configurarAnaliseSac');
+    return App.isAdmin();
+  },
   state: {
     dados: null,        // último resultado carregado (para exportação)
     carregando: false,
@@ -39,7 +64,10 @@ Pages.indicadoresOperacionais = {
    */
   render: function(container) {
     container = container || document.getElementById('app');
-    if (!App.isSupervisor()) {
+    // No PGO 5.0 quem abre a tela é decidido pela permissão analiseSac; no
+    // 4.x continua sendo o perfil de supervisão. Nos dois casos o servidor
+    // revalida (ver exigirAcesso_ em Services.gs).
+    if (!this._podeEntrar()) {
       App.navigateTo('dashboard');
       return;
     }
@@ -154,7 +182,7 @@ Pages.indicadoresOperacionais = {
 
     // Módulo ainda não configurado pelo ADM.
     if (!dados || !dados.habilitado) {
-      var msg = App.isAdmin()
+      var msg = this._podeConfigurar()
         ? 'Configure a planilha de origem em Configurações → Análise de SAC para ativar este painel.'
         : 'Este painel ainda não foi configurado. Solicite ao administrador a configuração da planilha de origem.';
       container.innerHTML = '<div class="card">' + Components.emptyState('settings_suggest', msg) + '</div>';
@@ -225,7 +253,7 @@ Pages.indicadoresOperacionais = {
     var chips = lista.map(function(nome) {
       return '<span class="badge badge-neutral">' + App.escapeHtml(nome) + '</span>';
     }).join(' ');
-    var acao = App.isAdmin()
+    var acao = Pages.indicadoresOperacionais._podeConfigurar()
       ? 'Reveja o mapeamento em Configurações → Análise de SAC.'
       : 'Peça ao administrador para revisar o mapeamento em Configurações.';
     return '<div class="card" style="margin-bottom:16px;border-left:4px solid ' + Pages.indicadores._cores[3] + ';">' +
@@ -251,7 +279,7 @@ Pages.indicadoresOperacionais = {
         ' (' + App.formatNumber(s.valor) + ')</span>';
     }).join(' ');
     var extra = lista.length > 8 ? ' <em>e outros…</em>' : '';
-    var acao = App.isAdmin()
+    var acao = Pages.indicadoresOperacionais._podeConfigurar()
       ? 'Agrupe-os em Configurações → Análise de SAC para entrarem nos indicadores.'
       : 'Peça ao administrador para agrupá-los em Configurações.';
     return '<div class="card" style="margin-bottom:16px;border-left:4px solid ' + Pages.indicadores._cores[4] + ';">' +

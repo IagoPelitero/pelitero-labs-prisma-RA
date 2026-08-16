@@ -250,9 +250,55 @@ const Components = {
   /* ──────────────────────────────────────────────
      Status Badge
   ────────────────────────────────────────────── */
+  /**
+   * Etiqueta colorida do status.
+   *
+   * A cor de FUNDO vem do catálogo e o ADM pode trocá-la a qualquer momento.
+   * Por isso a cor do TEXTO não pode ser fixa: escrever sempre em branco
+   * deixava "Pendente" (#FF9800) com 2,16 de contraste — bem abaixo do
+   * mínimo AA de 4,5 para um texto pequeno como este.
+   *
+   * A escolha é feita pela luminância do fundo: fundo claro recebe texto
+   * escuro, fundo escuro recebe texto branco. Assim qualquer cor que o ADM
+   * escolher continua legível, sem precisar limitar a paleta dele.
+   *
+   * @param {string} status Nome do status.
+   * @param {string} [cor] Cor de fundo em hexadecimal (#RRGGBB).
+   * @returns {string} HTML da etiqueta.
+   */
   statusBadge: function(status, cor) {
     cor = cor || '#6B7280';
-    return '<span class="badge" style="background:' + cor + '">' + (status || '—') + '</span>';
+    return '<span class="badge" style="background:' + cor + ';color:' +
+      this.corDeTextoLegivel(cor) + '">' + (status || '—') + '</span>';
+  },
+
+  /**
+   * Escolhe preto ou branco para escrever sobre uma cor de fundo.
+   *
+   * Usa a fórmula de luminância relativa do WCAG. O limite 0,22 é o ponto
+   * onde as duas opções empatam: acima dele o texto escuro rende mais
+   * contraste, abaixo o branco rende mais. Com as cores de status padrão o
+   * ganho é grande — "Pendente" (#FF9800) sai de 2,16 para 6,81.
+   *
+   * Cor em formato inesperado devolve branco, que é o comportamento
+   * histórico — nunca deixa o texto invisível.
+   *
+   * @param {string} corDeFundo Cor em hexadecimal (#RGB ou #RRGGBB).
+   * @returns {string} '#1F2937' (quase preto) ou '#FFFFFF'.
+   */
+  corDeTextoLegivel: function(corDeFundo) {
+    var hex = String(corDeFundo || '').trim().replace('#', '');
+    if (hex.length === 3) {
+      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return '#FFFFFF';
+
+    var canais = [0, 2, 4].map(function(i) {
+      var valor = parseInt(hex.substr(i, 2), 16) / 255;
+      return valor <= 0.03928 ? valor / 12.92 : Math.pow((valor + 0.055) / 1.055, 2.4);
+    });
+    var luminancia = 0.2126 * canais[0] + 0.7152 * canais[1] + 0.0722 * canais[2];
+    return luminancia > 0.22 ? '#1F2937' : '#FFFFFF';
   },
 
   /* ──────────────────────────────────────────────

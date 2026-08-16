@@ -152,7 +152,8 @@ Back/                        Camada de servidor (Apps Script)
  ├─ Pgo5Permissoes.gs       Cargos, níveis de acesso e o motor de permissões
  ├─ Pgo5Usuarios.gs         Cadastro de usuários e a hierarquia (SupervisorId)
  ├─ Pgo5Seguranca.gs        PIN administrativo, bloqueios e recursos protegidos
- └─ Pgo5Auditoria.gs        Registro das ações administrativas
+ ├─ Pgo5Auditoria.gs        Registro das ações administrativas
+ └─ Pgo5Analitico.gs        Relatórios, Produtividade Equipe e o "Fora da SLA"
 
 Front/                       Camada de interface (HtmlService)
  ├─ Index.html              Shell: layout (sidebar + header) e include dos demais
@@ -336,6 +337,51 @@ não entra na auditoria, para a planilha não virar um log infinito.
 protegidas são removidos antes da gravação por `limparDadoSensivel_`
 (`Pgo5Auditoria.gs`) — uma rede de segurança que age mesmo se quem registra
 a ação passar um objeto inteiro por engano.
+
+---
+
+## 6.5 As telas analíticas e seus escopos
+
+Cada tela analítica tem o **próprio** escopo. Enxergar um atendimento na
+tela de trabalho e enxergá-lo num relatório são coisas diferentes:
+
+| Tela | Permissões | Alcance |
+| --- | --- | --- |
+| Relatórios | `relatoriosProprios` / `relatoriosEquipe` / `relatoriosTodos` | próprios · própria árvore · toda a operação |
+| Produtividade Equipe | `produtividadeEquipe` / `produtividadeTodos` | própria árvore · toda a operação |
+| Análise de SAC | `analiseSac` | a planilha externa configurada |
+
+O recorte acontece **no servidor**: o que o usuário não pode ver não sai de
+lá. Isso vale também para a **exportação** (Excel, CSV e PDF), que
+reaproveita exatamente a mesma lista da tela — nunca "busca tudo e filtra
+depois".
+
+O filtro **Responsável** só oferece pessoas dentro do escopo. Mandar a lista
+inteira e escondê-la na interface exporia o organograma da operação.
+
+**Produtividade Equipe** é o nome VISÍVEL da tela cuja rota técnica continua
+sendo `indicadores`. Renomear a rota quebraria links salvos e o `data-page`
+do menu sem nenhum ganho para quem usa. O ADM pode personalizar o rótulo,
+como nas demais telas.
+
+A tela pede **um único** resumo agregado ao servidor (KPIs, agrupamentos e
+evolução diária). Antes ela baixava todos os atendimentos e contava no
+navegador — lento e desnecessário, já que nenhum gráfico precisa da linha
+individual.
+
+### Análise de SAC
+
+Lê uma **segunda planilha**, externa. Os registros brutos NUNCA são
+importados nem copiados para o PGO: o servidor lê, agrega e devolve só o
+resumo. CPF, cliente, protocolo e a URL da fonte não entram no que chega ao
+navegador.
+
+Status que não estiver mapeado vira **"Não Classificado"** — nunca é
+contado como "Em Aberto", o que inflaria o indicador de pendência.
+
+O valor manual **"Fora da SLA"** ficava na aba `IndicadoresSLA` do 4.x. No
+PGO 5.0 ele é uma linha de `Configurações` com `Tipo = 'SLA'`,
+`Chave` = a data e `Valor` = a quantidade. Nenhuma aba nova foi criada.
 
 ---
 

@@ -129,7 +129,11 @@ const TELAS_RENOMEAVEIS = [
   { pagina: 'dashboard', padrao: 'Dashboard' },
   { pagina: 'novoAtendimento', padrao: 'Novo Atendimento' },
   { pagina: 'relatorios', padrao: 'Relatórios' },
-  { pagina: 'indicadores', padrao: 'Indicadores' },
+  // O nome VISÍVEL passou a ser "Produtividade Equipe" na Etapa 4. O
+  // identificador técnico continua 'indicadores' de propósito: renomear a
+  // rota quebraria links salvos, o hash da URL e o data-page do menu, sem
+  // nenhum ganho para quem usa o sistema.
+  { pagina: 'indicadores', padrao: 'Produtividade Equipe' },
   // O nome desta tela já era configurável pelo ADM em "Análise de SAC"
   // (campo abaNome). Ela entra aqui pela MESMA origem, para não existirem
   // dois lugares gravando o mesmo rótulo.

@@ -3024,8 +3024,6 @@ body[data-theme="dark"] .skeleton-loading {
 }
 .indop-table tr.indop-linha-sla td { background: var(--light-blue); }
 .indop-table tr.indop-linha-sla td.indop-rowhead { background: var(--light-blue); }
-</style>
-
 /* ── Acessibilidade do menu (Etapa 3B) ──
    Na trilha compacta o rótulo não aparece, então o foco do teclado precisa
    ser claramente visível: sem isso quem navega por Tab se perde. */
@@ -3036,6 +3034,21 @@ body[data-theme="dark"] .skeleton-loading {
 
 .sidebar-item:focus-visible .material-icons {
   color: inherit;
+}
+
+/* ── PGO 5.0 · Etapa 4 ──
+   A classe .table-responsive é usada em Relatórios mas nunca tinha sido
+   definida. Na prática a rolagem já acontecia, porque Components monta a
+   tabela dentro de um .table-container (que tem overflow: auto). Esta
+   definição é a rede de segurança para o caso de uma tabela ser colocada
+   direto neste wrapper: sem ela, as 13 colunas do relatório passariam de
+   1800px e transbordariam o card em telas pequenas.
+
+   -webkit-overflow-scrolling melhora a rolagem por toque no iOS. */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ── PGO 5.0 · Etapa 3B ── */
@@ -3129,3 +3142,4 @@ body[data-theme="dark"] .skeleton-loading {
   .pgo5seg-recurso { flex-direction: column; align-items: flex-start; }
   .pgo5seg-acoes .btn { flex: 1 1 auto; }
 }
+</style>
