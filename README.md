@@ -143,7 +143,14 @@ Back/                        Camada de servidor (Apps Script)
  ├─ Config.gs               Constantes: nomes de abas, colunas, status, dados padrão
  ├─ Database.gs             CRUD genérico, cache de leitura, lock de escrita, migrações
  ├─ Services.gs             Regras de negócio, autenticação, permissões, dashboard
- └─ Utils.gs                Funções utilitárias puras (IDs, CPF, sanitização, datas)
+ ├─ Utils.gs                Funções utilitárias puras (IDs, CPF, sanitização, datas)
+ │
+ │  ── PGO 5.0 (banco relacional; convivem com o 4.x na mesma instalação) ──
+ ├─ Pgo5.gs                 Criação e detecção do schema de 5 abas, IDs hexadecimais
+ ├─ Pgo5Catalogo.gs         Catálogo dinâmico: canais, campos, produtos, status
+ ├─ Pgo5Atendimentos.gs     Atendimentos do 5.0 e os valores dos campos dinâmicos
+ ├─ Pgo5Permissoes.gs       Cargos, níveis de acesso e o motor de permissões
+ └─ Pgo5Usuarios.gs         Cadastro de usuários e a hierarquia (SupervisorId)
 
 Front/                       Camada de interface (HtmlService)
  ├─ Index.html              Shell: layout (sidebar + header) e include dos demais
@@ -156,9 +163,14 @@ Front/                       Camada de interface (HtmlService)
  ├─ Indicadores.html        Painel analítico (Chart.js), restrito à supervisão
  ├─ IndicadoresOperacionais.html
  │                          Análise de SAC: analisa uma 2ª planilha Google (supervisão)
- └─ Configuracoes.html      Administração (produtos, categorias, subcategorias, canais,
-                            usuários, Campos e Seletores dinâmicos, Análise de SAC
-                            e Nomes das telas)
+ ├─ Configuracoes.html      Administração (produtos, categorias, subcategorias, canais,
+ │                          usuários, Campos e Seletores dinâmicos, Análise de SAC
+ │                          e Nomes das telas)
+ │
+ │  ── PGO 5.0 ──
+ ├─ AtendimentoPGO5.html    Formulário dinâmico montado a partir do catálogo
+ ├─ ConfiguracoesPGO5.html  Administração do catálogo do 5.0
+ └─ AcessoPGO5.html         Usuários, Cargos e Níveis (com o editor de permissões)
 
 .claude/                     Metadados LOCAIS (não versionados — ver .gitignore)
  ├─ appsscript.json         Manifesto do Apps Script (timezone, escopos, runtime)
@@ -206,8 +218,13 @@ o sistema (ver [Configuração inicial](#8-configuração-inicial-e-instalação
 
 ## 6. Permissões
 
-Três perfis, definidos na coluna `Perfil` da aba Usuários. As regras são aplicadas
-**no servidor** (não apenas escondendo itens na interface).
+O sistema tem **dois modelos de acesso**, e vale o do banco que a instalação usa.
+Em ambos as regras são aplicadas **no servidor** — esconder um item na interface
+nunca é a proteção.
+
+### 6.1 Banco 4.x — três perfis fixos
+
+Definidos na coluna `Perfil` da aba Usuários.
 
 | Recurso | Analista | Supervisor | Administrador (ADM) |
 | --- | :---: | :---: | :---: |
@@ -221,6 +238,50 @@ Três perfis, definidos na coluna `Perfil` da aba Usuários. As regras são apli
 
 Funções-chave: `isAdminProfile_`, `isSupervisorProfile_`, `canAccessAtendimento_`,
 `restrictToOwnerIfNeeded_`, `requireSupervisor_`, `requireAdmin_` (em `Services.gs`).
+
+### 6.2 Banco PGO 5.0 — cargo e nível são coisas diferentes
+
+Aqui **não existe perfil fixo**. Cada usuário tem dois campos independentes:
+
+| Campo | O que significa | Concede acesso? |
+| --- | --- | :---: |
+| `CargoId` | A função organizacional da pessoa (ADM, Supervisor, Analista…) | **Não** |
+| `NivelAcessoId` | O conjunto de permissões que ela tem | **Sim** |
+
+O acesso é resolvido assim:
+
+```
+Usuário.NivelAcessoId → aba Configurações (Tipo = NIVEL_ACESSO)
+                      → coluna Configuracao (JSON) → lista de permissões
+```
+
+Nunca decida acesso pelo nome. `if (cargo === 'ADM')` está errado por dois
+motivos: o cargo não concede nada, e o nome do nível é livre — o administrador
+pode criar um nível chamado "Coordenação". Use sempre a permissão:
+
+```js
+const ator = exigirPermissao_('gerenciarEquipe');   // barra e devolve o ator
+if (usuarioTemPermissao_(usuario, 'analiseSac')) { /* ... */ }
+```
+
+**Escopos de atendimento.** Três permissões definem até onde a pessoa enxerga:
+`verProprios` → só os dela; `verEquipe` → ela e toda a árvore abaixo dela;
+`verTodos` → a operação inteira. O mesmo vale para editar, excluir e delegar.
+
+**Equipe ≠ hierarquia.** A coluna `Equipe` é só um rótulo organizacional e
+**não concede acesso a nada**. Quem monta a árvore é `SupervisorId`.
+
+**Falha fechada.** Nível inexistente, inativo, JSON inválido ou usuário inativo
+resultam em *zero* permissões — nunca em acesso ampliado.
+
+**Sempre resta um administrador.** Não é possível desativar nem rebaixar o
+último nível com `alterarPermissoes` ativo.
+
+Funções-chave: `obterPermissoesUsuario_`, `usuarioTemPermissao_`,
+`exigirPermissao_`, `obterEscopoAtendimentos_` (em `Pgo5Permissoes.gs`) e
+`obterSubordinadosDaHierarquia_`, `validarCicloHierarquia_`
+(em `Pgo5Usuarios.gs`). As telas herdadas do 4.x passam por `exigirAcesso_`
+(`Services.gs`), que escolhe a regra certa conforme o banco.
 
 ---
 

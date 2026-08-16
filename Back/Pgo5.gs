@@ -467,6 +467,7 @@ function inicializarPGO5Dev() {
   if (relatorio.sucesso) {
     relatorio.ajusteSchema = ajustarSchemaClienteCpfPGO5_();
     relatorio.seed = pgo5AplicarSeedEstrutural_();
+    relatorio.seedAcesso = aplicarSeedPermissoesPGO5_();
   }
   return relatorio;
 }
@@ -478,12 +479,12 @@ function inicializarPGO5Dev() {
  * @returns {Object} Relatório da inicialização + do seed estrutural.
  */
 function inicializarPGO5Admin() {
-  requireAuth_();
-  requireAdmin_();
+  exigirPermissao_('configurarSistema');
   const relatorio = inicializarPGO5_();
   if (relatorio.sucesso) {
     relatorio.ajusteSchema = ajustarSchemaClienteCpfPGO5_();
     relatorio.seed = pgo5AplicarSeedEstrutural_();
+    relatorio.seedAcesso = aplicarSeedPermissoesPGO5_();
     relatorio.conversaoClienteCpf = converterClienteCpfDinamicosPGO5_();
   }
   return relatorio;
@@ -539,8 +540,7 @@ function pgo5AtendimentosSchemaAntigo_() {
  *   estado: 'JA_ATUALIZADO' | 'CONVERTIDO' | 'ESTRUTURA_DESCONHECIDA'.
  */
 function ajustarSchemaClienteCpfPGO5() {
-  requireAuth_();
-  requireAdmin_();
+  exigirPermissao_('configurarSistema');
   return ajustarSchemaClienteCpfPGO5_();
 }
 
@@ -601,8 +601,7 @@ function ajustarSchemaClienteCpfPGO5_() {
  * @returns {Object} { atendimentosAtualizados, valoresRemovidos }.
  */
 function converterClienteCpfDinamicosPGO5() {
-  requireAuth_();
-  requireAdmin_();
+  exigirPermissao_('configurarSistema');
   return converterClienteCpfDinamicosPGO5_();
 }
 

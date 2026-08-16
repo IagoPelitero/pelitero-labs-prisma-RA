@@ -46,23 +46,23 @@
         <li class="sidebar-item active" data-page="dashboard" data-tooltip="Dashboard">
           <span class="material-icons">dashboard</span><span class="sidebar-label">Dashboard</span>
         </li>
-        <li class="sidebar-item" data-page="novoAtendimento" data-tooltip="Novo Atendimento">
+        <li class="sidebar-item" data-page="novoAtendimento" data-pgo5-permissoes="criarAtendimento" data-tooltip="Novo Atendimento">
           <span class="material-icons">add_circle</span><span class="sidebar-label">Novo Atendimento</span>
         </li>
-        <li class="sidebar-item" data-page="relatorios" data-tooltip="Relatórios">
+        <li class="sidebar-item" data-page="relatorios" data-pgo5-permissoes="relatoriosProprios,relatoriosEquipe,relatoriosTodos" data-tooltip="Relatórios">
           <span class="material-icons">description</span><span class="sidebar-label">Relatórios</span>
         </li>
         <!-- Indicadores: visão analítica com gráficos, restrita à supervisão (Supervisor/ADM) -->
-        <li class="sidebar-item" data-page="indicadores" data-supervisor-only data-tooltip="Indicadores">
+        <li class="sidebar-item" data-page="indicadores" data-supervisor-only data-pgo5-permissoes="produtividadeEquipe,produtividadeTodos" data-tooltip="Indicadores">
           <span class="material-icons">insights</span><span class="sidebar-label">Indicadores</span>
         </li>
         <!-- v4.7: Indicadores Operacionais (planilha externa). Rótulo dinâmico
              definido pelo ADM — App.aplicarRotuloIndicOp() atualiza o texto e o
              tooltip a partir do bootstrap. Restrito à supervisão. -->
-        <li class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-tooltip="Análise de SAC" id="menu-indic-op">
+        <li class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-pgo5-permissoes="analiseSac" data-tooltip="Análise de SAC" id="menu-indic-op">
           <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Análise de SAC</span>
         </li>
-        <li class="sidebar-item" data-page="configuracoes" data-supervisor-only data-tooltip="Configurações">
+        <li class="sidebar-item" data-page="configuracoes" data-supervisor-only data-pgo5-permissoes="gerenciarFormulario,gerenciarCanais,gerenciarCatalogos,gerenciarEquipe,gerenciarUsuariosTodos,gerenciarCargos,gerenciarNiveis" data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
         </li>
       </ul>
@@ -141,6 +141,9 @@
        Configuracoes porque a tela do 4.x delega para ele quando a
        instalação já está no banco 5.0. -->
   <?!= include('ConfiguracoesPGO5'); ?>
+  <!-- Usuários, Cargos e Níveis de Acesso do PGO 5.0. Carregado depois do
+       ConfiguracoesPGO5 porque a navegação daquela tela delega para cá. -->
+  <?!= include('AcessoPGO5'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>

@@ -314,7 +314,9 @@ function testSystem() {
  * @throws {Error} Quando quem executa não é ADM (ou não está autorizado).
  */
 function diagnosticarPrisma() {
-  requireAdmin_(); // valida no SERVIDOR: só o ADM executa
+  // Valida no SERVIDOR. No PGO 5.0 quem manda é a permissão do nível de
+  // acesso; no banco 4.x continua sendo o perfil ADM.
+  exigirAcesso_('visualizarBancoPgo', requireAdmin_);
   return executarDiagnostico_();
 }
 

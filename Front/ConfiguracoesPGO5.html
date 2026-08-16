@@ -27,17 +27,43 @@
 
 Pages.configuracoesPGO5 = {
 
-  /** Definição de cada seção: rótulo, ícone e o que ela aceita. */
+  /**
+   * Definição de cada seção: rótulo, ícone e quem pode vê-la.
+   *
+   * A permissão de cada seção é a MESMA que o servidor exige para gravar
+   * naquele tipo (ver permissaoDoTipoDeCatalogo_ em Pgo5Catalogo.gs). Assim a
+   * tela não oferece uma lista que a gravação depois recusaria.
+   */
   SECOES: [
-    { tipo: 'CANAL', label: 'Canais', icone: 'hub' },
-    { tipo: 'CAMPO', label: 'Campos', icone: 'dynamic_form' },
-    { tipo: 'OPCAO', label: 'Opções', icone: 'list' },
-    { tipo: 'PRODUTO', label: 'Produtos', icone: 'inventory_2' },
-    { tipo: 'CATEGORIA', label: 'Categorias', icone: 'category' },
-    { tipo: 'SUBCATEGORIA', label: 'Subcategorias', icone: 'account_tree' },
-    { tipo: 'STATUS', label: 'Status', icone: 'flag' },
-    { tipo: 'AGUARDANDO', label: 'Aguardando Retorno', icone: 'schedule' }
+    { tipo: 'CANAL', label: 'Canais', icone: 'hub', permissoes: ['gerenciarCanais'] },
+    { tipo: 'CAMPO', label: 'Campos', icone: 'dynamic_form', permissoes: ['gerenciarFormulario'] },
+    { tipo: 'OPCAO', label: 'Opções', icone: 'list', permissoes: ['gerenciarFormulario'] },
+    { tipo: 'PRODUTO', label: 'Produtos', icone: 'inventory_2', permissoes: ['gerenciarCatalogos'] },
+    { tipo: 'CATEGORIA', label: 'Categorias', icone: 'category', permissoes: ['gerenciarCatalogos'] },
+    { tipo: 'SUBCATEGORIA', label: 'Subcategorias', icone: 'account_tree', permissoes: ['gerenciarCatalogos'] },
+    { tipo: 'STATUS', label: 'Status', icone: 'flag', permissoes: ['gerenciarCatalogos'] },
+    { tipo: 'AGUARDANDO', label: 'Aguardando Retorno', icone: 'schedule', permissoes: ['gerenciarCatalogos'] },
+    // As duas seções abaixo não vivem na aba Formulário: são telas próprias
+    // (AcessoPGO5.html) e aparecem só para quem tem a permissão delas.
+    { tipo: 'USUARIOS', label: 'Usuários', icone: 'group', externa: 'usuariosPGO5',
+      permissoes: ['gerenciarEquipe', 'gerenciarUsuariosTodos'] },
+    { tipo: 'ACESSOS', label: 'Cargos e Níveis', icone: 'security', externa: 'acessosPGO5',
+      permissoes: ['gerenciarCargos', 'gerenciarNiveis'] }
   ],
+
+  /**
+   * Seções visíveis para o usuário logado.
+   *
+   * Uma seção com "permissoes" só aparece quando ele tem pelo menos uma
+   * delas. Isto é conforto visual: o servidor revalida cada gravação.
+   * @returns {Object[]} Seções que devem ser desenhadas.
+   */
+  secoesVisiveis: function() {
+    return this.SECOES.filter(function(secao) {
+      if (!secao.permissoes) return true;
+      return secao.permissoes.some(function(p) { return AcessoPGO5.podeNaInterface(p); });
+    });
+  },
 
   /** De qual seção vem o "pai" de cada tipo. */
   PAI_DE: { OPCAO: 'CAMPO', CATEGORIA: 'PRODUTO', SUBCATEGORIA: 'CATEGORIA' },
@@ -47,30 +73,72 @@ Pages.configuracoesPGO5 = {
 
   state: { catalogo: null, ativa: 'CANAL', carregando: false },
 
-  /** Abre a tela. Só o ADM chega aqui — o servidor revalida em cada ação. */
+  /**
+   * Abre a tela de Configurações do PGO 5.0.
+   *
+   * Quem chega aqui é decidido por PERMISSÃO, não por cargo: basta ter uma
+   * das permissões de administração. Cada gravação é revalidada no servidor.
+   * @param {HTMLElement} container Elemento <main id="app">.
+   */
   render: function(container) {
     var self = this;
     container = container || document.getElementById('app');
-    if (!App.isAdmin()) { App.navigateTo('dashboard'); return; }
+
+    var permissoesDaTela = ['gerenciarFormulario', 'gerenciarCanais', 'gerenciarCatalogos',
+      'gerenciarEquipe', 'gerenciarUsuariosTodos', 'gerenciarCargos', 'gerenciarNiveis'];
+    var podeEntrar = permissoesDaTela.some(function(p) { return AcessoPGO5.podeNaInterface(p); });
+    if (!podeEntrar) { App.navigateTo('dashboard'); return; }
 
     // Estado sempre limpo ao abrir a tela. Sem isso, uma gravação que ficou
     // pelo caminho (o usuário navegou antes da resposta chegar) deixaria a
     // trava de concorrência ligada para sempre, e as ações seguintes
     // passariam a não fazer nada — em silêncio.
     self.state.carregando = false;
+    self.state.ativa = self._secaoInicial();
 
     container.innerHTML = self._cabecalhoHtml() +
       '<div class="card">' + Components.emptyState('settings', 'Carregando configurações...') + '</div>';
-    self._carregar();
+    self._carregar(true);
+  },
+
+  /**
+   * Primeira seção a abrir.
+   *
+   * Nem todo mundo enxerga a mesma tela: um gestor pode ter acesso apenas a
+   * Usuários. Abrir sempre em "Canais" mostraria uma seção que ele não tem
+   * permissão de ver, então a tela começa na primeira seção visível PARA ELE.
+   * @returns {string} Tipo da seção (ex.: 'CANAL', 'USUARIOS').
+   */
+  _secaoInicial: function() {
+    var visiveis = this.secoesVisiveis();
+    return visiveis.length ? visiveis[0].tipo : 'CANAL';
+  },
+
+  /**
+   * Diz se vale a pena buscar o catálogo do servidor.
+   *
+   * Quem não administra catálogo (um gestor, por exemplo) receberia um erro
+   * de permissão e a tela inteira quebraria — mesmo tendo acesso legítimo a
+   * Usuários. Nesse caso a busca é simplesmente pulada.
+   * @returns {boolean} true quando o usuário administra alguma lista.
+   */
+  _precisaDoCatalogo: function() {
+    return ['gerenciarFormulario', 'gerenciarCanais', 'gerenciarCatalogos']
+      .some(function(p) { return AcessoPGO5.podeNaInterface(p); });
   },
 
   /** Busca o catálogo inteiro numa chamada e desenha. */
   _carregar: function(manterSecao) {
     var self = this;
+    if (!self._precisaDoCatalogo()) {
+      self.state.catalogo = { itens: {}, regras: {}, tiposCampo: [] };
+      self._pintar();
+      return;
+    }
     google.script.run
       .withSuccessHandler(function(cat) {
         self.state.catalogo = cat || { itens: {}, regras: {}, tiposCampo: [] };
-        if (!manterSecao) self.state.ativa = 'CANAL';
+        if (!manterSecao) self.state.ativa = self._secaoInicial();
         self._pintar();
       })
       .withFailureHandler(function(err) {
@@ -95,8 +163,12 @@ Pages.configuracoesPGO5 = {
     var container = document.getElementById('app');
     if (!container) return;
 
+    var secaoAtiva = self.SECOES.find(function(s) { return s.tipo === self.state.ativa; }) || {};
+    // Seções externas (Usuários, Cargos e Níveis) são telas próprias: elas
+    // desenham dentro do slot e trazem o próprio botão de "novo".
+    var externa = secaoAtiva.externa || '';
     var regras = (self.state.catalogo.regras || {})[self.state.ativa] || {};
-    var podeCriar = regras.podeCriar !== false;
+    var podeCriar = !externa && regras.podeCriar !== false;
 
     var html = '<div class="page-header"><div>' +
       '<h1 class="page-title">Configurações</h1>' +
@@ -105,16 +177,19 @@ Pages.configuracoesPGO5 = {
       '</div>';
 
     html += '<div class="config-layout"><aside class="config-nav">';
-    self.SECOES.forEach(function(s) {
+    self.secoesVisiveis().forEach(function(s) {
       var qtd = ((self.state.catalogo.itens || {})[s.tipo] || []).length;
       html += '<button class="config-nav-item' + (self.state.ativa === s.tipo ? ' active' : '') +
         '" data-secao="' + s.tipo + '">' +
         '<span class="material-icons">' + s.icone + '</span><span>' + s.label + '</span>' +
-        '<span class="config-count">' + qtd + '</span></button>';
+        (s.externa ? '' : '<span class="config-count">' + qtd + '</span>') + '</button>';
     });
-    html += '</aside><section class="card config-content">' + self._tabelaHtml() + '</section></div>';
+    html += externa
+      ? '</aside><section class="config-content" id="pgo5cfg-externo"></section></div>'
+      : '</aside><section class="card config-content">' + self._tabelaHtml() + '</section></div>';
 
     container.innerHTML = html;
+    if (externa && Pages[externa]) Pages[externa].render();
     self._ligarEventos();
   },
 

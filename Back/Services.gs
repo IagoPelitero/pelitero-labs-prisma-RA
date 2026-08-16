@@ -206,6 +206,17 @@ function getBootstrapData() {
     // antigo e o motor dinâmico do 5.0 — sem isso ele teria de descobrir
     // por tentativa e erro a cada abertura de tela.
     schemaBanco: (typeof detectarEstruturaBanco_ === 'function') ? detectarEstruturaBanco_() : 'LEGADO',
+    // Permissões efetivas do usuário no PGO 5.0. Servem para a interface
+    // esconder o que ele não pode fazer — NUNCA como controle de acesso:
+    // toda função sensível revalida no servidor (ver exigirPermissao_).
+    // Numa base 4.x isto vem vazio e as telas seguem a regra antiga.
+    // A checagem de tipo evita que um projeto publicado pela metade
+    // (Services.gs novo, Pgo5Permissoes.gs ainda não enviado) derrube o
+    // bootstrap inteiro. Sem o módulo, a interface só perde os atalhos
+    // administrativos — o sistema continua abrindo.
+    acessoPGO5: (typeof montarResumoDeAcessoPGO5_ === 'function')
+      ? montarResumoDeAcessoPGO5_()
+      : { schema: 'LEGADO', cargo: '', nivelAcesso: '', permissoes: [], escopos: {} },
     // Rótulos visíveis das telas (personalizáveis pelo ADM). Vão para
     // TODOS os perfis — quem só visualiza precisa ver o mesmo nome. As
     // permissões de cada tela seguem inalteradas.
@@ -1511,7 +1522,7 @@ function lerNomesTelas_() {
  */
 function getNomesTelas() {
   requireAuth_();
-  requireAdmin_();
+  exigirAcesso_('configurarSistema', requireAdmin_);
   const nomes = lerNomesTelas_();
   return TELAS_RENOMEAVEIS.map(function(tela) {
     return {
@@ -1532,7 +1543,7 @@ function getNomesTelas() {
  */
 function salvarNomesTelas(dados) {
   requireAuth_();
-  requireAdmin_();
+  exigirAcesso_('configurarSistema', requireAdmin_);
   const entrada = dados || {};
   const paraGravar = {};
 
@@ -1678,7 +1689,7 @@ function lerIndicOpConfig_() {
 /** (ADM) Retorna a configuração do módulo para a tela de Configurações. */
 function getIndicadoresOperacionaisConfig() {
   requireAuth_();
-  requireAdmin_();
+  exigirAcesso_('configurarAnaliseSac', requireAdmin_);
   return lerIndicOpConfig_();
 }
 
@@ -1690,7 +1701,7 @@ function getIndicadoresOperacionaisConfig() {
  */
 function salvarIndicadoresOperacionaisConfig(dados) {
   requireAuth_();
-  requireAdmin_();
+  exigirAcesso_('configurarAnaliseSac', requireAdmin_);
   const entrada = dados || {};
   const limparLista = function(v) {
     return listaConfigOp_(v).map(function(item) { return sanitizeInput(item); })
@@ -1769,7 +1780,7 @@ function limparCacheIndicOp_() {
  */
 function getIndicadoresOperacionaisFonte(dados) {
   requireAuth_();
-  requireAdmin_();
+  exigirAcesso_('visualizarFonteSac', requireAdmin_);
   const entrada = dados || {};
   const salvo = lerIndicOpConfig_();
   const url = sanitizeInput(entrada.planilhaUrl) || salvo.planilhaUrl;
@@ -2215,7 +2226,7 @@ function guardarCacheIndicOp_(cacheKey, resultado) {
  */
 function getIndicadoresOperacionais(options) {
   requireAuth_();
-  requireSupervisor_();
+  exigirAcesso_('analiseSac', requireSupervisor_);
   const cfg = lerIndicOpConfig_();
   if (!cfg.habilitado) {
     return { habilitado: false, abaNome: cfg.abaNome };
@@ -2281,7 +2292,7 @@ function getIndicadoresOperacionais(options) {
  */
 function salvarForaSLA(dataChave, valor) {
   requireAuth_();
-  requireSupervisor_();
+  exigirAcesso_('analiseSac', requireSupervisor_);
   const chave = sanitizeInput(dataChave);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(chave)) throw new Error('Data inválida.');
   let numero = Number(valor);
@@ -2344,7 +2355,7 @@ function updateForaSLAPorData_(dataChave, numero) {
  */
 function getConfiguracoes() {
   requireAuth_();
-  requireSupervisor_();
+  exigirAcesso_('gerenciarCatalogos', requireSupervisor_);
   const isAdmin = isAdminProfile_(getActor_().perfil);
   const entities = getConfigurationEntities_();
   const result = {};
@@ -2369,11 +2380,11 @@ function getConfiguracoes() {
  */
 function salvarConfiguracao(entidade, dados, id) {
   requireAuth_();
-  requireSupervisor_();
+  exigirAcesso_('gerenciarCatalogos', requireSupervisor_);
   const entities = getConfigurationEntities_();
   const meta = entities[sanitizeInput(entidade)];
   if (!meta) throw new Error('Tipo de configuração inválido.');
-  if (meta.adminOnly) requireAdmin_();
+  if (meta.adminOnly) exigirAcesso_('gerenciarCatalogos', requireAdmin_);
 
   const input = dados || {};
   const record = {};
@@ -2523,11 +2534,11 @@ function salvarConfiguracao(entidade, dados, id) {
  */
 function excluirConfiguracao(entidade, id) {
   requireAuth_();
-  requireSupervisor_();
+  exigirAcesso_('gerenciarCatalogos', requireSupervisor_);
   const entities = getConfigurationEntities_();
   const meta = entities[sanitizeInput(entidade)];
   if (!meta) throw new Error('Tipo de configuração inválido.');
-  if (meta.adminOnly) requireAdmin_();
+  if (meta.adminOnly) exigirAcesso_('gerenciarCatalogos', requireAdmin_);
   const safeId = sanitizeInput(id);
   const existing = getById(meta.sheet, safeId);
   if (!existing) throw new Error('Registro não encontrado.');
@@ -2583,7 +2594,7 @@ function excluirConfiguracao(entidade, id) {
  */
 function getDatabaseInfo() {
   requireAuth_();
-  requireAdmin_();
+  exigirAcesso_('visualizarBancoPgo', requireAdmin_);
   const ss = getSpreadsheet();
   return { nome: ss.getName(), url: ss.getUrl() };
 }
@@ -2807,6 +2818,33 @@ function requireSupervisor_() {
 }
 
 /**
+ * Barreira de acesso que serve aos dois bancos.
+ *
+ * POR QUE ISTO EXISTE
+ * As telas herdadas do 4.x (Indicadores, Análise de SAC, nomes de telas)
+ * decidiam o acesso pelo NOME do perfil — 'Supervisor', 'ADM'. No PGO 5.0 o
+ * nome do nível é livre: o Administrador pode criar um nível chamado
+ * "Coordenação". Comparar nomes barraria quem tem a permissão e liberaria
+ * quem só tem o rótulo. Então:
+ *
+ *   - Banco PGO 5.0 → decide pela PERMISSÃO (exigirPermissao_).
+ *   - Banco 4.x     → mantém exatamente o comportamento antigo, porque lá
+ *                     não existe nível de acesso para consultar.
+ *
+ * @param {string} permissao Permissão exigida no PGO 5.0 (ex.: 'analiseSac').
+ * @param {Function} barreiraLegado requireSupervisor_ ou requireAdmin_.
+ * @returns {void}
+ * @throws {Error} Quando o usuário não pode executar a ação.
+ */
+function exigirAcesso_(permissao, barreiraLegado) {
+  if (estruturaEhPGO5_() && typeof exigirPermissao_ === 'function') {
+    exigirPermissao_(permissao);
+    return;
+  }
+  barreiraLegado();
+}
+
+/**
  * Interrompe a execução se o usuário não for ADM.
  * @throws {Error} Quando o perfil não tem permissão.
  */
@@ -3008,6 +3046,12 @@ function resolverUsuarioIdPorNome_(nome) {
  * Supervisor recebe a lista completa, sem alteração.
  */
 function restrictToOwnerIfNeeded_(records, actor) {
+  // BANCO PGO 5.0: o recorte já foi aplicado na origem, pelo motor de
+  // permissões (ver pgo5FiltrarAtendimentosPorEscopo_). Reaplicar aqui a
+  // regra do 4.x — que compara o NOME do responsável com o do usuário —
+  // apagaria da tela justamente o que um gestor pode ver da equipe.
+  if (estruturaEhPGO5_()) return records;
+
   if (isSupervisorProfile_(actor.perfil)) return records;
   return records.filter(function(record) {
     return canAccessAtendimento_(record, actor);

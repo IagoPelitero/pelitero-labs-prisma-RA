@@ -87,6 +87,8 @@ var App = {
         // Nomes visíveis das telas definidos pelo ADM (só rótulos).
         App.nomesTelas = result && result.nomesTelas ? result.nomesTelas : {};
         App.schemaBanco = (result && result.schemaBanco) ? result.schemaBanco : 'LEGADO';
+        App.acessoPGO5 = (result && result.acessoPGO5) ? result.acessoPGO5
+          : { schema: 'LEGADO', cargo: '', nivelAcesso: '', permissoes: [], escopos: {} };
         App.renderUser();
         App.applyRoleVisibility();
         App.aplicarNomesTelas();
@@ -174,6 +176,10 @@ var App = {
   // bootstrap; na dúvida assume 4.x, que é o comportamento já existente.
   schemaBanco: 'LEGADO',
 
+  // Cargo, nível e permissões efetivas do usuário no PGO 5.0 (bootstrap).
+  // Usado só para decidir o que MOSTRAR — o servidor revalida tudo.
+  acessoPGO5: { schema: 'LEGADO', cargo: '', nivelAcesso: '', permissoes: [], escopos: {} },
+
   // true quando a instalação já roda sobre o banco PGO 5.0 — é o que faz
   // o Novo Atendimento usar o motor dinâmico em vez do formulário antigo.
   usandoPGO5: function() {
@@ -225,6 +231,7 @@ var App = {
   // "data-admin-only" exige ADM. Se o usuário já estiver numa tela
   // restrita, é redirecionado para o Dashboard.
   applyRoleVisibility: function() {
+    if (this.schemaBanco === 'PGO5') { this.aplicarVisibilidadePorPermissao(); return; }
     var allowed = this.isSupervisor();
     var admin = this.isAdmin();
     document.querySelectorAll('[data-supervisor-only]').forEach(function(element) {
@@ -234,6 +241,52 @@ var App = {
       element.style.display = admin ? '' : 'none';
     });
     if (!allowed && this.currentPage === 'configuracoes') this.navigateTo('dashboard');
+  },
+
+  /**
+   * Mostra ou esconde os itens do menu conforme as PERMISSÕES do usuário.
+   *
+   * Vale só no banco PGO 5.0. No 4.x a decisão continua sendo pelo perfil,
+   * porque lá não existe nível de acesso.
+   *
+   * Por que não usar o perfil aqui: no PGO 5.0 o nome do nível é livre — o
+   * ADM pode criar um nível chamado "Coordenação" ou "Retaguarda". Comparar
+   * o nome esconderia o menu de gente que tem a permissão, e é justamente
+   * essa decisão por rótulo que a Etapa 3A elimina.
+   *
+   * Cada item do menu declara em data-pgo5-permissoes as permissões que o
+   * liberam (basta UMA). Item sem o atributo é visível para todos os
+   * usuários autenticados — é o caso do Dashboard.
+   *
+   * ⚠️ Isto é conforto visual, não segurança: o servidor revalida cada
+   * chamada com exigirPermissao_() (ver Pgo5Permissoes.gs).
+   */
+  aplicarVisibilidadePorPermissao: function() {
+    var minhas = ((this.acessoPGO5 || {}).permissoes) || [];
+    var podeVer = function(elemento) {
+      var lista = elemento.getAttribute('data-pgo5-permissoes');
+      if (!lista) return true;
+      return lista.split(',').some(function(permissao) {
+        return minhas.indexOf(permissao.trim()) !== -1;
+      });
+    };
+
+    var telasPermitidas = {};
+    document.querySelectorAll('.sidebar-item').forEach(function(item) {
+      var visivel = podeVer(item);
+      item.style.display = visivel ? '' : 'none';
+      telasPermitidas[item.getAttribute('data-page')] = visivel;
+    });
+
+    // Itens fora do menu que também são restritos (ex.: botões marcados no
+    // 4.x). Sem permissão declarada, seguem visíveis.
+    document.querySelectorAll('[data-pgo5-permissoes]:not(.sidebar-item)').forEach(function(el) {
+      el.style.display = podeVer(el) ? '' : 'none';
+    });
+
+    // Já estava numa tela que deixou de ser permitida (troca de nível de
+    // acesso durante a sessão): volta para o Dashboard.
+    if (telasPermitidas[this.currentPage] === false) this.navigateTo('dashboard');
   },
 
   // Nome VISÍVEL de uma tela, definido pelo ADM em Configurações. É só o

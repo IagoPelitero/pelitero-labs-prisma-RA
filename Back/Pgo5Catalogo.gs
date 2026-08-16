@@ -488,6 +488,21 @@ function pgo5ChaveSeed_(tipo, nome, pai) {
  *   - excluir é FÍSICO e NUNCA em cascata.
  */
 
+/**
+ * Qual permissão é exigida para mexer em cada tipo de item do catálogo.
+ *
+ * Separar por domínio permite, por exemplo, um nível que administra canais
+ * mas não mexe nos campos do formulário.
+ *
+ * @param {string} tipo Tipo do item (CANAL, CAMPO, PRODUTO…).
+ * @returns {string} Chave da permissão exigida.
+ */
+function permissaoDoTipoDeCatalogo_(tipo) {
+  if (tipo === 'CANAL') return 'gerenciarCanais';
+  if (tipo === 'CAMPO' || tipo === 'OPCAO') return 'gerenciarFormulario';
+  return 'gerenciarCatalogos';
+}
+
 /** Tipos que o ADM pode manter pela tela, e o que é permitido em cada um. */
 function pgo5RegrasCatalogo_() {
   return {
@@ -509,8 +524,13 @@ function pgo5RegrasCatalogo_() {
  * @returns {Object} { itens: {TIPO: [...]}, canais, produtos, categorias, campos, regras }.
  */
 function getCatalogoPGO5() {
-  requireAuth_();
-  requireAdmin_();
+  // Ver o catálogo basta uma das permissões de administração: quem cuida de
+  // canais, de campos ou dos catálogos precisa da mesma tela.
+  const ator = requireAuth_();
+  const usuario = atorComoUsuario_(ator);
+  const podeVer = ['gerenciarFormulario', 'gerenciarCanais', 'gerenciarCatalogos']
+    .some(function(permissao) { return usuarioTemPermissao_(usuario, permissao); });
+  if (!podeVer) throw new Error('Você não tem permissão para executar esta ação.');
   const catalogo = pgo5CatalogoBruto_();
   const rotulos = pgo5MapaRotulos_(catalogo);
 
@@ -545,10 +565,8 @@ function getCatalogoPGO5() {
  * @returns {Object} { success, id }.
  */
 function salvarItemCatalogoPGO5(tipo, dados, id) {
-  requireAuth_();
-  requireAdmin_();
-
   const t = String(tipo || '').trim().toUpperCase();
+  exigirPermissao_(permissaoDoTipoDeCatalogo_(t));
   const regras = pgo5RegrasCatalogo_()[t];
   if (!regras) throw new Error('Tipo de item inválido: "' + tipo + '".');
 
@@ -631,10 +649,8 @@ function salvarItemCatalogoPGO5(tipo, dados, id) {
  * @returns {Object} { success }.
  */
 function excluirItemCatalogoPGO5(tipo, id) {
-  requireAuth_();
-  requireAdmin_();
-
   const t = String(tipo || '').trim().toUpperCase();
+  exigirPermissao_(permissaoDoTipoDeCatalogo_(t));
   const regras = pgo5RegrasCatalogo_()[t];
   if (!regras) throw new Error('Tipo de item inválido: "' + tipo + '".');
   if (!regras.podeExcluir) {
@@ -661,10 +677,8 @@ function excluirItemCatalogoPGO5(tipo, id) {
  * @returns {Object} { success }.
  */
 function moverItemCatalogoPGO5(tipo, id, direcao) {
-  requireAuth_();
-  requireAdmin_();
-
   const t = String(tipo || '').trim().toUpperCase();
+  exigirPermissao_(permissaoDoTipoDeCatalogo_(t));
   if (!pgo5RegrasCatalogo_()[t]) throw new Error('Tipo de item inválido: "' + tipo + '".');
 
   const registroId = String(id || '').trim();

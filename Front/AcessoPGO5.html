@@ -1,0 +1,611 @@
+<script>
+/* ============================================================
+   PRISMA Gestão Operacional — PGO 5.0
+   Arquivo: AcessoPGO5.html
+
+   RESPONSABILIDADE
+   As três telas de acesso: Usuários, Cargos e Níveis de Acesso —
+   incluindo o editor de permissões de cada nível.
+
+   ⚠️ CARGO ≠ NÍVEL
+     Cargo  → a função organizacional da pessoa (o que ela É).
+     Nível  → o que ela PODE fazer. É daqui que sai a permissão.
+
+   ⚠️ ESCONDER BOTÃO NÃO É SEGURANÇA
+   Tudo o que esta tela oculta é apenas conforto visual. Cada gravação é
+   revalidada no servidor por exigirPermissao_() — ver Pgo5Permissoes.gs.
+   ============================================================ */
+
+var AcessoPGO5 = {
+
+  /**
+   * Diz se o usuário logado tem uma permissão.
+   *
+   * Lê a lista que veio no bootstrap. Serve só para decidir o que mostrar;
+   * a decisão que vale é a do servidor.
+   *
+   * @param {string} permissao Chave da permissão.
+   * @returns {boolean} true quando a interface pode exibir o recurso.
+   */
+  podeNaInterface: function(permissao) {
+    var acesso = App.acessoPGO5 || {};
+    return (acesso.permissoes || []).indexOf(permissao) !== -1;
+  }
+};
+
+/* ============================================================
+   Pages.usuariosPGO5 — cadastro de pessoas
+   ============================================================ */
+Pages.usuariosPGO5 = {
+  state: { dados: null, salvando: false },
+
+  /**
+   * Abre a tela de Usuários.
+   * @param {HTMLElement} container Elemento <main id="app">.
+   */
+
+  /**
+   * Devolve o elemento onde esta tela deve desenhar.
+   *
+   * A tela tem dois lugares possíveis: dentro de Configurações (existe o slot
+   * "pgo5cfg-externo", e o menu de Configurações continua visível ao lado) ou
+   * sozinha, ocupando o <main id="app">. O alvo é recalculado a cada uso
+   * porque o repintar acontece depois de chamadas assíncronas, quando o
+   * usuário já pode ter trocado de tela.
+   *
+   * @returns {HTMLElement} Elemento que receberá o HTML.
+   */
+  _alvo: function() {
+    return document.getElementById('pgo5cfg-externo') || document.getElementById('app');
+  },
+
+  /**
+   * Diz se a tela está embutida em Configurações.
+   *
+   * Embutida, ela não repete o título da página (Configurações já o exibe) e
+   * coloca o botão de criação no cabeçalho do próprio card.
+   *
+   * @returns {boolean} true quando existe o slot de Configurações.
+   */
+  _embutido: function() {
+    return !!document.getElementById('pgo5cfg-externo');
+  },
+
+  render: function(container) {
+    var self = this;
+    container = container || self._alvo();
+    self.state.salvando = false;
+
+    container.innerHTML = self._cabecalho() +
+      '<div class="card">' + Components.emptyState('group', 'Carregando usuários...') + '</div>';
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.dados = dados || { usuarios: [], cargos: [], niveis: [] };
+        self._pintar();
+      })
+      .withFailureHandler(function(err) {
+        container.innerHTML = self._cabecalho() + '<div class="card">' +
+          Components.emptyState('lock', 'Você não tem acesso a esta tela.',
+            App.escapeHtml((err && err.message) || '')) + '</div>';
+      })
+      .listarUsuariosPGO5();
+  },
+
+  _cabecalho: function() {
+    if (this._embutido()) return '';
+    return '<div class="page-header"><div>' +
+      '<h1 class="page-title">Usuários</h1>' +
+      '<p class="page-subtitle">Quem acessa o sistema, com que cargo e com que nível de acesso.</p>' +
+      '</div></div>';
+  },
+
+  /** Desenha a lista. */
+  _pintar: function() {
+    var self = this;
+    var dados = self.state.dados;
+    var container = self._alvo();
+    var embutido = self._embutido();
+    var botaoNovo = '<button class="btn btn-primary" id="pgo5usr-novo">+ Novo usuário</button>';
+
+    var html = embutido ? '' : '<div class="page-header"><div>' +
+      '<h1 class="page-title">Usuários</h1>' +
+      '<p class="page-subtitle">Quem acessa o sistema, com que cargo e com que nível de acesso.</p></div>' +
+      botaoNovo + '</div>';
+
+    html += '<div class="card">';
+    if (embutido) {
+      html += '<div class="card-header"><div class="card-title">' +
+        '<span class="material-icons">group</span>Usuários</div>' + botaoNovo + '</div>';
+    }
+    html += '<p class="pgo5cfg-ajuda">O <strong>cargo</strong> descreve a função da pessoa. ' +
+      'Quem define o que ela pode fazer é o <strong>nível de acesso</strong>. ' +
+      'O <strong>supervisor</strong> monta a hierarquia — é ele que define o que um gestor enxerga ' +
+      '(a equipe é apenas uma informação organizacional).</p>';
+
+    if (!dados.usuarios.length) {
+      html += Components.emptyState('group', 'Nenhum usuário cadastrado.');
+    } else {
+      html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+        '<th>Nome</th><th>E-mail</th><th>Cargo</th><th>Nível de acesso</th>' +
+        '<th>Supervisor</th><th>Equipe</th><th>Situação</th>' +
+        '<th class="pgo5cfg-acoes-col">Ações</th></tr></thead><tbody>';
+      dados.usuarios.forEach(function(usuario) {
+        html += '<tr>';
+        html += '<td><strong>' + App.escapeHtml(usuario.nome) + '</strong></td>';
+        html += '<td>' + App.escapeHtml(usuario.email) + '</td>';
+        html += '<td>' + App.escapeHtml(usuario.cargo) + '</td>';
+        html += '<td>' + App.escapeHtml(usuario.nivelAcesso) + '</td>';
+        html += '<td>' + App.escapeHtml(usuario.supervisor) + '</td>';
+        html += '<td>' + App.escapeHtml(usuario.equipe || '-') + '</td>';
+        html += '<td>' + (usuario.ativo
+          ? '<span class="badge badge-success">Ativo</span>'
+          : '<span class="badge badge-neutral">Inativo</span>') + '</td>';
+        html += '<td class="pgo5cfg-acoes">' +
+          '<button type="button" class="btn-icon pgo5usr-acao" data-acao="editar" data-id="' +
+          App.escapeHtml(usuario.id) + '" title="Editar"><span class="material-icons">edit</span></button>' +
+          '<button type="button" class="btn-icon pgo5usr-acao" data-acao="alternar" data-id="' +
+          App.escapeHtml(usuario.id) + '" title="' + (usuario.ativo ? 'Desativar' : 'Ativar') + '">' +
+          '<span class="material-icons">' + (usuario.ativo ? 'toggle_on' : 'toggle_off') + '</span></button>' +
+          '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+    self._ligarEventos();
+  },
+
+  _ligarEventos: function() {
+    var self = this;
+    var novo = document.getElementById('pgo5usr-novo');
+    if (novo) novo.addEventListener('click', function() { self._abrirFormulario(null); });
+
+    document.querySelectorAll('.pgo5usr-acao').forEach(function(botao) {
+      botao.addEventListener('click', function() {
+        var id = botao.getAttribute('data-id');
+        var usuario = self.state.dados.usuarios.find(function(u) { return u.id === id; });
+        if (!usuario) return;
+        if (botao.getAttribute('data-acao') === 'editar') { self._abrirFormulario(usuario); return; }
+        self._chamar('alterarSituacaoUsuarioPGO5', [id, !usuario.ativo],
+          usuario.ativo ? 'Usuário desativado.' : 'Usuário reativado.');
+      });
+    });
+  },
+
+  /** Modal de criação/edição. */
+  _abrirFormulario: function(usuario) {
+    var self = this;
+    var dados = self.state.dados;
+    var u = usuario || {};
+    var edicao = !!usuario;
+
+    var body = '<div class="form-group"><label class="form-label" for="pgo5usr-nome">Nome <span class="required">*</span></label>' +
+      '<input class="form-control" id="pgo5usr-nome" type="text" value="' + App.escapeHtml(u.nome || '') + '"></div>';
+    body += '<div class="form-group"><label class="form-label" for="pgo5usr-email">E-mail da conta Google <span class="required">*</span></label>' +
+      '<input class="form-control" id="pgo5usr-email" type="email" value="' + App.escapeHtml(u.email || '') + '"></div>';
+    body += '<small class="pgo5cfg-nota">É o e-mail que identifica a pessoa. O PGO não usa senha própria.</small>';
+
+    body += self._seletor('pgo5usr-cargo', 'Cargo', dados.cargos, u.cargoId, '— sem cargo —');
+    body += self._seletor('pgo5usr-nivel', 'Nível de acesso', dados.niveis, u.nivelAcessoId, '— selecione —', true);
+    body += '<small class="pgo5cfg-nota">O nível é o que concede as permissões. O cargo, não.</small>';
+
+    var supervisores = (dados.usuarios || [])
+      .filter(function(x) { return x.ativo && x.id !== u.id; })
+      .map(function(x) { return { id: x.id, nome: x.nome }; });
+    body += self._seletor('pgo5usr-supervisor', 'Supervisor', supervisores, u.supervisorId, '— sem supervisor —');
+    body += '<small class="pgo5cfg-nota">Define a hierarquia: um gestor enxerga toda a árvore abaixo dele.</small>';
+
+    body += '<div class="form-group"><label class="form-label" for="pgo5usr-equipe">Equipe</label>' +
+      '<input class="form-control" id="pgo5usr-equipe" type="text" value="' + App.escapeHtml(u.equipe || '') + '"></div>';
+    body += '<small class="pgo5cfg-nota">Apenas organizacional — a equipe NÃO concede acesso a nada.</small>';
+
+    body += '<div class="form-group"><label class="pgo5-checkbox"><input type="checkbox" id="pgo5usr-ativo"' +
+      (edicao ? (u.ativo ? ' checked' : '') : ' checked') + '> Ativo</label></div>';
+
+    Components.modal({
+      title: (edicao ? 'Editar' : 'Novo') + ' usuário',
+      body: body,
+      confirmText: 'Salvar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        var payload = {
+          nome: (document.getElementById('pgo5usr-nome') || {}).value || '',
+          email: (document.getElementById('pgo5usr-email') || {}).value || '',
+          cargoId: (document.getElementById('pgo5usr-cargo') || {}).value || '',
+          nivelAcessoId: (document.getElementById('pgo5usr-nivel') || {}).value || '',
+          supervisorId: (document.getElementById('pgo5usr-supervisor') || {}).value || '',
+          equipe: (document.getElementById('pgo5usr-equipe') || {}).value || '',
+          ativo: !!(document.getElementById('pgo5usr-ativo') || {}).checked
+        };
+        if (!payload.nome || !payload.email || !payload.nivelAcessoId) {
+          Components.toast('Preencha nome, e-mail e nível de acesso.', 'warning');
+          return false;   // mantém o modal aberto
+        }
+        self._chamar('salvarUsuarioPGO5', [payload, edicao ? u.id : ''],
+          edicao ? 'Usuário atualizado.' : 'Usuário criado.');
+      }
+    });
+  },
+
+  /** Monta um <select> simples a partir de uma lista de { id, nome }. */
+  _seletor: function(id, rotulo, itens, selecionado, textoVazio, obrigatorio) {
+    var html = '<div class="form-group"><label class="form-label" for="' + id + '">' +
+      rotulo + (obrigatorio ? ' <span class="required">*</span>' : '') + '</label>';
+    html += '<select class="form-control" id="' + id + '">';
+    html += '<option value="">' + App.escapeHtml(textoVazio) + '</option>';
+    (itens || []).forEach(function(item) {
+      html += '<option value="' + App.escapeHtml(item.id) + '"' +
+        (String(selecionado || '') === item.id ? ' selected' : '') + '>' +
+        App.escapeHtml(item.nome) + '</option>';
+    });
+    return html + '</select></div>';
+  },
+
+  /** Chama o backend e recarrega a lista. O sucesso só é anunciado depois. */
+  _chamar: function(funcao, args, mensagemOk) {
+    var self = this;
+    if (self.state.salvando) return;
+    self.state.salvando = true;
+    Components.showLoading('Salvando...');
+
+    var run = google.script.run
+      .withSuccessHandler(function() {
+        self.state.salvando = false;
+        Components.hideLoading();
+        Components.toast(mensagemOk, 'success');
+        self.render();
+      })
+      .withFailureHandler(function(err) {
+        self.state.salvando = false;
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível concluir a operação.'), 'error');
+      });
+    run[funcao].apply(run, args);
+  }
+};
+
+/* ============================================================
+   Pages.acessosPGO5 — Cargos e Níveis de Acesso
+   ============================================================ */
+Pages.acessosPGO5 = {
+  state: { dados: null, aba: 'NIVEIS', salvando: false },
+
+  /**
+   * Nome de exibição de cada grupo de permissões.
+   *
+   * O servidor devolve o catálogo agrupado pela chave técnica do domínio
+   * (PGO5_PERMISSOES em Pgo5Permissoes.gs). Aqui essa chave vira um texto em
+   * português. Grupo novo criado no backend e ainda sem tradução aparece com
+   * a própria chave — a tela não quebra.
+   */
+  ROTULO_GRUPO: {
+    Atendimentos: 'Atendimentos próprios',
+    Equipe: 'Atendimentos da equipe',
+    Todos: 'Atendimentos de todos',
+    Relatorios: 'Relatórios',
+    Produtividade: 'Produtividade',
+    SAC: 'Análise de SAC',
+    Usuarios: 'Usuários',
+    Configuracoes: 'Configurações',
+    Seguranca: 'Segurança'
+  },
+
+  /**
+   * Abre a tela de Cargos e Níveis.
+   * @param {HTMLElement} container Elemento <main id="app">.
+   */
+
+  /**
+   * Devolve o elemento onde esta tela deve desenhar.
+   *
+   * A tela tem dois lugares possíveis: dentro de Configurações (existe o slot
+   * "pgo5cfg-externo", e o menu de Configurações continua visível ao lado) ou
+   * sozinha, ocupando o <main id="app">. O alvo é recalculado a cada uso
+   * porque o repintar acontece depois de chamadas assíncronas, quando o
+   * usuário já pode ter trocado de tela.
+   *
+   * @returns {HTMLElement} Elemento que receberá o HTML.
+   */
+  _alvo: function() {
+    return document.getElementById('pgo5cfg-externo') || document.getElementById('app');
+  },
+
+  /**
+   * Diz se a tela está embutida em Configurações.
+   *
+   * Embutida, ela não repete o título da página (Configurações já o exibe) e
+   * coloca o botão de criação no cabeçalho do próprio card.
+   *
+   * @returns {boolean} true quando existe o slot de Configurações.
+   */
+  _embutido: function() {
+    return !!document.getElementById('pgo5cfg-externo');
+  },
+
+  render: function(container) {
+    var self = this;
+    container = container || self._alvo();
+    self.state.salvando = false;
+
+    container.innerHTML = self._cabecalho() +
+      '<div class="card">' + Components.emptyState('badge', 'Carregando...') + '</div>';
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.dados = dados || { cargos: [], niveis: [], catalogoPermissoes: {} };
+        self._pintar();
+      })
+      .withFailureHandler(function(err) {
+        container.innerHTML = self._cabecalho() + '<div class="card">' +
+          Components.emptyState('lock', 'Você não tem acesso a esta tela.',
+            App.escapeHtml((err && err.message) || '')) + '</div>';
+      })
+      .getCargosENiveisPGO5();
+  },
+
+  _cabecalho: function() {
+    if (this._embutido()) return '';
+    return '<div class="page-header"><div>' +
+      '<h1 class="page-title">Cargos e Níveis de Acesso</h1>' +
+      '<p class="page-subtitle">O cargo diz o que a pessoa é. O nível diz o que ela pode.</p>' +
+      '</div></div>';
+  },
+
+  _pintar: function() {
+    var self = this;
+    var dados = self.state.dados;
+    var ehNiveis = self.state.aba === 'NIVEIS';
+    var podeCriar = ehNiveis ? dados.podeGerenciarNiveis : dados.podeGerenciarCargos;
+
+    var embutido = self._embutido();
+    var botaoNovo = podeCriar ? '<button class="btn btn-primary" id="pgo5acc-novo">+ Novo ' +
+      (ehNiveis ? 'nível' : 'cargo') + '</button>' : '';
+    var abas = [['NIVEIS', 'Níveis de Acesso', 'security'], ['CARGOS', 'Cargos', 'badge']];
+
+    var html = embutido ? '' : '<div class="page-header"><div>' +
+      '<h1 class="page-title">Cargos e Níveis de Acesso</h1>' +
+      '<p class="page-subtitle">O cargo diz o que a pessoa é. O nível diz o que ela pode.</p></div>' +
+      botaoNovo + '</div>';
+
+    // Embutida em Configurações já existe um menu à esquerda; repetir outro
+    // menu lateral aqui dentro confundiria. Nesse caso as duas listas viram
+    // abas horizontais dentro do próprio card.
+    if (embutido) {
+      html += '<div class="card"><div class="card-header"><div class="pgo5acc-abas">';
+      abas.forEach(function(item) {
+        html += '<button class="pgo5acc-aba' + (self.state.aba === item[0] ? ' active' : '') +
+          '" data-aba="' + item[0] + '"><span class="material-icons">' + item[2] + '</span>' +
+          '<span>' + item[1] + '</span></button>';
+      });
+      html += '</div>' + botaoNovo + '</div>';
+    } else {
+      html += '<div class="config-layout"><aside class="config-nav">';
+      abas.forEach(function(item) {
+        html += '<button class="config-nav-item' + (self.state.aba === item[0] ? ' active' : '') +
+          '" data-aba="' + item[0] + '"><span class="material-icons">' + item[2] + '</span>' +
+          '<span>' + item[1] + '</span></button>';
+      });
+      html += '</aside><section class="card config-content">';
+    }
+
+    if (ehNiveis) {
+      if (!embutido) html += '<div class="card-header"><div class="card-title">' +
+        '<span class="material-icons">security</span>Níveis de Acesso</div></div>';
+      html += '<p class="pgo5cfg-ajuda">O nível de acesso define o que o usuário pode fazer. ' +
+        'Alterar as permissões aqui muda o que TODOS os usuários daquele nível conseguem fazer.</p>';
+      html += self._tabelaNiveis();
+    } else {
+      if (!embutido) html += '<div class="card-header"><div class="card-title">' +
+        '<span class="material-icons">badge</span>Cargos</div></div>';
+      html += '<p class="pgo5cfg-ajuda">Cargo representa a função organizacional. ' +
+        'Ele <strong>não concede permissão</strong> — quem concede é o nível de acesso.</p>';
+      html += self._tabelaCargos();
+    }
+
+    html += embutido ? '</div>' : '</section></div>';
+    self._alvo().innerHTML = html;
+    self._ligarEventos();
+  },
+
+  _tabelaCargos: function() {
+    var dados = this.state.dados;
+    if (!dados.cargos.length) return Components.emptyState('badge', 'Nenhum cargo cadastrado.');
+
+    var html = '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+      '<th>Ordem</th><th>Cargo</th><th>Situação</th>' +
+      '<th class="pgo5cfg-acoes-col">Ações</th></tr></thead><tbody>';
+    dados.cargos.forEach(function(cargo, i) {
+      html += '<tr><td>' + (cargo.ordem || i + 1) + '</td>' +
+        '<td><strong>' + App.escapeHtml(cargo.nome) + '</strong></td>' +
+        '<td>' + (cargo.ativo ? '<span class="badge badge-success">Ativo</span>'
+          : '<span class="badge badge-neutral">Inativo</span>') + '</td>' +
+        '<td class="pgo5cfg-acoes">' +
+        '<button type="button" class="btn-icon pgo5acc-acao" data-tipo="CARGO" data-acao="editar" data-id="' +
+        App.escapeHtml(cargo.id) + '" title="Editar"><span class="material-icons">edit</span></button>' +
+        '<button type="button" class="btn-icon pgo5acc-acao" data-tipo="CARGO" data-acao="alternar" data-id="' +
+        App.escapeHtml(cargo.id) + '" title="' + (cargo.ativo ? 'Desativar' : 'Ativar') + '">' +
+        '<span class="material-icons">' + (cargo.ativo ? 'toggle_on' : 'toggle_off') + '</span></button>' +
+        '</td></tr>';
+    });
+    return html + '</tbody></table></div>';
+  },
+
+  _tabelaNiveis: function() {
+    var dados = this.state.dados;
+    if (!dados.niveis.length) return Components.emptyState('security', 'Nenhum nível cadastrado.');
+
+    var html = '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+      '<th>Ordem</th><th>Nível</th><th>Permissões</th><th>Situação</th>' +
+      '<th class="pgo5cfg-acoes-col">Ações</th></tr></thead><tbody>';
+    dados.niveis.forEach(function(nivel, i) {
+      html += '<tr><td>' + (nivel.ordem || i + 1) + '</td>' +
+        '<td><strong>' + App.escapeHtml(nivel.nome) + '</strong></td>' +
+        '<td>' + nivel.permissoes.length + '</td>' +
+        '<td>' + (nivel.ativo ? '<span class="badge badge-success">Ativo</span>'
+          : '<span class="badge badge-neutral">Inativo</span>') + '</td>' +
+        '<td class="pgo5cfg-acoes">' +
+        '<button type="button" class="btn-icon pgo5acc-acao" data-tipo="NIVEL" data-acao="editar" data-id="' +
+        App.escapeHtml(nivel.id) + '" title="Editar permissões"><span class="material-icons">tune</span></button>' +
+        '<button type="button" class="btn-icon pgo5acc-acao" data-tipo="NIVEL" data-acao="alternar" data-id="' +
+        App.escapeHtml(nivel.id) + '" title="' + (nivel.ativo ? 'Desativar' : 'Ativar') + '">' +
+        '<span class="material-icons">' + (nivel.ativo ? 'toggle_on' : 'toggle_off') + '</span></button>' +
+        '</td></tr>';
+    });
+    return html + '</tbody></table></div>';
+  },
+
+  _ligarEventos: function() {
+    var self = this;
+    // Duas aparências para a mesma troca de lista: menu lateral (tela cheia)
+    // ou abas horizontais (embutida em Configurações).
+    document.querySelectorAll('[data-aba]').forEach(function(botao) {
+      botao.addEventListener('click', function() {
+        self.state.aba = botao.getAttribute('data-aba');
+        self._pintar();
+      });
+    });
+    var novo = document.getElementById('pgo5acc-novo');
+    if (novo) novo.addEventListener('click', function() {
+      if (self.state.aba === 'NIVEIS') self._abrirFormularioNivel(null);
+      else self._abrirFormularioCargo(null);
+    });
+
+    document.querySelectorAll('.pgo5acc-acao').forEach(function(botao) {
+      botao.addEventListener('click', function() {
+        var tipo = botao.getAttribute('data-tipo');
+        var id = botao.getAttribute('data-id');
+        var lista = tipo === 'CARGO' ? self.state.dados.cargos : self.state.dados.niveis;
+        var item = lista.find(function(x) { return x.id === id; });
+        if (!item) return;
+
+        if (botao.getAttribute('data-acao') === 'editar') {
+          if (tipo === 'CARGO') self._abrirFormularioCargo(item);
+          else self._abrirFormularioNivel(item);
+          return;
+        }
+        // Alternar situação reenvia o registro com o Ativo trocado.
+        if (tipo === 'CARGO') {
+          self._chamar('salvarCargoPGO5',
+            [{ nome: item.nome, ordem: item.ordem, ativo: !item.ativo }, item.id], 'Cargo atualizado.');
+        } else {
+          self._chamar('salvarNivelAcessoPGO5',
+            [{ nome: item.nome, ordem: item.ordem, ativo: !item.ativo }, item.id], 'Nível atualizado.');
+        }
+      });
+    });
+  },
+
+  _abrirFormularioCargo: function(cargo) {
+    var self = this;
+    var c = cargo || {};
+    var body = '<div class="form-group"><label class="form-label" for="pgo5acc-nome">Nome do cargo <span class="required">*</span></label>' +
+      '<input class="form-control" id="pgo5acc-nome" type="text" value="' + App.escapeHtml(c.nome || '') + '"></div>';
+    body += '<div class="form-group"><label class="form-label" for="pgo5acc-ordem">Ordem</label>' +
+      '<input class="form-control" id="pgo5acc-ordem" type="number" min="0" value="' +
+      App.escapeHtml(String(c.ordem || '')) + '"></div>';
+    body += '<div class="form-group"><label class="pgo5-checkbox"><input type="checkbox" id="pgo5acc-ativo"' +
+      (cargo ? (c.ativo ? ' checked' : '') : ' checked') + '> Ativo</label></div>';
+    body += '<small class="pgo5cfg-nota">Cargo é rótulo organizacional: nada aqui altera o acesso de ninguém.</small>';
+
+    Components.modal({
+      title: (cargo ? 'Editar' : 'Novo') + ' cargo',
+      body: body, confirmText: 'Salvar', cancelText: 'Cancelar',
+      onConfirm: function() {
+        var nome = (document.getElementById('pgo5acc-nome') || {}).value || '';
+        if (!nome) { Components.toast('Informe o nome do cargo.', 'warning'); return false; }
+        self._chamar('salvarCargoPGO5', [{
+          nome: nome,
+          ordem: (document.getElementById('pgo5acc-ordem') || {}).value || '',
+          ativo: !!(document.getElementById('pgo5acc-ativo') || {}).checked
+        }, cargo ? c.id : ''], cargo ? 'Cargo atualizado.' : 'Cargo criado.');
+      }
+    });
+  },
+
+  /** Modal do nível, com o editor de permissões agrupado por domínio. */
+  _abrirFormularioNivel: function(nivel) {
+    var self = this;
+    var n = nivel || { permissoes: [] };
+    var catalogo = self.state.dados.catalogoPermissoes || {};
+    var podeEditarPermissoes = self.state.dados.podeAlterarPermissoes;
+
+    var body = '<div class="form-group"><label class="form-label" for="pgo5acc-nome">Nome do nível <span class="required">*</span></label>' +
+      '<input class="form-control" id="pgo5acc-nome" type="text" value="' + App.escapeHtml(n.nome || '') + '"></div>';
+    body += '<div class="form-group"><label class="form-label" for="pgo5acc-ordem">Ordem</label>' +
+      '<input class="form-control" id="pgo5acc-ordem" type="number" min="0" value="' +
+      App.escapeHtml(String(n.ordem || '')) + '"></div>';
+    body += '<div class="form-group"><label class="pgo5-checkbox"><input type="checkbox" id="pgo5acc-ativo"' +
+      (nivel ? (n.ativo ? ' checked' : '') : ' checked') + '> Ativo</label></div>';
+
+    body += '<h4 class="pgo5acc-titulo-permissoes">Permissões</h4>';
+    if (!podeEditarPermissoes) {
+      body += '<p class="pgo5cfg-ajuda">Você pode editar o nome e a situação, mas não as permissões.</p>';
+    }
+    // Um bloco por domínio — o catálogo vem do servidor, então acrescentar
+    // uma permissão nova no backend faz a tela se ajustar sozinha.
+    Object.keys(catalogo).forEach(function(grupo) {
+      body += '<fieldset class="pgo5acc-grupo"><legend>' +
+        App.escapeHtml(self.ROTULO_GRUPO[grupo] || grupo) + '</legend>';
+      Object.keys(catalogo[grupo]).forEach(function(chave) {
+        var marcada = (n.permissoes || []).indexOf(chave) !== -1;
+        body += '<label class="pgo5-checkbox pgo5acc-permissao">' +
+          '<input type="checkbox" class="pgo5acc-check" value="' + App.escapeHtml(chave) + '"' +
+          (marcada ? ' checked' : '') + (podeEditarPermissoes ? '' : ' disabled') + '> ' +
+          App.escapeHtml(catalogo[grupo][chave]) + '</label>';
+      });
+      body += '</fieldset>';
+    });
+
+    Components.modal({
+      title: (nivel ? 'Editar' : 'Novo') + ' nível de acesso',
+      body: body, confirmText: 'Salvar', cancelText: 'Cancelar',
+      onConfirm: function() {
+        var nome = (document.getElementById('pgo5acc-nome') || {}).value || '';
+        if (!nome) { Components.toast('Informe o nome do nível.', 'warning'); return false; }
+
+        var payload = {
+          nome: nome,
+          ordem: (document.getElementById('pgo5acc-ordem') || {}).value || '',
+          ativo: !!(document.getElementById('pgo5acc-ativo') || {}).checked
+        };
+        // Sem permissão para editar a lista, ela nem é enviada: assim o
+        // servidor preserva exatamente o que o nível já tinha.
+        if (podeEditarPermissoes) {
+          payload.permissoes = Array.prototype.slice
+            .call(document.querySelectorAll('.pgo5acc-check'))
+            .filter(function(c) { return c.checked; })
+            .map(function(c) { return c.value; });
+        }
+        self._chamar('salvarNivelAcessoPGO5', [payload, nivel ? n.id : ''],
+          nivel ? 'Nível atualizado.' : 'Nível criado.');
+      }
+    });
+  },
+
+  _chamar: function(funcao, args, mensagemOk) {
+    var self = this;
+    if (self.state.salvando) return;
+    self.state.salvando = true;
+    Components.showLoading('Salvando...');
+
+    var run = google.script.run
+      .withSuccessHandler(function() {
+        self.state.salvando = false;
+        Components.hideLoading();
+        Components.toast(mensagemOk, 'success');
+        // Sem argumento: a tela se redesenha onde já estava (dentro de
+        // Configurações ou em tela cheia). Passar o <main> aqui apagaria o
+        // menu de Configurações depois de cada gravação.
+        self.render();
+      })
+      .withFailureHandler(function(err) {
+        self.state.salvando = false;
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível concluir a operação.'), 'error');
+      });
+    run[funcao].apply(run, args);
+  }
+};
+</script>

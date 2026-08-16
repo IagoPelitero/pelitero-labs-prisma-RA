@@ -208,7 +208,10 @@ function pgo5ResolverResponsavel_(ator, responsavelSolicitado) {
   const pedido = String(responsavelSolicitado || '').trim();
   if (!pedido || pedido === String(ator.id)) return String(ator.id);
 
-  if (!isSupervisorProfile_(ator.perfil)) {
+  // Quem pode delegar — e para quem — é decidido pelo NÍVEL DE ACESSO,
+  // nunca pelo cargo. Ver Pgo5Permissoes.gs.
+  const escopo = obterEscopoDelegacao_(atorComoUsuario_(ator));
+  if (escopo === 'NENHUM') {
     throw new Error('Você não pode atribuir o atendimento a outro usuário.');
   }
 
@@ -217,12 +220,11 @@ function pgo5ResolverResponsavel_(ator, responsavelSolicitado) {
   });
   if (!alvo) throw new Error('O usuário escolhido como responsável não está ativo.');
 
-  if (isAdminProfile_(ator.perfil)) return String(alvo.Id);
+  if (escopo === 'TODOS') return String(alvo.Id);
 
-  // Supervisor: só dentro da própria hierarquia (subordinado direto) ou equipe.
-  const ehSubordinado = String(alvo.SupervisorId || '').trim().toUpperCase() === String(ator.id).toUpperCase();
-  const mesmaEquipe = !!ator.equipe && normalizeText_(alvo.Equipe) === normalizeText_(ator.equipe);
-  if (!ehSubordinado && !mesmaEquipe) {
+  // delegarEquipe: apenas quem está abaixo do ator na HIERARQUIA. A coluna
+  // Equipe é organizacional e de propósito não entra nesta decisão.
+  if (!usuarioEstaNaHierarquia_(ator.id, alvo.Id)) {
     throw new Error('Você só pode atribuir atendimentos a usuários da sua equipe.');
   }
   return String(alvo.Id);
@@ -238,17 +240,18 @@ function pgo5ResponsaveisElegiveis_(ator) {
   const todos = pgo5Ler(PGO5.SHEET_NAMES.USUARIOS).filter(function(u) { return isTrue_(u.Ativo); });
   const eu = todos.find(function(u) { return String(u.Id).toUpperCase() === String(ator.id).toUpperCase(); });
   const comoItem = function(u) { return { id: String(u.Id || ''), rotulo: String(u.Nome || '') }; };
+  const porNome = function(a, b) { return a.rotulo.localeCompare(b.rotulo, 'pt-BR'); };
 
-  if (!isSupervisorProfile_(ator.perfil)) return eu ? [comoItem(eu)] : [];
-  if (isAdminProfile_(ator.perfil)) {
-    return todos.map(comoItem).sort(function(a, b) { return a.rotulo.localeCompare(b.rotulo, 'pt-BR'); });
-  }
+  const escopo = obterEscopoDelegacao_(atorComoUsuario_(ator));
+  if (escopo === 'NENHUM') return eu ? [comoItem(eu)] : [];
+  if (escopo === 'TODOS') return todos.map(comoItem).sort(porNome);
+
+  // delegarEquipe: o próprio ator mais toda a árvore subordinada a ele.
+  const subordinados = obterSubordinadosDaHierarquia_(ator.id);
   return todos.filter(function(u) {
-    if (String(u.Id).toUpperCase() === String(ator.id).toUpperCase()) return true;
-    const ehSubordinado = String(u.SupervisorId || '').trim().toUpperCase() === String(ator.id).toUpperCase();
-    const mesmaEquipe = !!ator.equipe && normalizeText_(u.Equipe) === normalizeText_(ator.equipe);
-    return ehSubordinado || mesmaEquipe;
-  }).map(comoItem).sort(function(a, b) { return a.rotulo.localeCompare(b.rotulo, 'pt-BR'); });
+    const id = String(u.Id).toUpperCase();
+    return id === String(ator.id).toUpperCase() || subordinados.indexOf(id) !== -1;
+  }).map(comoItem).sort(porNome);
 }
 
 // ============================================================================
@@ -312,7 +315,7 @@ function pgo5MontarAtendimento_(canalId, valores, catalogo) {
  * @returns {Object} { success, id }.
  */
 function criarAtendimentoPGO5(dados) {
-  const ator = requireAuth_();
+  const ator = exigirPermissao_('criarAtendimento');
   const entrada = dados || {};
   const canalId = String(entrada.canalId || '').trim();
 
@@ -383,7 +386,7 @@ function atualizarAtendimentoPGO5(id, dados) {
 
   const atual = pgo5ObterPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, atendimentoId);
   if (!atual) throw new Error('Atendimento não encontrado.');
-  pgo5AssertPodeAcessar_(ator, atual);
+  pgo5AssertPodeAcessar_(ator, atual, 'editar');
 
   const canalId = String(atual.CanalId || '').trim();
   const catalogo = pgo5CatalogoBruto_();
@@ -458,7 +461,7 @@ function alterarStatusAtendimentoPGO5(id, statusId, aguardandoId) {
 
   const atual = pgo5ObterPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, atendimentoId);
   if (!atual) throw new Error('Atendimento não encontrado.');
-  pgo5AssertPodeAcessar_(ator, atual);
+  pgo5AssertPodeAcessar_(ator, atual, 'editar');
 
   const catalogo = pgo5CatalogoBruto_();
   const novoStatus = String(statusId || '').trim();
@@ -500,7 +503,7 @@ function excluirAtendimentoPGO5(id) {
 
   const atual = pgo5ObterPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, atendimentoId);
   if (!atual) throw new Error('Atendimento não encontrado.');
-  pgo5AssertPodeAcessar_(ator, atual);
+  pgo5AssertPodeAcessar_(ator, atual, 'excluir');
 
   return withScriptLock_(function() {
     const doAtendimento = pgo5Ler(PGO5.SHEET_NAMES.VALORES_ATENDIMENTO).filter(function(v) {
@@ -589,14 +592,10 @@ function listarAtendimentosPGO5_() {
     nomeUsuario[String(u.Id || '').trim()] = String(u.Nome || '');
   });
 
-  const podeVerTudo = isSupervisorProfile_(ator.perfil);
-
-  return pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS).filter(function(a) {
-    if (podeVerTudo) return true;
-    // Analista continua vendo apenas o que é dele (regra atual preservada).
-    return String(a.ResponsavelId || '').trim().toUpperCase() === String(ator.id).toUpperCase() ||
-      String(a.CriadoPorId || '').trim().toUpperCase() === String(ator.id).toUpperCase();
-  }).map(function(a) {
+  // O que cada um enxerga vem do NÍVEL DE ACESSO, nunca do cargo.
+  return pgo5FiltrarAtendimentosPorEscopo_(
+    ator, pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS), 'ver'
+  ).map(function(a) {
     const respId = String(a.ResponsavelId || '').trim();
     return {
       id: String(a.Id || ''),
@@ -656,7 +655,13 @@ function pgo5AtendimentosComoLegado_() {
     if (nome) dinamicosPorAtendimento[chave][nome] = v.Valor;
   });
 
-  return pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS).map(function(a) {
+  // O Dashboard, os Relatórios e os Indicadores consomem esta ponte. O
+  // recorte precisa acontecer AQUI, no servidor — mandar tudo e filtrar no
+  // navegador exporia dados fora do escopo do usuário.
+  const permitidos = pgo5FiltrarAtendimentosPorEscopo_(
+    getActor_(), pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS), 'ver');
+
+  return permitidos.map(function(a) {
     const id = String(a.Id || '');
     const din = dinamicosPorAtendimento[id.toUpperCase()] || {};
     const respId = String(a.ResponsavelId || '').trim();
@@ -700,14 +705,64 @@ function pgo5AtendimentosComoLegado_() {
  * @param {Object} registro - Linha do atendimento.
  * @throws {Error} Quando o acesso não é permitido.
  */
-function pgo5AssertPodeAcessar_(ator, registro) {
-  if (isSupervisorProfile_(ator.perfil)) return;
+function pgo5AssertPodeAcessar_(ator, registro, acao) {
+  if (pgo5AtendimentoEstaNoEscopo_(ator, registro, acao || 'ver')) return;
+  throw new Error('Você não tem acesso a este atendimento.');
+}
+
+/**
+ * Diz se um atendimento cai dentro do escopo do usuário para uma ação.
+ *
+ * O escopo vem do motor de permissões (ver Pgo5Permissoes.gs) e nunca do
+ * cargo:
+ *
+ *   TODOS    → qualquer atendimento
+ *   EQUIPE   → os próprios + os de quem está abaixo na HIERARQUIA
+ *   PROPRIOS → só onde ele é responsável ou criador
+ *   NENHUM   → nenhum
+ *
+ * @param {Object} ator Ator autenticado.
+ * @param {Object} registro Linha do atendimento.
+ * @param {string} acao 'ver', 'editar' ou 'excluir'.
+ * @param {string[]} [subordinados] Árvore do ator, quando já calculada.
+ * @returns {boolean} true quando a ação é permitida sobre este registro.
+ */
+function pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados) {
+  const escopo = obterEscopoAtendimentos_(atorComoUsuario_(ator), acao);
+  if (escopo === 'NENHUM') return false;
+  if (escopo === 'TODOS') return true;
+
   const meu = String(ator.id).toUpperCase();
-  const ehResponsavel = String(registro.ResponsavelId || '').trim().toUpperCase() === meu;
-  const ehCriador = String(registro.CriadoPorId || '').trim().toUpperCase() === meu;
-  if (!ehResponsavel && !ehCriador) {
-    throw new Error('Você não tem acesso a este atendimento.');
-  }
+  const responsavel = String(registro.ResponsavelId || '').trim().toUpperCase();
+  const criador = String(registro.CriadoPorId || '').trim().toUpperCase();
+  if (responsavel === meu || criador === meu) return true;
+
+  if (escopo !== 'EQUIPE') return false;
+  const arvore = subordinados || obterSubordinadosDaHierarquia_(ator.id);
+  return arvore.indexOf(responsavel) !== -1 || arvore.indexOf(criador) !== -1;
+}
+
+/**
+ * Filtra uma lista de atendimentos pelo escopo do ator.
+ *
+ * A árvore de subordinados é calculada UMA vez e reaproveitada para todas
+ * as linhas — sem isso, uma base com centenas de atendimentos percorreria a
+ * hierarquia repetidamente.
+ *
+ * @param {Object} ator Ator autenticado.
+ * @param {Object[]} registros Linhas da aba Atendimentos.
+ * @param {string} acao 'ver', 'editar' ou 'excluir'.
+ * @returns {Object[]} Apenas os registros permitidos.
+ */
+function pgo5FiltrarAtendimentosPorEscopo_(ator, registros, acao) {
+  const escopo = obterEscopoAtendimentos_(atorComoUsuario_(ator), acao);
+  if (escopo === 'NENHUM') return [];
+  if (escopo === 'TODOS') return registros;
+
+  const subordinados = escopo === 'EQUIPE' ? obterSubordinadosDaHierarquia_(ator.id) : [];
+  return registros.filter(function(registro) {
+    return pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados);
+  });
 }
 
 // ============================================================================
@@ -738,7 +793,7 @@ function getFormularioPGO5() {
     status: pgo5Status_(catalogo),
     aguardando: pgo5Aguardando_(catalogo),
     responsaveis: pgo5ResponsaveisElegiveis_(ator),
-    podeDelegar: isSupervisorProfile_(ator.perfil),
+    podeDelegar: obterEscopoDelegacao_(atorComoUsuario_(ator)) !== 'NENHUM',
     usuarioId: String(ator.id)
   };
 }
