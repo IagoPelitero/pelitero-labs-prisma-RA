@@ -1,0 +1,27 @@
+# ============================================================================
+# PRISMA Gestão Operacional — normalização de fim de linha
+# ============================================================================
+#
+# POR QUE ESTE ARQUIVO EXISTE
+# O projeto é editado no Windows, onde o Git costuma vir com
+# core.autocrlf=true: ele grava CRLF no disco e converte de volta para LF ao
+# commitar. Isso funciona, mas depende de uma configuração da MÁQUINA — em
+# outro computador (ou com outra configuração) os mesmos arquivos passariam
+# a ser vistos como "totalmente alterados", e um commit de 400 linhas
+# apareceria como 8.000.
+#
+# As regras abaixo movem essa decisão para dentro do repositório: o
+# conteúdo versionado é SEMPRE LF, em qualquer máquina.
+#
+# Isto não muda uma vírgula do código — só como as quebras de linha são
+# guardadas. O Apps Script aceita os dois formatos.
+# ============================================================================
+
+# Por padrão, o Git decide o que é texto e normaliza para LF ao commitar.
+* text=auto eol=lf
+
+# Os arquivos do projeto são todos texto.
+*.gs   text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.json text eol=lf

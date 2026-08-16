@@ -679,7 +679,11 @@ const Components = {
       sortDir: 'asc',
       onRowClick: null,
       emptyMessage: 'Nenhum registro encontrado',
-      emptyIcon: 'search_off'
+      emptyIcon: 'search_off',
+      // Etapa 5: com "cartoes", em telas pequenas cada linha vira um
+      // cartão empilhado em vez de manter as colunas lado a lado. Só o
+      // Dashboard usa por enquanto; as demais tabelas seguem iguais.
+      cartoes: false
     }, options);
 
     if (!opts.rows || opts.rows.length === 0) {
@@ -704,7 +708,9 @@ const Components = {
     // as linhas de cada render ficavam retidas para sempre na memória).
     this._pruneRegistry(this._tableRegistry, 'table-', this._tableCounter, 20);
 
-    var html = '<div class="table-container"><table class="data-table"><thead><tr>';
+    var classeCartoes = opts.cartoes ? ' dash-cartoes' : '';
+    var html = '<div class="table-container"><table class="data-table' + classeCartoes +
+      '"><thead><tr>';
 
     // Headers
     for (var h = 0; h < opts.headers.length; h++) {
@@ -746,7 +752,11 @@ const Components = {
           : (row.cells && row.cells[c] !== undefined
             ? row.cells[c]
             : (row[key] !== undefined && row[key] !== null ? row[key] : ''));
-        html += '<td>' + cellVal + '</td>';
+        // O data-label carrega o nome da coluna para o modo cartão: sem
+        // cabeçalho na tela pequena, é ele que identifica cada bloco
+        // (ver .dash-cartoes td::before em Styles.html).
+        var rotuloColuna = String(opts.headers[c].label || '').replace(/"/g, '&quot;');
+        html += '<td data-label="' + rotuloColuna + '">' + cellVal + '</td>';
       }
 
       if (opts.actions) {
@@ -757,14 +767,19 @@ const Components = {
             var actionIcon = /^[a-z_]+$/.test(action.icon || '')
               ? '<span class="material-icons" style="font-size:18px">' + action.icon + '</span>'
               : (action.icon || '•');
-            actionsHtml += '<button type="button" class="btn-action" title="' + (action.title || 'Ação') +
+            // Botão só de ícone precisa de aria-label: sem ele, um leitor
+            // de tela anuncia apenas "botão" e o usuário não sabe o que faz.
+            var rotuloAcao = (action.title || 'Ação').replace(/"/g, '&quot;');
+            actionsHtml += '<button type="button" class="btn-action" title="' + rotuloAcao +
+              '" aria-label="' + rotuloAcao +
               '" onclick="Components._runTableAction(\'' + tableId + '\',' + a + ',' + r + ',event)">' +
               actionIcon + '</button>';
           }
         } else if (typeof opts.actions === 'function') {
           actionsHtml = opts.actions(row, r);
         }
-        html += '<td class="actions" style="text-align:center">' + actionsHtml + '</td>';
+        html += '<td class="actions acoes-cell" data-label="Ações" style="text-align:center">' +
+          actionsHtml + '</td>';
       }
 
       html += '</tr>';

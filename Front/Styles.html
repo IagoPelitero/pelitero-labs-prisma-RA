@@ -2736,6 +2736,19 @@ body[data-theme="dark"] .skeleton-loading {
   cursor: pointer;
   margin: 0 2px;
   transition: all var(--transition-fast);
+  /* O botão não declarava cor e herdava o preto padrão do navegador. No
+     tema Dark, ícone preto sobre card escuro dava 1,43 de contraste — na
+     prática, invisível. Usando o token do tema, ele acompanha os quatro. */
+  color: var(--text-secondary);
+}
+
+.btn-action .material-icons { color: inherit; }
+
+/* Foco visível: estes botões são só ícone e precisam ser alcançáveis por
+   teclado (Editar, Alterar status e Excluir ficam todos aqui). */
+.btn-action:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 1px;
 }
 
 .btn-action:hover {
@@ -3141,5 +3154,166 @@ body[data-theme="dark"] .skeleton-loading {
   .btn-voltar { padding: 7px 10px; }
   .pgo5seg-recurso { flex-direction: column; align-items: flex-start; }
   .pgo5seg-acoes .btn { flex: 1 1 auto; }
+}
+/* ══════════════════════════════════════════════════════════════
+   PGO 5.0 · Etapa 5 — Dashboard compacto
+   ══════════════════════════════════════════════════════════════
+   A tabela do Dashboard reúne as informações em 5 grupos (+ Ações) em vez
+   de 10 colunas soltas. Cada célula vira um bloquinho com hierarquia
+   visual: o dado principal em cima, os complementares abaixo em tom menor.
+
+   Tudo aqui usa as variáveis de tema, então acompanha Azul, Rosa, Brasil
+   e Dark sem regra específica por tema. */
+
+.dash-grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;                 /* deixa o texto truncar dentro do flex */
+  line-height: 1.35;
+}
+
+/* Protocolo: é a chave que o operador procura primeiro. */
+.dash-protocolo {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.dash-linha-secundaria,
+.dash-canal,
+.dash-cpf,
+.dash-aguardando {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dash-sep { opacity: 0.5; padding: 0 2px; }
+
+.dash-status { margin-top: 4px; }
+
+.dash-cliente-nome,
+.dash-responsavel {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+/* Cascata Produto → Categoria → Subcategoria. */
+.dash-classificacao {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.dash-classificacao.dash-nivel-1 { padding-left: 8px; font-size: 12.5px; }
+.dash-classificacao.dash-nivel-2 { padding-left: 18px; font-size: 12.5px; }
+
+.dash-ramo { color: var(--text-secondary); opacity: 0.7; }
+
+/* Ausência de dado nunca aparece como "undefined" nem como célula muda. */
+.dash-vazio {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Observação ocupa no máximo duas linhas; o texto completo abre no modal
+   do Components.longText, o mesmo das outras tabelas. */
+.dash-observacoes {
+  max-width: 320px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.dash-idade {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+/* Tons suaves: orientam a prioridade sem transformar a tela num alarme. */
+/* Texto de 11,5px precisa de 4,5 de contraste. Com --text-secondary sobre
+   o cinza de fundo o resultado era 4,06; --text-primary resolve sem mudar
+   a ideia de "estado neutro, sem alarme". */
+.dash-idade.idade-recente { background: rgba(107, 114, 128, 0.14); color: var(--text-primary); }
+.dash-idade.idade-atencao { background: rgba(181, 74, 0, 0.16); color: #B54A00; }
+.dash-idade.idade-critica { background: rgba(198, 40, 40, 0.16); color: #C62828; }
+
+body[data-theme="dark"] .dash-idade.idade-atencao { background: rgba(255, 167, 38, 0.20); color: #FFA726; }
+body[data-theme="dark"] .dash-idade.idade-critica { background: rgba(239, 83, 80, 0.20); color: #EF5350; }
+
+/* ── Dashboard em tela pequena ──
+   Espremer 6 grupos lado a lado em 375px deixaria cada um com ~60px, o que
+   é ilegível. Abaixo de 900px cada atendimento vira um CARTÃO empilhado: o
+   cabeçalho da tabela some e cada célula ganha o nome do grupo como
+   rótulo, tirado do atributo data-label que o dataTable já escreve. */
+@media (max-width: 900px) {
+  .data-table.dash-cartoes thead { display: none; }
+
+  .data-table.dash-cartoes tbody tr {
+    display: block;
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card-bg);
+  }
+
+  .data-table.dash-cartoes tbody td {
+    display: block;
+    width: auto;
+    padding: 6px 0;
+    border: 0;
+    white-space: normal;
+  }
+
+  .data-table.dash-cartoes tbody td + td {
+    border-top: 1px dashed var(--border);
+  }
+
+  /* Rótulo do grupo acima do conteúdo, já que não há mais cabeçalho. */
+  .data-table.dash-cartoes tbody td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 3px;
+  }
+
+  .dash-observacoes { max-width: 100%; }
+
+  /* As ações ficam lado a lado, com alvo de toque confortável. */
+  .data-table.dash-cartoes tbody td.acoes-cell {
+    display: flex;
+    gap: 8px;
+    padding-top: 10px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PGO 5.0 · Etapa 5 — identidade "PGO" do menu
+   ══════════════════════════════════════════════════════════════
+   O "P" fica branco e o "GO" no azul do tema. Como a cor vem de
+   --secondary-blue, cada tema mantém a própria identidade: rosa no tema
+   Rosa, amarelo no Brasil, azul claro no Dark. */
+.sidebar-logo-abbr .pgo-p { color: #FFFFFF; }
+
+/* O "GO" usa a cor de destaque do tema, mas nem toda ela rende contraste
+   suficiente sobre o fundo escuro do badge: no Rosa dava 3,09 e no Dark
+   4,07 — abaixo do mínimo AA de 4,5. O clareamento abaixo preserva a cor
+   (continua rosa no Rosa, azul no Dark) e a leva para a faixa legível. */
+.sidebar-logo-abbr .pgo-go {
+  color: color-mix(in srgb, var(--secondary-blue) 62%, #FFFFFF);
+}
+
+/* Navegadores sem color-mix caem neste valor, que funciona nos 4 temas. */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  .sidebar-logo-abbr .pgo-go { color: #9EC9F0; }
 }
 </style>

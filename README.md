@@ -153,7 +153,8 @@ Back/                        Camada de servidor (Apps Script)
  ├─ Pgo5Usuarios.gs         Cadastro de usuários e a hierarquia (SupervisorId)
  ├─ Pgo5Seguranca.gs        PIN administrativo, bloqueios e recursos protegidos
  ├─ Pgo5Auditoria.gs        Registro das ações administrativas
- └─ Pgo5Analitico.gs        Relatórios, Produtividade Equipe e o "Fora da SLA"
+ ├─ Pgo5Analitico.gs        Relatórios, Produtividade Equipe e o "Fora da SLA"
+ └─ Pgo5Migracao.gs         Tombamento do banco 4.x para o PGO 5.0
 
 Front/                       Camada de interface (HtmlService)
  ├─ Index.html              Shell: layout (sidebar + header) e include dos demais
@@ -382,6 +383,84 @@ contado como "Em Aberto", o que inflaria o indicador de pendência.
 O valor manual **"Fora da SLA"** ficava na aba `IndicadoresSLA` do 4.x. No
 PGO 5.0 ele é uma linha de `Configurações` com `Tipo = 'SLA'`,
 `Chave` = a data e `Valor` = a quantidade. Nenhuma aba nova foi criada.
+
+---
+
+## 6.6 O Dashboard
+
+A tabela do Dashboard reúne as informações em **cinco grupos**, mais a
+coluna de ações:
+
+| Grupo | O que mostra |
+| --- | --- |
+| Atendimento | Protocolo (em destaque), data, há quanto tempo está aberto, canal e o badge de status |
+| Cliente | Nome e CPF |
+| Classificação | Produto → Categoria → Subcategoria, em cascata |
+| Responsável | Quem responde e de quem se aguarda retorno |
+| Observações | Resumo em duas linhas; o texto completo abre em modal |
+| Ações | Editar, Alterar status e Excluir |
+
+Antes eram dez colunas soltas e a tabela ficava mais larga que a tela.
+**Nada disso mudou o banco** — é composição visual sobre os mesmos campos.
+
+Abaixo de 900px cada atendimento vira um **cartão empilhado**: o cabeçalho
+some e cada bloco recebe o nome do grupo como rótulo.
+
+O badge de status escolhe a cor do texto pela luminância do fundo, então
+qualquer cor que o administrador configurar continua legível.
+
+---
+
+## 6.7 Tombamento: trazer os dados do 4.x
+
+Toda a regra está em `Pgo5Migracao.gs` — nenhum outro arquivo migra dados.
+
+**Como funciona, em cinco passos**
+
+1. **Ler** — abre a *cópia* da planilha antiga e lê as abas necessárias.
+2. **Mapear** — cria catálogo e usuários no banco novo, anotando
+   "Id antigo → Id novo".
+3. **Montar** — reconstrói cada atendimento usando esses mapas.
+4. **Validar** — confere contagens, IDs e referências.
+5. **Marcar** — só então grava o marcador de conclusão.
+
+**A origem é somente leitura.** Nenhuma função escreve na planilha antiga —
+não existe ali `setValue`, `appendRow` nem `deleteRow`. Há teste
+automatizado que instrumenta a fonte e falha se qualquer escrita for
+tentada.
+
+**Não roda duas vezes.** Uma segunda execução duplicaria todos os
+atendimentos, então a primeira conclusão bem-sucedida grava a Script
+Property `PGO5_MIGRACAO_CONCLUIDA` e as tentativas seguintes são
+recusadas. Se a migração falhar no meio, o marcador **não** é gravado.
+
+**O Id real da planilha antiga nunca entra no código.** Ele vem da Script
+Property `PGO5_MIGRACAO_FONTE_ID`, configurada só no ambiente autorizado.
+
+**O que é transformado**
+
+| Origem (4.x) | Destino (PGO 5.0) |
+| --- | --- |
+| `Perfil` (um campo só) | `CargoId` + `NivelAcessoId` (dois conceitos) |
+| `IndicadoresSLA` (aba) | `Configurações` com `Tipo = 'SLA'` |
+| `CamposExtras` (JSON) | `ValoresAtendimento`, com snapshot de rótulo e tipo |
+| Cliente e CPF | colunas estruturais de `Atendimentos` |
+
+**A hierarquia não é inventada.** O 4.x não tem equivalente ao
+`SupervisorId`, e deduzi-la pela Equipe criaria relações que nunca
+existiram — o que daria a um gestor acesso a atendimentos que não são dele.
+Todos são migrados sem supervisor, e o relatório informa quantos ficaram
+assim. O administrador monta a árvore depois, na tela de Usuários.
+
+**Perfil desconhecido cai no nível mais restrito.** Errar para menos acesso
+é seguro; errar para mais, não.
+
+**Dado inconsistente não derruba a migração.** Uma categoria sem produto
+válido é migrada sem o vínculo e entra em "referências não resolvidas" no
+relatório. Descartar perderia dado; inventar o vínculo criaria informação
+falsa.
+
+**O relatório não guarda dado pessoal**: só contagens e avisos genéricos.
 
 ---
 

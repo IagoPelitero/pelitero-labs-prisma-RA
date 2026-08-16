@@ -597,21 +597,23 @@ Pages.dashboard = {
    * @returns {Object[]} Colunas { campo, label, base }.
    */
   _colunasTabela: function() {
-    // BANCO PGO 5.0: a sequência das colunas é definida pelo PO e é fixa.
-    // Cliente e CPF continuam existindo no registro (busca, duplicidade),
-    // mas ficam fora da tabela por decisão de produto.
+    // BANCO PGO 5.0 — Dashboard compacto (Etapa 5).
+    //
+    // POR QUE AGRUPAR
+    // Eram 10 colunas independentes: a tabela ficava mais larga que
+    // qualquer tela e o usuário rolava para o lado o tempo todo. As
+    // informações continuam TODAS visíveis, só que reunidas em 5 grupos
+    // que fazem sentido juntos — mais Ações, que o dataTable acrescenta.
+    //
+    // Nada disso muda o banco: é composição visual em cima dos mesmos
+    // campos que já vinham do servidor.
     if (App.usandoPGO5 && App.usandoPGO5()) {
       return [
-        { campo: 'dataAbertura', label: 'Data', base: true },
-        { campo: '_idade', label: 'Aberto há', base: true },
-        { campo: 'numeroRA', label: 'Protocolo', base: true },
-        { campo: 'produto', label: 'Produto', base: true },
-        { campo: 'categoria', label: 'Categoria', base: true },
-        { campo: 'subcategoria', label: 'Subcategoria', base: true },
-        { campo: 'responsavel', label: 'Responsável', base: true },
-        { campo: 'situacaoPendencia', label: 'Aguardando retorno', base: true },
-        { campo: 'canal', label: 'Canal', base: true },
-        { campo: 'observacoes', label: 'Observações', base: true }
+        { campo: '_grupoAtendimento', label: 'Atendimento', base: true },
+        { campo: '_grupoCliente', label: 'Cliente', base: true },
+        { campo: '_grupoClassificacao', label: 'Classificação', base: true },
+        { campo: '_grupoResponsavel', label: 'Responsável', base: true },
+        { campo: '_grupoObservacoes', label: 'Observações', base: true }
       ];
     }
 
@@ -653,6 +655,13 @@ Pages.dashboard = {
    * @returns {string} HTML seguro da célula.
    */
   _valorCelula: function(item, col) {
+    // Grupos do Dashboard compacto (PGO 5.0).
+    if (col.campo === '_grupoAtendimento') return this._grupoAtendimento(item);
+    if (col.campo === '_grupoCliente') return this._grupoCliente(item);
+    if (col.campo === '_grupoClassificacao') return this._grupoClassificacao(item);
+    if (col.campo === '_grupoResponsavel') return this._grupoResponsavel(item);
+    if (col.campo === '_grupoObservacoes') return this._grupoObservacoes(item);
+
     if (col.campo === 'dataAbertura') return App.formatDateBR(item.dataAbertura);
     if (col.campo === '_idade') return this._badgeIdade(item);
     if (col.campo === 'status') return Components.statusBadge(item.status, item.statusCor || null);
@@ -670,6 +679,147 @@ Pages.dashboard = {
     // conteúdo COMPLETO, selecionável e com botão de copiar
     // (Components.longText — mesmo comportamento em todas as tabelas).
     return Components.longText(valor, 40);
+  },
+
+  /**
+   * Grupo "Atendimento": protocolo em destaque, data, idade, canal e o
+   * badge de status.
+   *
+   * O status usa Components.statusBadge, que escolhe a cor do texto pela
+   * luminância do fundo — assim qualquer cor que o ADM configurar continua
+   * legível (correção da Etapa 4, não voltar para branco fixo).
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {string} HTML seguro da célula.
+   */
+  _grupoAtendimento: function(item) {
+    var protocolo = item.numeroRA
+      ? '<span class="dash-protocolo">' + App.escapeHtml(item.numeroRA) + '</span>'
+      : '<span class="dash-vazio">Sem protocolo</span>';
+
+    var data = App.formatDateBR(item.dataAbertura) || '—';
+    var idade = this._textoIdade(item);
+    var linhaData = App.escapeHtml(data) + (idade ? ' <span class="dash-sep">•</span> ' + idade : '');
+
+    var canal = item.canal
+      ? '<div class="dash-canal">' + App.escapeHtml(item.canal) + '</div>'
+      : '';
+
+    // O status vem do CATÁLOGO (com a cor configurada), nunca de uma lista
+    // fixa no código — canais e status novos aparecem sozinhos aqui.
+    var status = Components.statusBadge(item.status, item.statusCor || null);
+
+    return '<div class="dash-grupo">' + protocolo +
+      '<div class="dash-linha-secundaria">' + linhaData + '</div>' +
+      canal + '<div class="dash-status">' + status + '</div></div>';
+  },
+
+  /**
+   * Grupo "Cliente": nome e CPF.
+   *
+   * ⚠️ O CPF é exibido EXATAMENTE como está gravado. Ele é um
+   * identificador em texto e pode ser "0" ou "00123" — aplicar máscara ou
+   * converter para número apagaria os zeros à esquerda e mudaria o
+   * identificador (ver a regra de CPF no README).
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {string} HTML seguro da célula.
+   */
+  _grupoCliente: function(item) {
+    var nome = item.cliente
+      ? '<div class="dash-cliente-nome">' + App.escapeHtml(item.cliente) + '</div>'
+      : '<div class="dash-vazio">Sem cliente</div>';
+
+    // Comparar com '' (e não com !item.cpf) porque "0" é um CPF VÁLIDO e
+    // seria descartado por um teste de valor falsy.
+    var cpf = String(item.cpf === undefined || item.cpf === null ? '' : item.cpf);
+    var linhaCpf = cpf !== ''
+      ? '<div class="dash-cpf">CPF: ' + App.escapeHtml(cpf) + '</div>'
+      : '<div class="dash-vazio">Sem CPF</div>';
+
+    return '<div class="dash-grupo">' + nome + linhaCpf + '</div>';
+  },
+
+  /**
+   * Grupo "Classificação": Produto → Categoria → Subcategoria em cascata.
+   *
+   * Cada nível só aparece quando existe. Um atendimento sem classificação
+   * mostra "Sem classificação" — nunca "undefined" ou "[object Object]".
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {string} HTML seguro da célula.
+   */
+  _grupoClassificacao: function(item) {
+    var niveis = [item.produto, item.categoria, item.subcategoria]
+      .map(function(valor) { return String(valor === undefined || valor === null ? '' : valor).trim(); })
+      .filter(function(valor) { return valor !== '' && valor !== '-'; });
+
+    if (!niveis.length) return '<div class="dash-grupo"><span class="dash-vazio">Sem classificação</span></div>';
+
+    var html = '<div class="dash-grupo">';
+    niveis.forEach(function(nivel, posicao) {
+      html += '<div class="dash-classificacao dash-nivel-' + posicao + '">' +
+        (posicao > 0 ? '<span class="dash-ramo">└</span> ' : '') +
+        App.escapeHtml(nivel) + '</div>';
+    });
+    return html + '</div>';
+  },
+
+  /**
+   * Grupo "Responsável": quem responde e de quem se aguarda retorno.
+   *
+   * "Aguardando" NÃO é status: são informações diferentes e por isso ficam
+   * visualmente separadas do badge do grupo Atendimento.
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {string} HTML seguro da célula.
+   */
+  _grupoResponsavel: function(item) {
+    var responsavel = item.responsavel
+      ? '<div class="dash-responsavel">' + App.escapeHtml(item.responsavel) + '</div>'
+      : '<div class="dash-vazio">Sem responsável</div>';
+
+    var aguardando = String(item.situacaoPendencia || '').trim();
+    var linhaAguardando = '<div class="dash-aguardando">Aguardando: ' +
+      (aguardando ? App.escapeHtml(aguardando) : '—') + '</div>';
+
+    return '<div class="dash-grupo">' + responsavel + linhaAguardando + '</div>';
+  },
+
+  /**
+   * Grupo "Observações": resumo em duas linhas.
+   *
+   * Components.longText corta o texto e abre o conteúdo COMPLETO num modal
+   * ao clique — é o mesmo comportamento já usado nas outras tabelas, então
+   * o usuário não precisa aprender nada novo para ler a observação inteira.
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {string} HTML seguro da célula.
+   */
+  _grupoObservacoes: function(item) {
+    var texto = String(item.observacoes === undefined || item.observacoes === null
+      ? '' : item.observacoes).trim();
+    if (!texto) return '<div class="dash-grupo"><span class="dash-vazio">—</span></div>';
+    return '<div class="dash-grupo dash-observacoes">' + Components.longText(texto, 90) + '</div>';
+  },
+
+  /**
+   * Texto curto da idade do caso ("hoje", "há 3d"), já com a cor de
+   * atenção. Usado dentro do grupo Atendimento.
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {string} HTML seguro, ou '' quando não se aplica.
+   */
+  _textoIdade: function(item) {
+    if (String(item.status || '').toLowerCase().indexOf('conclu') === 0) return '';
+    var abertura = App.parseDate(item.dataAbertura);
+    if (!abertura) return '';
+    var dias = Math.floor((Date.now() - abertura.getTime()) / 86400000);
+    if (dias < 0) dias = 0;
+    var classe = dias <= 3 ? 'idade-recente' : (dias <= 7 ? 'idade-atencao' : 'idade-critica');
+    var rotulo = dias === 0 ? 'hoje' : 'há ' + dias + 'd';
+    return '<span class="dash-idade ' + classe + '" title="Aberto há ' + dias + ' dia(s)">' +
+      rotulo + '</span>';
   },
 
   /**
@@ -796,17 +946,20 @@ Pages.dashboard = {
       };
     });
 
+    // Ordem e ícones alinhados com a linguagem visual de Configurações.
+    // "change_circle" em vez de bandeira: bandeira seria lida como
+    // prioridade ou marcação, não como troca de situação.
     var actions = [
-      {
-        icon: 'swap_horiz',
-        title: 'Alterar status',
-        onClick: function(row) { self.alterarStatus(row.raw); }
-      },
       {
         icon: 'edit',
         title: 'Editar',
         // Edição em modal: o usuário permanece no Dashboard.
         onClick: function(row) { self.abrirEdicao(row.raw); }
+      },
+      {
+        icon: 'change_circle',
+        title: 'Alterar status',
+        onClick: function(row) { self.alterarStatus(row.raw); }
       },
       {
         icon: 'delete',
@@ -822,7 +975,10 @@ Pages.dashboard = {
     container.innerHTML = Components.dataTable({
       headers: headers,
       rows: rows,
-      actions: actions
+      actions: actions,
+      // Em tela pequena cada atendimento vira um cartão empilhado. Só o
+      // Dashboard usa por enquanto — é a tabela mais larga do sistema.
+      cartoes: true
     });
 
     if (paginacao) {
