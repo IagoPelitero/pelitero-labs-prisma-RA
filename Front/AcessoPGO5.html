@@ -608,4 +608,442 @@ Pages.acessosPGO5 = {
     run[funcao].apply(run, args);
   }
 };
+
+/* ============================================================
+   Pages.segurancaPGO5 — PIN administrativo, bloqueios e auditoria
+
+   ⚠️ O QUE ESTA TELA NUNCA MOSTRA
+   Hash, salt, Script Properties ou o próprio PIN. Ela só sabe se existe
+   PIN, quem está bloqueado e até quando a liberação vale — tudo vindo de
+   obterEstadoSegurancaPGO5().
+
+   ⚠️ O CONTADOR DE 5 MINUTOS AQUI É DECORATIVO
+   Quem decide se a liberação vale é o servidor, a cada chamada. O que a
+   tela mostra serve para o usuário saber que precisa se apressar, não
+   para autorizar coisa alguma. Ver Pgo5Seguranca.gs.
+   ============================================================ */
+Pages.segurancaPGO5 = {
+  state: { dados: null, salvando: false },
+
+  /** Onde desenhar: o slot de Configurações ou o <main> inteiro. */
+  _alvo: function() {
+    return document.getElementById('pgo5cfg-externo') || document.getElementById('app');
+  },
+
+  /** true quando a tela está embutida em Configurações. */
+  _embutido: function() {
+    return !!document.getElementById('pgo5cfg-externo');
+  },
+
+  /**
+   * Abre a tela de Segurança.
+   * @param {HTMLElement} [container] Destino; por padrão, o alvo calculado.
+   */
+  render: function(container) {
+    var self = this;
+    container = container || self._alvo();
+    self.state.salvando = false;
+
+    container.innerHTML = '<div class="card">' +
+      Components.emptyState('lock', 'Carregando informações de segurança...') + '</div>';
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.dados = dados || {};
+        self._pintar();
+      })
+      .withFailureHandler(function(err) {
+        self._alvo().innerHTML = '<div class="card">' +
+          Components.emptyState('lock', 'Você não tem acesso a esta tela.',
+            App.escapeHtml((err && err.message) || '')) + '</div>';
+      })
+      .obterEstadoSegurancaPGO5();
+  },
+
+  /** Desenha o conteúdo com o estado já carregado. */
+  _pintar: function() {
+    var self = this;
+    var dados = self.state.dados;
+
+    var html = '<div class="card">';
+    html += '<div class="card-header"><div class="card-title">' +
+      '<span class="material-icons">lock</span>Segurança</div></div>';
+    html += '<p class="pgo5cfg-ajuda">O <strong>PIN administrativo</strong> é uma segunda ' +
+      'camada para as ações mais sensíveis. Ele não substitui o login — quem entra no ' +
+      'sistema continua sendo a sua Conta Google.</p>';
+
+    // ── Estado do PIN ──
+    html += '<div class="pgo5seg-bloco">';
+    html += '<h4 class="pgo5acc-titulo-permissoes">PIN administrativo</h4>';
+    if (dados.pinDefinido) {
+      html += '<p class="pgo5seg-estado"><span class="badge badge-success">Definido</span> ' +
+        'Depois de digitar o PIN correto, as ações protegidas ficam liberadas por ' +
+        dados.minutosDeSessao + ' minutos.</p>';
+      if (dados.sessaoAtiva) {
+        html += '<p class="pgo5seg-estado"><span class="material-icons">lock_open</span> ' +
+          'Liberado até <strong>' + App.escapeHtml(self._hora(dados.sessaoExpiraEm)) +
+          '</strong>.</p>';
+      } else {
+        html += '<p class="pgo5seg-estado"><span class="material-icons">lock</span> ' +
+          'Bloqueado no momento — as ações protegidas vão pedir o PIN.</p>';
+      }
+      html += '<div class="pgo5seg-acoes">' +
+        '<button class="btn btn-primary" id="pgo5seg-validar">Informar PIN</button>' +
+        '<button class="btn btn-secondary" id="pgo5seg-alterar">Alterar PIN</button></div>';
+    } else {
+      html += '<p class="pgo5seg-estado"><span class="badge badge-warning">Não definido</span> ' +
+        'Enquanto não houver PIN, as ações protegidas ficam indisponíveis para todos.</p>';
+      html += '<div class="pgo5seg-acoes">' +
+        '<button class="btn btn-primary" id="pgo5seg-definir">Definir PIN</button></div>';
+    }
+    html += '</div>';
+
+    // ── Recursos protegidos ──
+    if ((dados.recursosProtegidos || []).length) {
+      html += '<div class="pgo5seg-bloco">';
+      html += '<h4 class="pgo5acc-titulo-permissoes">Links protegidos</h4>';
+      html += '<p class="pgo5cfg-ajuda">O endereço só é buscado no servidor depois que o ' +
+        'PIN é aceito. Ele não fica guardado nesta página.</p>';
+      dados.recursosProtegidos.forEach(function(recurso) {
+        html += '<div class="pgo5seg-recurso">' +
+          '<span>' + App.escapeHtml(self.NOME_DO_RECURSO[recurso] || recurso) + '</span>' +
+          '<button class="btn btn-secondary pgo5seg-link" data-recurso="' +
+          App.escapeHtml(recurso) + '">Visualizar link</button></div>';
+      });
+      html += '</div>';
+    }
+
+    // ── Bloqueios ──
+    html += '<div class="pgo5seg-bloco">';
+    html += '<h4 class="pgo5acc-titulo-permissoes">Bloqueios por tentativa de PIN</h4>';
+    html += '<p class="pgo5cfg-ajuda">Depois de ' + dados.tentativasPermitidas +
+      ' tentativas erradas, o PIN daquele usuário fica bloqueado por ' +
+      dados.horasDeBloqueio + ' horas. O bloqueio é individual.</p>';
+
+    if (!(dados.bloqueados || []).length) {
+      html += '<p class="pgo5seg-estado"><span class="material-icons">check_circle</span> ' +
+        'Ninguém está bloqueado.</p>';
+    } else {
+      html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+        '<th>Usuário</th><th>Bloqueado até</th><th class="pgo5cfg-acoes-col">Ações</th>' +
+        '</tr></thead><tbody>';
+      dados.bloqueados.forEach(function(bloqueado) {
+        html += '<tr><td><strong>' + App.escapeHtml(bloqueado.nome) + '</strong></td>' +
+          '<td>' + App.escapeHtml(self._dataHora(bloqueado.bloqueadoAte)) + '</td>' +
+          '<td class="pgo5cfg-acoes">' +
+          '<button type="button" class="btn-icon pgo5seg-desbloquear" data-id="' +
+          App.escapeHtml(bloqueado.id) + '" title="Desbloquear" aria-label="Desbloquear">' +
+          '<span class="material-icons">lock_open</span></button></td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    // Recuperação: só faz sentido para o administrador único.
+    if (dados.souOUnicoAdministrador) {
+      html += '<p class="pgo5cfg-ajuda">Você é o <strong>único administrador ativo</strong>. ' +
+        'Se bloquear o próprio PIN, não há outra pessoa para desbloquear — use a ' +
+        'recuperação abaixo, que confere o seu e-mail e a conta Google conectada.</p>';
+      html += '<div class="pgo5seg-acoes">' +
+        '<button class="btn btn-secondary" id="pgo5seg-recuperar">Recuperar meu acesso</button>' +
+        '</div>';
+    }
+    html += '</div>';
+
+    // ── Auditoria ──
+    html += '<div class="pgo5seg-bloco">';
+    html += '<h4 class="pgo5acc-titulo-permissoes">Auditoria administrativa</h4>';
+    html += '<p class="pgo5cfg-ajuda">Registro das ações administrativas. Consultas e ' +
+      'leituras não entram aqui, e nenhum dado de cliente é guardado.</p>';
+    html += '<div class="pgo5seg-acoes">' +
+      '<button class="btn btn-secondary" id="pgo5seg-auditoria">Ver auditoria</button></div>';
+    html += '<div id="pgo5seg-auditoria-lista"></div>';
+    html += '</div>';
+
+    html += '</div>';
+    self._alvo().innerHTML = html;
+    self._ligarEventos();
+  },
+
+  /** Nome legível de cada recurso protegido. */
+  NOME_DO_RECURSO: {
+    BANCO_PGO: 'Planilha do sistema (banco PGO)',
+    FONTE_SAC: 'Planilha da Análise de SAC'
+  },
+
+  _ligarEventos: function() {
+    var self = this;
+    var ligar = function(id, acao) {
+      var botao = document.getElementById(id);
+      if (botao) botao.addEventListener('click', acao);
+    };
+
+    ligar('pgo5seg-definir', function() { self._abrirFormularioPin(false); });
+    ligar('pgo5seg-alterar', function() { self._abrirFormularioPin(true); });
+    ligar('pgo5seg-validar', function() { self._pedirPin(function() { self.render(); }); });
+    ligar('pgo5seg-recuperar', function() { self._abrirRecuperacao(); });
+    ligar('pgo5seg-auditoria', function() { self._carregarAuditoria(); });
+
+    document.querySelectorAll('.pgo5seg-link').forEach(function(botao) {
+      botao.addEventListener('click', function() {
+        self._abrirLinkProtegido(botao.getAttribute('data-recurso'));
+      });
+    });
+    document.querySelectorAll('.pgo5seg-desbloquear').forEach(function(botao) {
+      botao.addEventListener('click', function() {
+        self._chamar('desbloquearPinDeUsuarioPGO5', [botao.getAttribute('data-id')],
+          'Usuário desbloqueado.');
+      });
+    });
+  },
+
+  /**
+   * Modal de definição/alteração do PIN.
+   *
+   * O PIN digitado vai direto para o servidor e não é guardado em lugar
+   * nenhum da página — nem em variável, nem em localStorage.
+   *
+   * @param {boolean} ehAlteracao true quando já existe PIN.
+   */
+  _abrirFormularioPin: function(ehAlteracao) {
+    var self = this;
+    var digitos = self.state.dados.digitosDoPin || 6;
+
+    var body = '';
+    if (ehAlteracao) {
+      body += self._campoPin('pgo5seg-atual', 'PIN atual', digitos);
+    }
+    body += self._campoPin('pgo5seg-novo', 'Novo PIN', digitos);
+    body += self._campoPin('pgo5seg-confirma', 'Confirme o novo PIN', digitos);
+    body += '<small class="pgo5cfg-nota">Use exatamente ' + digitos + ' dígitos. ' +
+      'Evite sequências óbvias como 000000 ou 123456. O PIN não pode ser recuperado — ' +
+      'se for esquecido, será preciso defini-lo novamente.</small>';
+
+    Components.modal({
+      title: ehAlteracao ? 'Alterar PIN' : 'Definir PIN',
+      body: body,
+      confirmText: 'Salvar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        var valor = function(id) {
+          var campo = document.getElementById(id);
+          return campo ? campo.value.trim() : '';
+        };
+        var payload = {
+          pinAtual: ehAlteracao ? valor('pgo5seg-atual') : '',
+          novoPin: valor('pgo5seg-novo'),
+          confirmacao: valor('pgo5seg-confirma')
+        };
+        if (payload.novoPin.length !== digitos) {
+          Components.toast('O PIN deve ter ' + digitos + ' dígitos.', 'warning');
+          return false;
+        }
+        if (payload.novoPin !== payload.confirmacao) {
+          Components.toast('A confirmação não confere.', 'warning');
+          return false;
+        }
+        self._chamar('definirPinPGO5', [payload],
+          ehAlteracao ? 'PIN alterado.' : 'PIN definido.');
+      }
+    });
+  },
+
+  /**
+   * Pede o PIN e, dando certo, executa a ação seguinte.
+   *
+   * Serve tanto para o botão "Informar PIN" quanto para quando uma ação
+   * protegida volta do servidor pedindo PIN.
+   *
+   * @param {Function} aoLiberar Executada depois de validar.
+   * @param {string} [mensagem] Texto extra explicando por que o PIN é pedido.
+   */
+  _pedirPin: function(aoLiberar, mensagem) {
+    var self = this;
+    var digitos = (self.state.dados && self.state.dados.digitosDoPin) || 6;
+
+    Components.modal({
+      title: 'Informe o PIN administrativo',
+      body: (mensagem ? '<p class="pgo5cfg-ajuda">' + App.escapeHtml(mensagem) + '</p>' : '') +
+        self._campoPin('pgo5seg-pin', 'PIN', digitos) +
+        '<small class="pgo5cfg-nota">Depois de aceito, as ações protegidas ficam ' +
+        'liberadas por alguns minutos.</small>',
+      confirmText: 'Validar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        var campo = document.getElementById('pgo5seg-pin');
+        var pin = campo ? campo.value.trim() : '';
+        if (pin.length !== digitos) {
+          Components.toast('O PIN deve ter ' + digitos + ' dígitos.', 'warning');
+          return false;
+        }
+        Components.showLoading('Validando...');
+        google.script.run
+          .withSuccessHandler(function() {
+            Components.hideLoading();
+            Components.toast('PIN aceito.', 'success');
+            if (typeof aoLiberar === 'function') aoLiberar();
+          })
+          .withFailureHandler(function(err) {
+            Components.hideLoading();
+            Components.toast(((err && err.message) || 'Não foi possível validar o PIN.'), 'error');
+            self.render();
+          })
+          .validarPinPGO5(pin);
+      }
+    });
+  },
+
+  /**
+   * Campo de PIN.
+   *
+   * type="password" para não ficar visível na tela, inputmode="numeric" para
+   * o teclado do celular abrir em números, e autocomplete desligado para o
+   * navegador não guardar o valor.
+   */
+  _campoPin: function(id, rotulo, digitos) {
+    return '<div class="form-group"><label class="form-label" for="' + id + '">' +
+      App.escapeHtml(rotulo) + ' <span class="required">*</span></label>' +
+      '<input class="form-control pgo5seg-pin-campo" id="' + id + '" type="password" ' +
+      'inputmode="numeric" autocomplete="off" maxlength="' + digitos + '" ' +
+      'placeholder="' + new Array(digitos + 1).join('•') + '"></div>';
+  },
+
+  /**
+   * Busca e mostra um link protegido.
+   *
+   * A URL só existe na página depois desta resposta, e apenas dentro do
+   * modal. Se o servidor pedir PIN, abre o modal de PIN e tenta de novo.
+   *
+   * @param {string} recurso 'BANCO_PGO' ou 'FONTE_SAC'.
+   */
+  _abrirLinkProtegido: function(recurso) {
+    var self = this;
+    Components.showLoading('Verificando autorização...');
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        Components.hideLoading();
+        Components.modal({
+          title: dados.nome || 'Link protegido',
+          body: '<p class="pgo5cfg-ajuda">Este endereço foi liberado agora e não fica ' +
+            'guardado na tela.</p>' +
+            '<p><a href="' + App.escapeHtml(dados.url) + '" target="_blank" rel="noopener">' +
+            App.escapeHtml(dados.url) + '</a></p>',
+          confirmText: 'Fechar',
+          cancelText: ''
+        });
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        var mensagem = (err && err.message) || '';
+        if (mensagem.indexOf('PIN_NECESSARIO') !== -1) {
+          self._pedirPin(function() { self._abrirLinkProtegido(recurso); },
+            'Este link é protegido pelo PIN administrativo.');
+          return;
+        }
+        if (mensagem.indexOf('PIN_NAO_DEFINIDO') !== -1) {
+          Components.toast('Defina o PIN administrativo antes de usar os links protegidos.',
+            'warning', 6000);
+          return;
+        }
+        Components.toast(mensagem || 'Não foi possível obter o link.', 'error');
+      })
+      .obterLinkProtegidoPGO5(recurso);
+  },
+
+  /** Modal da recuperação do administrador único. */
+  _abrirRecuperacao: function() {
+    var self = this;
+    Components.modal({
+      title: 'Recuperar meu acesso',
+      body: '<p class="pgo5cfg-ajuda">Confirme o seu e-mail cadastrado. O sistema também ' +
+        'confere a conta Google conectada agora — as duas precisam ser a mesma pessoa. ' +
+        'Isto remove o bloqueio; o PIN continua o mesmo e não é mostrado.</p>' +
+        '<div class="form-group"><label class="form-label" for="pgo5seg-email">' +
+        'E-mail cadastrado <span class="required">*</span></label>' +
+        '<input class="form-control" id="pgo5seg-email" type="email" autocomplete="off"></div>',
+      confirmText: 'Recuperar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        var campo = document.getElementById('pgo5seg-email');
+        var email = campo ? campo.value.trim() : '';
+        if (!email) {
+          Components.toast('Informe o e-mail cadastrado.', 'warning');
+          return false;
+        }
+        self._chamar('recuperarAcessoUnicoAdministradorPGO5', [email], 'Bloqueio removido.');
+      }
+    });
+  },
+
+  /** Carrega e mostra os registros de auditoria. */
+  _carregarAuditoria: function() {
+    var self = this;
+    var destino = document.getElementById('pgo5seg-auditoria-lista');
+    if (!destino) return;
+    destino.innerHTML = '<p class="pgo5cfg-ajuda">Carregando...</p>';
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        var registros = (dados && dados.registros) || [];
+        if (!registros.length) {
+          destino.innerHTML = Components.emptyState('history', 'Nenhuma ação registrada ainda.');
+          return;
+        }
+        var html = '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+          '<th>Quando</th><th>Ação</th><th>Onde</th><th>Resumo</th><th>Quem</th>' +
+          '</tr></thead><tbody>';
+        registros.forEach(function(registro) {
+          html += '<tr>' +
+            '<td>' + App.escapeHtml(self._dataHora(registro.data)) + '</td>' +
+            '<td><span class="badge badge-neutral">' + App.escapeHtml(registro.acao) + '</span></td>' +
+            '<td>' + App.escapeHtml(registro.entidade) + '</td>' +
+            '<td>' + App.escapeHtml(registro.resumo) + '</td>' +
+            '<td>' + App.escapeHtml(registro.executor) + '</td></tr>';
+        });
+        destino.innerHTML = html + '</tbody></table></div>';
+      })
+      .withFailureHandler(function(err) {
+        destino.innerHTML = Components.emptyState('lock',
+          'Não foi possível carregar a auditoria.', App.escapeHtml((err && err.message) || ''));
+      })
+      .listarAuditoriaPGO5(200);
+  },
+
+  /** Hora no formato HH:MM, para o aviso da liberação. */
+  _hora: function(iso) {
+    var data = new Date(iso);
+    if (isNaN(data.getTime())) return '';
+    return ('0' + data.getHours()).slice(-2) + ':' + ('0' + data.getMinutes()).slice(-2);
+  },
+
+  /** Data e hora em formato brasileiro. */
+  _dataHora: function(iso) {
+    var data = new Date(iso);
+    if (isNaN(data.getTime())) return String(iso || '');
+    return ('0' + data.getDate()).slice(-2) + '/' + ('0' + (data.getMonth() + 1)).slice(-2) +
+      '/' + data.getFullYear() + ' ' + this._hora(iso);
+  },
+
+  /** Chama o backend e redesenha. O sucesso só é anunciado depois. */
+  _chamar: function(funcao, args, mensagemOk) {
+    var self = this;
+    if (self.state.salvando) return;
+    self.state.salvando = true;
+    Components.showLoading('Processando...');
+
+    var run = google.script.run
+      .withSuccessHandler(function() {
+        self.state.salvando = false;
+        Components.hideLoading();
+        Components.toast(mensagemOk, 'success');
+        self.render();
+      })
+      .withFailureHandler(function(err) {
+        self.state.salvando = false;
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível concluir a operação.'), 'error');
+      });
+    run[funcao].apply(run, args);
+  }
+};
 </script>

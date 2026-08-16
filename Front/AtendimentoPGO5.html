@@ -168,19 +168,33 @@ var FormularioPGO5 = {
       number: 'number', integer: 'number', decimal: 'number',
       moeda: 'text', percentual: 'number',
       date: 'date', datetime: 'datetime-local', time: 'time',
-      email: 'email', telefone: 'tel', cpf: 'text', text: 'text'
+      email: 'email', telefone: 'tel', cpf: 'text', protocolo: 'text', text: 'text'
     };
     var htmlType = mapaTipo[tipo] || 'text';
     var extra = '';
     if (tipo === 'integer') extra = ' step="1"';
     if (tipo === 'decimal' || tipo === 'percentual') extra = ' step="any"';
     if (tipo === 'percentual') extra += ' min="0" max="100"';
-    if (tipo === 'cpf') extra = ' maxlength="14" inputmode="numeric"';
+    // CPF e Protocolo são IDENTIFICADORES DIGITADOS, não números:
+    //   - type="text" (nunca "number"): com "number" o navegador aceitaria
+    //     notação científica e comeria os zeros à esquerda de "00123";
+    //   - inputmode="numeric" abre o teclado numérico no celular;
+    //   - a classe pgo5-so-digitos liga o filtro de digitação.
+    // O filtro é conforto: quem colar texto ou desligar o JavaScript ainda
+    // passa pela validação do servidor.
+    if (tipo === 'cpf') extra = ' maxlength="14" inputmode="numeric" class-extra="pgo5-so-digitos"';
+    if (tipo === 'protocolo') extra = ' maxlength="30" inputmode="numeric" class-extra="pgo5-so-digitos"';
     if (tipo === 'telefone') extra = ' maxlength="15" inputmode="numeric"';
     // datetime-local usa "T" entre data e hora.
     if (tipo === 'datetime') val = val.replace(' ', 'T');
 
-    return '<input class="form-control" type="' + htmlType + '" id="' + id + '" value="' + val + '"' +
+    // "class-extra" é só um veículo interno; vira classe de verdade aqui.
+    var classes = 'form-control';
+    if (extra.indexOf('pgo5-so-digitos') !== -1) {
+      classes += ' pgo5-so-digitos';
+      extra = extra.replace(' class-extra="pgo5-so-digitos"', '');
+    }
+    return '<input class="' + classes + '" type="' + htmlType + '" id="' + id + '" value="' + val + '"' +
       ph + req + extra + '>';
   },
 
@@ -434,6 +448,18 @@ Pages.novoAtendimentoPGO5 = {
   _ligarEventos: function() {
     var self = this;
     var s = self.state;
+
+    // Campos de identificador (CPF, Protocolo) aceitam apenas dígitos.
+    // Isto é CONFORTO DE DIGITAÇÃO, não validação: quem colar texto, usar
+    // autofill ou desligar o JavaScript ainda é barrado pelo servidor.
+    // Os zeros à esquerda são preservados porque nada aqui converte para
+    // número — o valor continua sendo texto do começo ao fim.
+    document.querySelectorAll('.pgo5-so-digitos').forEach(function(campo) {
+      campo.addEventListener('input', function() {
+        var apenasDigitos = campo.value.replace(/\D/g, '');
+        if (campo.value !== apenasDigitos) campo.value = apenasDigitos;
+      });
+    });
 
     document.querySelectorAll('.pgo5-canal-card').forEach(function(botao) {
       botao.addEventListener('click', function() {

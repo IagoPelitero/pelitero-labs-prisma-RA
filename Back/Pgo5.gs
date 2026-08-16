@@ -418,6 +418,7 @@ function inicializarPGO5_() {
       const aba = ss.insertSheet(nome);
       aba.getRange(1, 1, 1, colunas.length).setValues([colunas]);
       aplicarFormatoCabecalho_(aba, colunas.length);
+      aplicarFormatoTextoEmIdentificadores_(aba, colunas);
       relatorio.abasCriadas.push(nome);
       relatorio.abasValidas.push(nome);
     });
@@ -902,4 +903,41 @@ function pgo5LinhaPorId_(aba, id) {
     if (String(ids[i][0] || '').trim().toUpperCase() === alvo) return i + 2;
   }
   return -1;
+}
+
+/**
+ * Colunas que guardam IDENTIFICADORES digitados, e não números.
+ *
+ * "00123" precisa continuar "00123". Se a coluna ficar no formato
+ * automático, o Google Sheets lê a string como número, mostra 123 e os
+ * zeros à esquerda somem — o identificador deixa de servir para consulta.
+ */
+const PGO5_COLUNAS_DE_IDENTIFICADOR = ['CPF', 'Protocolo'];
+
+/**
+ * Formata como TEXTO as colunas de identificador da aba.
+ *
+ * Aplicado na criação da aba, uma única vez por coluna. Sem isto, gravar
+ * "0" resultaria no número 0 e "01234567890" viraria 1234567890.
+ *
+ * A formatação é opcional do ponto de vista do código: se a API não estiver
+ * disponível (como no ambiente de teste), a função simplesmente não faz
+ * nada e a gravação continua funcionando.
+ *
+ * @param {Sheet} aba Aba recém-criada.
+ * @param {string[]} colunas Cabeçalhos na ordem oficial.
+ * @returns {void}
+ */
+function aplicarFormatoTextoEmIdentificadores_(aba, colunas) {
+  try {
+    const totalLinhas = aba.getMaxRows ? aba.getMaxRows() : 1000;
+    PGO5_COLUNAS_DE_IDENTIFICADOR.forEach(function(nomeColuna) {
+      const posicao = colunas.indexOf(nomeColuna);
+      if (posicao === -1) return;
+      const intervalo = aba.getRange(2, posicao + 1, Math.max(1, totalLinhas - 1), 1);
+      if (typeof intervalo.setNumberFormat === 'function') intervalo.setNumberFormat('@');
+    });
+  } catch (erro) {
+    Logger.log('[PGO5] Formato de texto não aplicado: ' + erro.message);
+  }
 }

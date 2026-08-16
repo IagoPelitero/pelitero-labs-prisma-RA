@@ -92,6 +92,9 @@
   /* Layout */
   --sidebar-width: 260px;
   --sidebar-collapsed: 70px;
+  /* Trilha de ícones usada em telas pequenas: estreita, mas sempre visível.
+     Ver o bloco @media (max-width: 768px) — o menu nunca é escondido. */
+  --sidebar-compacto: 58px;
   --header-height: 64px;
   --filters-height: 56px;
   --radius-sm: 6px;
@@ -134,7 +137,12 @@ body[data-theme="brasil"] {
   --accent-green: #FFDF00;
   --sidebar-bg: #002776;
   --sidebar-bg-2: #001542;
-  --sidebar-active: #009C3B;
+  /* Verde mais fechado que o --primary-blue (#009C3B) SÓ para o item ativo
+     do menu. Com o verde da bandeira, o texto branco dava 3,61 de contraste
+     — abaixo do mínimo AA (4,5). Este tom passa de 5,7 e continua sendo o
+     verde do tema. Importa mais agora: em tela pequena o menu vira uma
+     trilha de ícones e o item ativo é a única pista de onde o usuário está. */
+  --sidebar-active: #00762D;
 }
 
 /* Tema Dark */
@@ -1644,11 +1652,26 @@ select.form-control {
   font-size: 10.5px;
 }
 
+/* ── Cores dos badges (corrigidas na Etapa 3B) ──
+   O badge escreve em BRANCO num texto pequeno (11,5px), então precisa de
+   4,5 de contraste para atender ao AA. Com as cores originais o resultado
+   ficava baixo demais para ler com conforto:
+
+     sucesso #43A047 → 3,30      alerta #FF6B00 → 2,86
+     erro    #E53935 → 4,23      info   #00A3E0 → 2,87
+
+   Os tons abaixo são versões mais fechadas das MESMAS cores e passam de
+   4,5 nos quatro temas. A correção é local do badge de propósito: os
+   tokens --success-green, --warning-orange, --error-red e --secondary-blue
+   também pintam botões, alertas e gráficos, onde a cor original aparece em
+   área grande e continua legível. Mexer no token global mudaria a
+   identidade visual do sistema inteiro para resolver um problema que é só
+   deste componente. */
 .badge-primary { background: var(--primary-blue); }
-.badge-success { background: var(--success-green); }
-.badge-warning { background: var(--warning-orange); }
-.badge-danger { background: var(--error-red); }
-.badge-info { background: var(--secondary-blue); }
+.badge-success { background: #2E7D32; }
+.badge-warning { background: #B54A00; }
+.badge-danger  { background: #C62828; }
+.badge-info    { background: #0277BD; }
 .badge-neutral { background: var(--text-secondary); }
 
 .badge-outline {
@@ -2232,21 +2255,72 @@ select.form-control {
   }
 }
 
+/* ── Sidebar em tela pequena (Etapa 3B) ──
+   REGRA: o menu NUNCA desaparece.
+
+   Antes daqui o sidebar recebia transform: translateX(-100%) e saía da tela.
+   O problema é que o botão que o traria de volta mora DENTRO dele: em 375px
+   o usuário ficava sem nenhuma navegação, só com o conteúdo.
+
+   Agora ele encolhe para uma trilha de ícones que continua fixa e clicável.
+   Os rótulos somem, mas cada item mantém title e aria-label, então quem usa
+   leitor de tela ou passa o dedo sobre o ícone continua sabendo o que é. */
 @media (max-width: 768px) {
   .sidebar {
-    transform: translateX(-100%);
-    width: var(--sidebar-width);
-  }
-  .sidebar.mobile-open {
-    transform: translateX(0);
+    transform: none;
+    width: var(--sidebar-compacto);
   }
   .sidebar .sidebar-label,
-  .sidebar .sidebar-logo-text {
-    display: inline;
-    opacity: 1;
+  .sidebar .sidebar-logo-text,
+  .sidebar .sidebar-version {
+    display: none;
+  }
+  .sidebar .sidebar-item {
+    justify-content: center;
+    padding: 12px 0;
+  }
+  /* Alvo de toque confortável: o item inteiro responde ao dedo. */
+  .sidebar .sidebar-item .material-icons {
+    font-size: 22px;
+  }
+  .sidebar .sidebar-header {
+    justify-content: center;
+    padding: 14px 0;
+  }
+  /* O botão de recolher não faz sentido numa trilha já compacta. */
+  .sidebar .sidebar-toggle {
+    display: none;
+  }
+  .sidebar .sidebar-logo-abbr {
+    margin: 0;
   }
   .main-area {
-    margin-left: 0;
+    margin-left: var(--sidebar-compacto);
+  }
+  /* Na trilha compacta o rótulo escrito some, então o balão com o nome
+     passa a valer aqui também (o mesmo comportamento do menu recolhido no
+     desktop). Em toque, o atributo title e o aria-label cobrem o caso. */
+  .sidebar .sidebar-item::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--dark-blue);
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .15s;
+    z-index: 1200;
+  }
+  .sidebar .sidebar-item:hover::after,
+  .sidebar .sidebar-item:focus-visible::after {
+    opacity: 1;
   }
   .header {
     padding: 0 16px;
@@ -2282,17 +2356,15 @@ select.form-control {
   }
 }
 
-/* Mobile sidebar overlay */
+/* Fundo escuro do antigo menu deslizante.
+   Mantido apenas por compatibilidade: desde a Etapa 3B o sidebar não desliza
+   mais sobre o conteúdo, então este elemento nunca é ativado. */
 .sidebar-backdrop {
   display: none;
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.4);
   z-index: 999;
-}
-
-.sidebar-backdrop.active {
-  display: block;
 }
 
 /* ── 21. Animations ── */
@@ -2953,3 +3025,107 @@ body[data-theme="dark"] .skeleton-loading {
 .indop-table tr.indop-linha-sla td { background: var(--light-blue); }
 .indop-table tr.indop-linha-sla td.indop-rowhead { background: var(--light-blue); }
 </style>
+
+/* ── Acessibilidade do menu (Etapa 3B) ──
+   Na trilha compacta o rótulo não aparece, então o foco do teclado precisa
+   ser claramente visível: sem isso quem navega por Tab se perde. */
+.sidebar-item:focus-visible {
+  outline: 2px solid var(--secondary-blue);
+  outline-offset: -2px;
+}
+
+.sidebar-item:focus-visible .material-icons {
+  color: inherit;
+}
+
+/* ── PGO 5.0 · Etapa 3B ── */
+
+/* Cabeçalho de Configurações com o botão Voltar à esquerda do título. */
+.pgo5cfg-titulo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.btn-voltar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s;
+}
+
+.btn-voltar .material-icons { font-size: 18px; }
+
+.btn-voltar:hover {
+  background: var(--light-blue);
+  border-color: var(--primary-blue);
+  color: var(--primary-blue);
+}
+
+.btn-voltar:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+/* Tela de Segurança: blocos separados por assunto (PIN, links, bloqueios). */
+.pgo5seg-bloco {
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pgo5seg-bloco:last-child { border-bottom: 0; padding-bottom: 4px; }
+
+.pgo5seg-estado {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.pgo5seg-estado .material-icons { font-size: 18px; color: var(--text-secondary); }
+
+.pgo5seg-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.pgo5seg-recurso {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  font-size: 13.5px;
+  border-top: 1px solid var(--border);
+}
+
+/* O PIN é digitado em campo mascarado; espaçar os caracteres ajuda a
+   conferir quantos dígitos já foram digitados sem revelar o valor. */
+.pgo5seg-pin-campo {
+  letter-spacing: 6px;
+  font-size: 18px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .pgo5cfg-titulo { flex-wrap: wrap; gap: 10px; }
+  .btn-voltar { padding: 7px 10px; }
+  .pgo5seg-recurso { flex-direction: column; align-items: flex-start; }
+  .pgo5seg-acoes .btn { flex: 1 1 auto; }
+}

@@ -730,6 +730,10 @@ function salvarCargoPGO5(dados, id) {
       throw new Error('Cargo não encontrado.');
     }
     pgo5AtualizarPorId(PGO5.SHEET_NAMES.CONFIGURACOES, registroId, linha);
+    registrarAuditoria_(
+      linha.Ativo ? PGO5_ACOES_AUDITORIA.EDIT : PGO5_ACOES_AUDITORIA.DEACTIVATE,
+      PGO5_ENTIDADES_AUDITORIA.CARGO, registroId, 'Cargo atualizado.',
+      { nome: nome, ativo: linha.Ativo });
     return { success: true, id: registroId };
   }
 
@@ -737,6 +741,8 @@ function salvarCargoPGO5(dados, id) {
   linha.Chave = normalizeText_(nome).toUpperCase().replace(/\s+/g, '_');
   if (!linha.Valor) linha.Valor = listarCargos_().length + 1;
   const novo = pgo5Inserir(PGO5.SHEET_NAMES.CONFIGURACOES, linha);
+  registrarAuditoria_(PGO5_ACOES_AUDITORIA.CREATE, PGO5_ENTIDADES_AUDITORIA.CARGO,
+    String(novo.Id || ''), 'Cargo criado.', { nome: nome });
   return { success: true, id: String(novo.Id || '') };
 }
 
@@ -776,11 +782,14 @@ function salvarNivelAcessoPGO5(dados, id) {
 
   const ativo = entrada.ativo === undefined ? true : isTrue_(entrada.ativo);
 
+  // Guardado antes da gravação: a auditoria precisa saber o que havia antes.
+  let atualParaAuditoria = null;
   if (registroId) {
     const atual = pgo5ObterPorId(PGO5.SHEET_NAMES.CONFIGURACOES, registroId);
     if (!atual || String(atual.Tipo).toUpperCase() !== PGO5_TIPOS_CONFIG.NIVEL_ACESSO) {
       throw new Error('Nível de acesso não encontrado.');
     }
+    atualParaAuditoria = atual;
     garantirAdministradorRestante_({
       nivelId: registroId,
       ativo: ativo,
@@ -800,7 +809,9 @@ function salvarNivelAcessoPGO5(dados, id) {
   }
 
   if (registroId) {
+    const permissoesAntes = lerPermissoesDoRegistro_(atualParaAuditoria);
     pgo5AtualizarPorId(PGO5.SHEET_NAMES.CONFIGURACOES, registroId, linha);
+    auditarAlteracaoDeNivel_(ator, registroId, nome, ativo, permissoes, permissoesAntes);
     return { success: true, id: registroId };
   }
 
@@ -808,5 +819,46 @@ function salvarNivelAcessoPGO5(dados, id) {
   if (!linha.Valor) linha.Valor = listarNiveisAcesso_().length + 1;
   if (permissoes === null) linha.Configuracao = JSON.stringify({ permissoes: [] });
   const novo = pgo5Inserir(PGO5.SHEET_NAMES.CONFIGURACOES, linha);
+  auditarAlteracaoDeNivel_(ator, String(novo.Id || ''), nome, ativo, permissoes || [], null);
   return { success: true, id: String(novo.Id || '') };
+}
+
+/**
+ * Registra na auditoria o que aconteceu com um nível de acesso.
+ *
+ * Guarda a QUANTIDADE de permissões e quais entraram ou saíram — nunca o
+ * JSON inteiro, que cresceria demais na planilha. Alterar permissões é
+ * registrado com ação própria (ALTER_PERMISSION) porque é a mudança que
+ * afeta todos os usuários daquele nível de uma vez.
+ *
+ * @param {Object} ator Quem executou.
+ * @param {string} nivelId Id do nível afetado.
+ * @param {string} nome Nome do nível.
+ * @param {boolean} ativo Situação resultante.
+ * @param {string[]|null} permissoesDepois Permissões novas, ou null se não mudaram.
+ * @param {string[]|null} permissoesAntes Permissões anteriores, ou null na criação.
+ * @returns {void}
+ */
+function auditarAlteracaoDeNivel_(ator, nivelId, nome, ativo, permissoesDepois, permissoesAntes) {
+  const ehCriacao = permissoesAntes === null;
+  registrarAuditoria_(
+    ehCriacao ? PGO5_ACOES_AUDITORIA.CREATE
+      : (ativo ? PGO5_ACOES_AUDITORIA.EDIT : PGO5_ACOES_AUDITORIA.DEACTIVATE),
+    PGO5_ENTIDADES_AUDITORIA.NIVEL_ACESSO, nivelId,
+    ehCriacao ? 'Nível de acesso criado.' : 'Nível de acesso atualizado.',
+    { nome: nome, ativo: ativo }, String(ator.id));
+
+  if (permissoesDepois === null || permissoesDepois === undefined) return;
+
+  const antes = permissoesAntes || [];
+  const depois = permissoesDepois;
+  const incluidas = depois.filter(function(p) { return antes.indexOf(p) === -1; });
+  const removidas = antes.filter(function(p) { return depois.indexOf(p) === -1; });
+  if (!ehCriacao && incluidas.length === 0 && removidas.length === 0) return;
+
+  registrarAuditoria_(PGO5_ACOES_AUDITORIA.ALTER_PERMISSION,
+    PGO5_ENTIDADES_AUDITORIA.NIVEL_ACESSO, nivelId,
+    'Permissões do nível "' + nome + '" alteradas.',
+    { total: depois.length, incluidas: incluidas, removidas: removidas },
+    String(ator.id));
 }

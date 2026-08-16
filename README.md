@@ -150,7 +150,9 @@ Back/                        Camada de servidor (Apps Script)
  ├─ Pgo5Catalogo.gs         Catálogo dinâmico: canais, campos, produtos, status
  ├─ Pgo5Atendimentos.gs     Atendimentos do 5.0 e os valores dos campos dinâmicos
  ├─ Pgo5Permissoes.gs       Cargos, níveis de acesso e o motor de permissões
- └─ Pgo5Usuarios.gs         Cadastro de usuários e a hierarquia (SupervisorId)
+ ├─ Pgo5Usuarios.gs         Cadastro de usuários e a hierarquia (SupervisorId)
+ ├─ Pgo5Seguranca.gs        PIN administrativo, bloqueios e recursos protegidos
+ └─ Pgo5Auditoria.gs        Registro das ações administrativas
 
 Front/                       Camada de interface (HtmlService)
  ├─ Index.html              Shell: layout (sidebar + header) e include dos demais
@@ -170,7 +172,7 @@ Front/                       Camada de interface (HtmlService)
  │  ── PGO 5.0 ──
  ├─ AtendimentoPGO5.html    Formulário dinâmico montado a partir do catálogo
  ├─ ConfiguracoesPGO5.html  Administração do catálogo do 5.0
- └─ AcessoPGO5.html         Usuários, Cargos e Níveis (com o editor de permissões)
+ └─ AcessoPGO5.html         Usuários, Cargos, Níveis e Segurança (PIN e auditoria)
 
 .claude/                     Metadados LOCAIS (não versionados — ver .gitignore)
  ├─ appsscript.json         Manifesto do Apps Script (timezone, escopos, runtime)
@@ -283,12 +285,85 @@ Funções-chave: `obterPermissoesUsuario_`, `usuarioTemPermissao_`,
 (em `Pgo5Usuarios.gs`). As telas herdadas do 4.x passam por `exigirAcesso_`
 (`Services.gs`), que escolhe a regra certa conforme o banco.
 
+### 6.3 PIN administrativo — a segunda camada
+
+Algumas ações não se contentam com a permissão. Para elas vale:
+
+```
+PERMISSÃO  +  PIN DESBLOQUEADO  =  AÇÃO
+```
+
+São três: ver o link da planilha do sistema, ver o link da planilha da
+Análise de SAC e conceder um nível com poderes administrativos.
+
+O PIN **não é senha de login** — quem autentica continua sendo a Conta
+Google. Ele tem 6 dígitos e é guardado como `SHA-256(salt + PIN)` em Script
+Properties; o valor em si nunca é gravado, nunca vai para a planilha e nunca
+chega ao navegador. Não existe PIN padrão: uma instalação nova começa sem
+PIN, e as ações protegidas ficam indisponíveis até um administrador definir
+o primeiro.
+
+| Situação | O que acontece |
+| --- | --- |
+| PIN correto | Libera as ações protegidas por 5 minutos |
+| 3 erros seguidos | Bloqueia **aquele usuário** por 24 horas |
+| Bloqueado | Outro administrador desbloqueia, ou espera o prazo |
+| Único administrador bloqueado | Recuperação por e-mail + conta Google autenticada |
+
+**Os links protegidos nunca saem do servidor sem as duas chaves.** Eles não
+estão no bootstrap, no HTML, em `data-*` nem em variável de JavaScript: a
+tela pede, o servidor confere permissão e PIN, e só então devolve a URL.
+
+**O contador de 5 minutos do navegador é decorativo.** A validade é
+conferida no servidor a cada chamada — `localStorage`, `sessionStorage` ou
+variável de JavaScript não servem como prova.
+
+Funções-chave: `exigirPermissaoComPin_`, `validarPinPGO5`,
+`obterLinkProtegidoPGO5`, `recuperarAcessoUnicoAdministradorPGO5`
+(em `Pgo5Seguranca.gs`).
+
+### 6.4 Auditoria administrativa
+
+As ações administrativas ficam registradas na aba `Configurações` com
+`Tipo = AUDITORIA` — nenhuma aba nova. São gravadas criação, edição,
+ativação, desativação, exclusão, mudança de permissões, concessão de
+administrador, alteração do PIN, bloqueio, desbloqueio e recuperação.
+
+**Leitura não gera registro**: abrir o Dashboard ou consultar um relatório
+não entra na auditoria, para a planilha não virar um log infinito.
+
+**Nada de dado pessoal**: CPF, cliente, protocolo, PIN, hash, salt e URLs
+protegidas são removidos antes da gravação por `limparDadoSensivel_`
+(`Pgo5Auditoria.gs`) — uma rede de segurança que age mesmo se quem registra
+a ação passar um objeto inteiro por engano.
+
 ---
 
 ## 7. Integração com o Google Sheets (banco de dados)
 
 Cada aba da planilha é uma "tabela". As colunas e os dados padrão são definidos em
 `Config.gs` (`COLUMNS`, `DEFAULT_*`).
+
+### CPF e Protocolo são identificadores, não números
+
+No **PGO 5.0** os dois campos guardam o que o operador digitou:
+
+- aceitam **somente dígitos** — `0`, `00`, `01234567890` são todos válidos;
+- **não** passam por cálculo de dígito verificador;
+- são gravados como **texto**, e as colunas nascem formatadas como texto na
+  planilha (`aplicarFormatoTextoEmIdentificadores_` em `Pgo5.gs`).
+
+O motivo é simples: virar número comeria os zeros à esquerda e `00123` se
+tornaria `123`, perdendo o identificador.
+
+⚠️ **`"0"` é um valor válido.** Nunca teste com `if (!valor)`, porque `"0"`
+é *falsy* em JavaScript e o teste confundiria "zero" com "vazio". Compare
+com `''` explicitamente — é o que `pgo5TextoDeIdentificador_` faz.
+
+No banco **4.x** nada mudou: lá o CPF continua validado por dígito
+verificador e gravado com máscara, porque as abas legadas são consumidas por
+outras planilhas via `IMPORTRANGE`. Registros históricos não são convertidos:
+a regra vale para novos registros e edições futuras.
 
 | Aba | Função |
 | --- | --- |

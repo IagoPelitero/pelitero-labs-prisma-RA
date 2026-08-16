@@ -49,7 +49,7 @@ const PGO5_TIPOS_CAMPO = [
   'text', 'textarea', 'number', 'integer', 'decimal',
   'date', 'datetime', 'time',
   'select', 'multiselect', 'radio', 'checkbox',
-  'email', 'telefone', 'cpf', 'moeda', 'percentual'
+  'email', 'telefone', 'cpf', 'protocolo', 'moeda', 'percentual'
 ];
 
 /**
@@ -334,9 +334,9 @@ function pgo5DefinicaoInicial_() {
   const camposOperacionais = function() {
     return [
       { nome: 'dataAbertura', rotulo: 'Data', tipo: 'date', obrigatorio: true },
-      { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'text', obrigatorio: true, placeholder: 'Número do protocolo' },
+      { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'protocolo', obrigatorio: true, placeholder: 'Somente números' },
       { nome: 'cliente', rotulo: 'Nome do Cliente', tipo: 'text', obrigatorio: true },
-      { nome: 'cpf', rotulo: 'CPF', tipo: 'cpf', obrigatorio: true, placeholder: '000.000.000-00' },
+      { nome: 'cpf', rotulo: 'CPF', tipo: 'cpf', obrigatorio: true, placeholder: 'Somente números' },
       { nome: 'produto', rotulo: 'Produto', tipo: 'select', obrigatorio: false },
       { nome: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false },
       { nome: 'subcategoria', rotulo: 'Subcategoria', tipo: 'select', obrigatorio: false },
@@ -354,7 +354,7 @@ function pgo5DefinicaoInicial_() {
       nome: 'SAC Reclamação',
       campos: [
         { nome: 'dataAbertura', rotulo: 'Data', tipo: 'date', obrigatorio: true },
-        { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'text', obrigatorio: true },
+        { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'protocolo', obrigatorio: true },
         { nome: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false },
         { nome: 'subcategoria', rotulo: 'Subcategoria', tipo: 'select', obrigatorio: false },
         // Dinâmico: vai para ValoresAtendimento, não para uma coluna nova.
@@ -665,6 +665,15 @@ function excluirItemCatalogoPGO5(tipo, id) {
   }
 
   const removido = pgo5ExcluirPorId(PGO5.SHEET_NAMES.FORMULARIO, registroId);
+
+  // Exclusão de item de catálogo é definitiva e muda o que o formulário
+  // oferece a todo mundo — por isso entra na auditoria administrativa.
+  // Guarda só o tipo e o rótulo: aqui não existe dado pessoal.
+  if (removido) {
+    registrarAuditoria_(PGO5_ACOES_AUDITORIA.DELETE, PGO5_ENTIDADES_AUDITORIA.CATALOGO,
+      registroId, 'Item de catálogo excluído.',
+      { tipo: t, rotulo: String(atual.Rotulo || atual.Nome || '') });
+  }
   return { success: removido };
 }
 

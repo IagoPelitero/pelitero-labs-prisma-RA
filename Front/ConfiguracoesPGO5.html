@@ -48,7 +48,9 @@ Pages.configuracoesPGO5 = {
     { tipo: 'USUARIOS', label: 'Usuários', icone: 'group', externa: 'usuariosPGO5',
       permissoes: ['gerenciarEquipe', 'gerenciarUsuariosTodos'] },
     { tipo: 'ACESSOS', label: 'Cargos e Níveis', icone: 'security', externa: 'acessosPGO5',
-      permissoes: ['gerenciarCargos', 'gerenciarNiveis'] }
+      permissoes: ['gerenciarCargos', 'gerenciarNiveis'] },
+    { tipo: 'SEGURANCA', label: 'Segurança', icone: 'lock', externa: 'segurancaPGO5',
+      permissoes: ['alterarPermissoes'] }
   ],
 
   /**
@@ -85,7 +87,8 @@ Pages.configuracoesPGO5 = {
     container = container || document.getElementById('app');
 
     var permissoesDaTela = ['gerenciarFormulario', 'gerenciarCanais', 'gerenciarCatalogos',
-      'gerenciarEquipe', 'gerenciarUsuariosTodos', 'gerenciarCargos', 'gerenciarNiveis'];
+      'gerenciarEquipe', 'gerenciarUsuariosTodos', 'gerenciarCargos', 'gerenciarNiveis',
+      'alterarPermissoes'];
     var podeEntrar = permissoesDaTela.some(function(p) { return AcessoPGO5.podeNaInterface(p); });
     if (!podeEntrar) { App.navigateTo('dashboard'); return; }
 
@@ -98,6 +101,7 @@ Pages.configuracoesPGO5 = {
 
     container.innerHTML = self._cabecalhoHtml() +
       '<div class="card">' + Components.emptyState('settings', 'Carregando configurações...') + '</div>';
+    self._ligarVoltar();
     self._carregar(true);
   },
 
@@ -143,18 +147,42 @@ Pages.configuracoesPGO5 = {
       })
       .withFailureHandler(function(err) {
         var app = document.getElementById('app');
-        if (app) app.innerHTML = self._cabecalhoHtml() + '<div class="card">' +
-          Components.emptyState('error_outline', 'Não foi possível carregar as configurações.',
-            App.escapeHtml((err && err.message) || '')) + '</div>';
+        if (app) {
+          app.innerHTML = self._cabecalhoHtml() + '<div class="card">' +
+            Components.emptyState('error_outline', 'Não foi possível carregar as configurações.',
+              App.escapeHtml((err && err.message) || '')) + '</div>';
+          self._ligarVoltar();
+        }
       })
       .getCatalogoPGO5();
   },
 
-  _cabecalhoHtml: function() {
-    return '<div class="page-header"><div>' +
-      '<h1 class="page-title">Configurações</h1>' +
-      '<p class="page-subtitle">O que você define aqui é o que o formulário mostra.</p>' +
-      '</div></div>';
+  /**
+   * Cabeçalho da tela, com o botão Voltar.
+   *
+   * O Voltar devolve para a tela EXTERNA de onde o usuário veio (ver
+   * App.obterOrigemConfiguracoes_). Navegar entre as seções internas não
+   * muda esse destino.
+   *
+   * @returns {string} HTML do cabeçalho.
+   */
+  _cabecalhoHtml: function(acaoHtml) {
+    var origem = App.obterOrigemConfiguracoes_();
+    var nomeDaOrigem = App.nomeVisivelDaTela(origem);
+    return '<div class="page-header"><div class="pgo5cfg-titulo">' +
+      '<button type="button" class="btn-voltar" id="pgo5cfg-voltar" ' +
+      'title="Voltar para ' + App.escapeHtml(nomeDaOrigem) + '" ' +
+      'aria-label="Voltar para ' + App.escapeHtml(nomeDaOrigem) + '">' +
+      '<span class="material-icons">arrow_back</span><span>Voltar</span></button>' +
+      '<div><h1 class="page-title">Configurações</h1>' +
+      '<p class="page-subtitle">O que você define aqui é o que o formulário mostra.</p></div>' +
+      '</div>' + (acaoHtml || '') + '</div>';
+  },
+
+  /** Liga o botão Voltar do cabeçalho (existe em todos os estados da tela). */
+  _ligarVoltar: function() {
+    var botao = document.getElementById('pgo5cfg-voltar');
+    if (botao) botao.addEventListener('click', function() { App.voltarDaConfiguracao(); });
   },
 
   /** Desenha a navegação lateral + a tabela da seção ativa. */
@@ -170,11 +198,8 @@ Pages.configuracoesPGO5 = {
     var regras = (self.state.catalogo.regras || {})[self.state.ativa] || {};
     var podeCriar = !externa && regras.podeCriar !== false;
 
-    var html = '<div class="page-header"><div>' +
-      '<h1 class="page-title">Configurações</h1>' +
-      '<p class="page-subtitle">O que você define aqui é o que o formulário mostra.</p></div>' +
-      (podeCriar ? '<button class="btn btn-primary" id="pgo5cfg-novo">+ Novo registro</button>' : '') +
-      '</div>';
+    var html = self._cabecalhoHtml(
+      podeCriar ? '<button class="btn btn-primary" id="pgo5cfg-novo">+ Novo registro</button>' : '');
 
     html += '<div class="config-layout"><aside class="config-nav">';
     self.secoesVisiveis().forEach(function(s) {
@@ -189,6 +214,7 @@ Pages.configuracoesPGO5 = {
       : '</aside><section class="card config-content">' + self._tabelaHtml() + '</section></div>';
 
     container.innerHTML = html;
+    self._ligarVoltar();
     if (externa && Pages[externa]) Pages[externa].render();
     self._ligarEventos();
   },

@@ -115,6 +115,17 @@ var App = {
         App.navigateTo(item.getAttribute('data-page'));
         App.closeMobileSidebar();
       });
+
+      // Os itens são <li>, que o navegador não ativa com o teclado sozinho.
+      // Como em tela pequena o menu é uma trilha só de ícones, navegar por
+      // Tab + Enter precisa funcionar.
+      sidebar.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        var item = event.target.closest('.sidebar-item');
+        if (!item || !item.getAttribute('data-page')) return;
+        event.preventDefault();          // Espaço não deve rolar a página
+        App.navigateTo(item.getAttribute('data-page'));
+      });
     }
 
     window.addEventListener('resize', function() {
@@ -134,6 +145,11 @@ var App = {
     }
     if (target === 'novo') target = 'novoAtendimento';
     if (!Pages[target]) target = 'dashboard';
+
+    // Antes de sair da tela atual, anota de onde o usuário veio quando ele
+    // está ENTRANDO em Configurações. É o que faz o botão Voltar devolver
+    // para o Dashboard, para Produtividade ou para onde quer que ele estava.
+    if (target === 'configuracoes') this.registrarOrigemConfiguracoes_(this.currentPage);
 
     this.currentPage = target;
     this.currentParams = options;
@@ -162,6 +178,76 @@ var App = {
   // Recarrega a página atual do zero (botão "Atualizar" do cabeçalho).
   refreshCurrentPage: function() {
     this.navigateTo(this.currentPage, this.currentParams, true);
+  },
+
+  /**
+   * De onde o usuário veio ao abrir Configurações.
+   *
+   * ORIGEM EXTERNA × SUBSEÇÃO INTERNA — a distinção que importa aqui:
+   *
+   *   origem EXTERNA  → a tela de fora (Dashboard, Relatórios, Indicadores).
+   *                     É para ela que o botão Voltar leva.
+   *   subseção INTERNA→ Usuários, Cargos, Canais, Campos… Navegar entre elas
+   *                     NÃO muda a origem: quem entrou pelo Dashboard volta
+   *                     para o Dashboard mesmo depois de passear por dentro
+   *                     de Configurações.
+   *
+   * Por isso o registro acontece só em App.navigateTo, no momento de ENTRAR
+   * em 'configuracoes'. A navegação interna da tela não passa por lá.
+   */
+  _origemDaConfiguracao: 'dashboard',
+
+  /**
+   * Guarda a tela anterior antes de abrir Configurações.
+   *
+   * Ignora 'configuracoes' como origem: sem isso, reabrir a tela estando
+   * nela mesma faria o Voltar cair em Configurações de novo — um laço em
+   * que o usuário nunca sai.
+   *
+   * @param {string} telaAnterior Página em que o usuário estava.
+   * @returns {void}
+   */
+  registrarOrigemConfiguracoes_: function(telaAnterior) {
+    var anterior = String(telaAnterior || '');
+    if (!anterior || anterior === 'configuracoes') return;
+    if (!Pages[anterior]) return;             // rota desconhecida: mantém a anterior
+    this._origemDaConfiguracao = anterior;
+  },
+
+  /**
+   * Para onde o botão Voltar deve levar.
+   *
+   * Se a origem registrada não existir mais (acesso direto pela URL, por
+   * exemplo), cai no Dashboard — que é sempre acessível a qualquer usuário
+   * autenticado.
+   *
+   * @returns {string} Nome da página de destino.
+   */
+  obterOrigemConfiguracoes_: function() {
+    var origem = this._origemDaConfiguracao;
+    if (!origem || origem === 'configuracoes' || !Pages[origem]) return 'dashboard';
+    return origem;
+  },
+
+  /** Executa o Voltar do cabeçalho de Configurações. */
+  voltarDaConfiguracao: function() {
+    this.navigateTo(this.obterOrigemConfiguracoes_());
+  },
+
+  /**
+   * Nome visível de uma tela, para usar em textos como "Voltar para X".
+   *
+   * Reaproveita o rótulo que está no menu lateral (que o ADM pode ter
+   * personalizado) e cai no identificador técnico se a tela não estiver lá.
+   *
+   * @param {string} pagina Identificador técnico (data-page).
+   * @returns {string} Nome legível.
+   */
+  nomeVisivelDaTela: function(pagina) {
+    var item = document.querySelector('.sidebar-item[data-page="' + pagina + '"]');
+    if (!item) return pagina;
+    var label = item.querySelector('.sidebar-label');
+    return (label && label.textContent.trim()) || pagina;
   },
 
   // Mostra o nome e o perfil do usuário logado no cabeçalho.
@@ -314,6 +400,10 @@ var App = {
       var nome = self.nomeTela(pagina, padrao);
       label.textContent = nome;
       item.setAttribute('data-tooltip', nome);
+      // Na trilha compacta o texto some: title e aria-label passam a ser a
+      // única identificação do item, então acompanham o rótulo escolhido.
+      item.setAttribute('title', nome);
+      item.setAttribute('aria-label', nome);
     });
   },
 

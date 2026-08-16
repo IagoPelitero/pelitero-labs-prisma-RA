@@ -155,13 +155,28 @@ function pgo5NormalizarValorCampo_(campo, valor) {
       }
       return { ok: true, valor: digitos, erro: '' };
     }
-    case 'cpf': {
-      const digitos = String(bruto).replace(/\D/g, '');
-      if (!validateCPF(digitos)) {
-        return { ok: false, valor: '', erro: '"' + rotulo + '" não é um CPF válido.' };
+    case 'cpf':
+    case 'protocolo': {
+      // REGRA DO PGO 5.0 (definida pelo PO): CPF e Protocolo são
+      // IDENTIFICADORES DIGITADOS pelo operador, não números.
+      //
+      //   - aceitam qualquer sequência só de dígitos: "0", "00",
+      //     "01234567890" são todos válidos;
+      //   - NÃO passam por cálculo de dígito verificador. O operador copia o
+      //     que veio do canal de atendimento e nem sempre é um CPF completo;
+      //   - são guardados como TEXTO. Virar Number comeria os zeros à
+      //     esquerda e "00123" viraria 123, perdendo o identificador;
+      //   - qualquer caractere que não seja dígito é recusado — letras,
+      //     ponto, hífen e barra inclusive.
+      //
+      // Atenção a "0": é um valor VÁLIDO. Nunca teste com `if (!valor)`,
+      // porque "0" é falsy em JavaScript. Compare com '' explicitamente.
+      const texto = String(bruto === undefined || bruto === null ? '' : bruto).trim();
+      if (!/^[0-9]+$/.test(texto)) {
+        return { ok: false, valor: '',
+          erro: '"' + rotulo + '" deve conter apenas números.' };
       }
-      // Guarda formatado, como o sistema 4.x já faz.
-      return { ok: true, valor: formatCPF(digitos), erro: '' };
+      return { ok: true, valor: texto, erro: '' };
     }
     default: {
       return { ok: true, valor: sanitizeInput(bruto), erro: '' };
@@ -190,11 +205,14 @@ function pgo5ParaNumero_(valor) {
 // ============================================================================
 
 /**
- * Decide qual usuário fica como RESPONSÁVEL, aplicando as regras de perfil.
+ * Decide qual usuário fica como RESPONSÁVEL.
  *
- *   Analista   → sempre ele mesmo (não delega).
- *   Supervisor → ele mesmo, ou alguém da sua equipe/hierarquia.
- *   ADM        → ele mesmo, ou qualquer usuário ativo.
+ * Quem pode delegar — e para quem — vem do ESCOPO DE DELEGAÇÃO do nível de
+ * acesso, nunca do cargo (ver obterEscopoDelegacao_ em Pgo5Permissoes.gs):
+ *
+ *   NENHUM → sempre ele mesmo (não delega).
+ *   EQUIPE → ele mesmo, ou alguém da sua hierarquia.
+ *   TODOS  → ele mesmo, ou qualquer usuário ativo.
  *
  * CriadoPorId é sempre quem executa a criação e nunca muda depois — quem
  * chama esta função trata disso.
@@ -600,7 +618,7 @@ function listarAtendimentosPGO5_() {
     return {
       id: String(a.Id || ''),
       dataAbertura: a.DataAbertura,
-      protocolo: String(a.Protocolo || '') || '-',
+      protocolo: pgo5TextoDeIdentificador_(a.Protocolo) || '-',
       produto: pgo5Rotulo_(rotulos, a.ProdutoId),
       categoria: pgo5Rotulo_(rotulos, a.CategoriaId),
       subcategoria: pgo5Rotulo_(rotulos, a.SubcategoriaId),
@@ -675,11 +693,11 @@ function pgo5AtendimentosComoLegado_() {
 
     return {
       Id: id,
-      NumeroRA: String(a.Protocolo || ''),
+      NumeroRA: pgo5TextoDeIdentificador_(a.Protocolo),
       DataAbertura: a.DataAbertura,
       Canal: pgo5Rotulo_(rotulos, a.CanalId, ''),
       Cliente: String(a.Cliente || ''),
-      CPF: String(a.CPF || ''),
+      CPF: pgo5TextoDeIdentificador_(a.CPF),
       Produto: pgo5Rotulo_(rotulos, a.ProdutoId, ''),
       Categoria: pgo5Rotulo_(rotulos, a.CategoriaId, ''),
       Subcategoria: pgo5Rotulo_(rotulos, a.SubcategoriaId, ''),
@@ -796,4 +814,25 @@ function getFormularioPGO5() {
     podeDelegar: obterEscopoDelegacao_(atorComoUsuario_(ator)) !== 'NENHUM',
     usuarioId: String(ator.id)
   };
+}
+
+/**
+ * Converte um identificador lido da planilha em texto, sem perder o zero.
+ *
+ * POR QUE ISTO EXISTE
+ * `String(valor || '')` parece inofensivo, mas apaga o identificador "0":
+ * em JavaScript o número 0 é *falsy*, então `0 || ''` resulta em string
+ * vazia. Como CPF e Protocolo agora aceitam "0" e "00123", a conversão
+ * precisa distinguir AUSENTE de ZERO.
+ *
+ * Uma célula pode voltar como número se tiver sido digitada direto na
+ * planilha antes da coluna ser formatada como texto — por isso a conversão
+ * trata o caso em vez de confiar que sempre virá string.
+ *
+ * @param {*} valor Conteúdo bruto da célula.
+ * @returns {string} O identificador como texto ('' apenas quando ausente).
+ */
+function pgo5TextoDeIdentificador_(valor) {
+  if (valor === null || valor === undefined) return '';
+  return String(valor).trim();
 }

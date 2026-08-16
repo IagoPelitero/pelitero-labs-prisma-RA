@@ -34,35 +34,38 @@
     <!-- Menu lateral: navegação entre as páginas da SPA -->
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-header">
+        <!-- Identidade do menu: apenas "PGO" (decisão do PO na Etapa 3B).
+             O nome técnico do sistema continua "PRISMA Gestão Operacional" no
+             título da página, no cabeçalho e na documentação. -->
         <div class="sidebar-logo">
           <div class="sidebar-logo-abbr">PGO</div>
-          <span class="sidebar-logo-text">PRISMA</span>
+          <span class="sidebar-logo-text">Gestão Operacional</span>
         </div>
         <button class="sidebar-toggle" onclick="App.toggleSidebar()" title="Recolher/expandir menu">
           <span class="material-icons">menu</span>
         </button>
       </div>
       <ul class="sidebar-menu">
-        <li class="sidebar-item active" data-page="dashboard" data-tooltip="Dashboard">
+        <li role="button" tabindex="0" title="Dashboard" aria-label="Dashboard" class="sidebar-item active" data-page="dashboard" data-tooltip="Dashboard">
           <span class="material-icons">dashboard</span><span class="sidebar-label">Dashboard</span>
         </li>
-        <li class="sidebar-item" data-page="novoAtendimento" data-pgo5-permissoes="criarAtendimento" data-tooltip="Novo Atendimento">
+        <li role="button" tabindex="0" title="Novo Atendimento" aria-label="Novo Atendimento" class="sidebar-item" data-page="novoAtendimento" data-pgo5-permissoes="criarAtendimento" data-tooltip="Novo Atendimento">
           <span class="material-icons">add_circle</span><span class="sidebar-label">Novo Atendimento</span>
         </li>
-        <li class="sidebar-item" data-page="relatorios" data-pgo5-permissoes="relatoriosProprios,relatoriosEquipe,relatoriosTodos" data-tooltip="Relatórios">
+        <li role="button" tabindex="0" title="Relatórios" aria-label="Relatórios" class="sidebar-item" data-page="relatorios" data-pgo5-permissoes="relatoriosProprios,relatoriosEquipe,relatoriosTodos" data-tooltip="Relatórios">
           <span class="material-icons">description</span><span class="sidebar-label">Relatórios</span>
         </li>
         <!-- Indicadores: visão analítica com gráficos, restrita à supervisão (Supervisor/ADM) -->
-        <li class="sidebar-item" data-page="indicadores" data-supervisor-only data-pgo5-permissoes="produtividadeEquipe,produtividadeTodos" data-tooltip="Indicadores">
+        <li role="button" tabindex="0" title="Indicadores" aria-label="Indicadores" class="sidebar-item" data-page="indicadores" data-supervisor-only data-pgo5-permissoes="produtividadeEquipe,produtividadeTodos" data-tooltip="Indicadores">
           <span class="material-icons">insights</span><span class="sidebar-label">Indicadores</span>
         </li>
         <!-- v4.7: Indicadores Operacionais (planilha externa). Rótulo dinâmico
              definido pelo ADM — App.aplicarRotuloIndicOp() atualiza o texto e o
              tooltip a partir do bootstrap. Restrito à supervisão. -->
-        <li class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-pgo5-permissoes="analiseSac" data-tooltip="Análise de SAC" id="menu-indic-op">
+        <li role="button" tabindex="0" title="Análise de SAC" aria-label="Análise de SAC" class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-pgo5-permissoes="analiseSac" data-tooltip="Análise de SAC" id="menu-indic-op">
           <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Análise de SAC</span>
         </li>
-        <li class="sidebar-item" data-page="configuracoes" data-supervisor-only data-pgo5-permissoes="gerenciarFormulario,gerenciarCanais,gerenciarCatalogos,gerenciarEquipe,gerenciarUsuariosTodos,gerenciarCargos,gerenciarNiveis" data-tooltip="Configurações">
+        <li role="button" tabindex="0" title="Configurações" aria-label="Configurações" class="sidebar-item" data-page="configuracoes" data-supervisor-only data-pgo5-permissoes="gerenciarFormulario,gerenciarCanais,gerenciarCatalogos,gerenciarEquipe,gerenciarUsuariosTodos,gerenciarCargos,gerenciarNiveis" data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
         </li>
       </ul>

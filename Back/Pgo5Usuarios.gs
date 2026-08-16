@@ -341,9 +341,22 @@ function validarConcessaoDeNivel_(ator, nivelAcessoId) {
   if (!nivel) throw new Error('Selecione um nível de acesso válido.');
   if (!nivel.ativo) throw new Error('O nível de acesso escolhido está desativado.');
 
-  if (nivelEhAdministrativo_(nivel) &&
-      !usuarioTemPermissao_(atorComoUsuario_(ator), 'concederAdministrador')) {
-    throw new Error('Você não tem permissão para conceder acesso de Administrador.');
+  // Conceder poder administrativo exige DUAS chaves: a permissão e o PIN.
+  // A checagem olha o que o nível PODE FAZER, nunca como ele se chama — o
+  // nome é livre e alguém pode criar "Coordenação" com poder total.
+  // Ver nivelConcedePoderAdministrativo_ em Pgo5Seguranca.gs.
+  if (nivelConcedePoderAdministrativo_(nivel)) {
+    if (!usuarioTemPermissao_(atorComoUsuario_(ator), 'concederAdministrador')) {
+      throw new Error('Você não tem permissão para conceder acesso de Administrador.');
+    }
+    if (!sessaoProtegidaEstaValida_(String(ator.id))) {
+      if (!existePinDefinido_()) {
+        throw new Error('PIN_NAO_DEFINIDO: defina o PIN administrativo em ' +
+          'Configurações › Segurança antes de conceder acesso administrativo.');
+      }
+      throw new Error('PIN_NECESSARIO: informe o PIN administrativo para conceder ' +
+        'um nível com poderes administrativos.');
+    }
   }
 }
 
@@ -428,7 +441,18 @@ function salvarUsuarioPGO5(dados, id) {
 
   if (registroId) validarAlcanceDoAtor_(ator, registroId);
   validarDadosUsuario_(limpos, registroId);
-  validarConcessaoDeNivel_(ator, limpos.nivelAcessoId);
+
+  // Registro anterior, para saber o que mudou (auditoria) e para não pedir
+  // PIN quando o nível de acesso sequer está sendo alterado.
+  const anterior = registroId
+    ? pgo5ObterPorId(PGO5.SHEET_NAMES.USUARIOS, registroId)
+    : null;
+  const nivelAnterior = anterior ? String(anterior.NivelAcessoId || '').trim() : '';
+  const nivelMudou = limpos.nivelAcessoId.toUpperCase() !== nivelAnterior.toUpperCase();
+
+  if (nivelMudou) validarConcessaoDeNivel_(ator, limpos.nivelAcessoId);
+  else validarNivelContinuaUtilizavel_(limpos.nivelAcessoId);
+
   validarSupervisorUsuario_(registroId, limpos.supervisorId);
 
   // Um gestor sem gerenciarUsuariosTodos não pode criar gente solta na
@@ -461,14 +485,70 @@ function salvarUsuarioPGO5(dados, id) {
       const atual = pgo5ObterPorId(PGO5.SHEET_NAMES.USUARIOS, registroId);
       if (!atual) throw new Error('Usuário não encontrado.');
       pgo5AtualizarPorId(PGO5.SHEET_NAMES.USUARIOS, registroId, linha);
+      auditarSalvamentoDeUsuario_(ator, registroId, nivelMudou, limpos.nivelAcessoId, false);
       return { success: true, id: registroId };
     }
 
     linha.CriadoPorId = String(ator.id);
     linha.DataCadastro = toIso_(new Date());
     const novo = pgo5Inserir(PGO5.SHEET_NAMES.USUARIOS, linha);
+    auditarSalvamentoDeUsuario_(ator, String(novo.Id || ''), true, limpos.nivelAcessoId, true);
     return { success: true, id: String(novo.Id || '') };
   });
+}
+
+/**
+ * Confere que um nível já atribuído continua existindo e ativo.
+ *
+ * Usada quando o nível NÃO está mudando: nesse caso não faz sentido pedir
+ * PIN nem a permissão de conceder Administrador, mas o registro ainda
+ * precisa apontar para um nível utilizável.
+ *
+ * @param {string} nivelAcessoId Id do nível atualmente atribuído.
+ * @returns {void}
+ * @throws {Error} Quando o nível não existe ou está desativado.
+ */
+function validarNivelContinuaUtilizavel_(nivelAcessoId) {
+  const nivel = listarNiveisAcesso_().find(function(n) {
+    return n.id.toUpperCase() === String(nivelAcessoId || '').trim().toUpperCase();
+  });
+  if (!nivel) throw new Error('Selecione um nível de acesso válido.');
+  if (!nivel.ativo) throw new Error('O nível de acesso escolhido está desativado.');
+}
+
+/**
+ * Registra na auditoria a criação ou edição de um usuário.
+ *
+ * Guarda apenas IDs técnicos e o nome do nível — nunca e-mail, CPF ou o
+ * payload do formulário (ver limparDadoSensivel_ em Pgo5Auditoria.gs).
+ *
+ * @param {Object} ator Quem executou.
+ * @param {string} usuarioId Id do usuário afetado.
+ * @param {boolean} nivelMudou Se o nível de acesso foi alterado.
+ * @param {string} nivelAcessoId Nível resultante.
+ * @param {boolean} ehCriacao true na criação, false na edição.
+ * @returns {void}
+ */
+function auditarSalvamentoDeUsuario_(ator, usuarioId, nivelMudou, nivelAcessoId, ehCriacao) {
+  const nivel = listarNiveisAcesso_().find(function(n) {
+    return n.id.toUpperCase() === String(nivelAcessoId || '').toUpperCase();
+  });
+  const nomeDoNivel = nivel ? nivel.nome : 'Sem dados';
+
+  registrarAuditoria_(
+    ehCriacao ? PGO5_ACOES_AUDITORIA.CREATE : PGO5_ACOES_AUDITORIA.EDIT,
+    PGO5_ENTIDADES_AUDITORIA.USUARIO, usuarioId,
+    ehCriacao ? 'Usuário criado.' : 'Usuário editado.',
+    { nivelAcessoId: nivelAcessoId, nivelAcesso: nomeDoNivel, nivelAlterado: nivelMudou },
+    String(ator.id));
+
+  // Conceder poder administrativo é a mudança mais sensível do sistema e
+  // ganha um registro próprio, fácil de encontrar na auditoria.
+  if (nivelMudou && nivel && nivelConcedePoderAdministrativo_(nivel)) {
+    registrarAuditoria_(PGO5_ACOES_AUDITORIA.GRANT_ADMIN, PGO5_ENTIDADES_AUDITORIA.USUARIO,
+      usuarioId, 'Nível com poderes administrativos concedido.',
+      { nivelAcessoId: nivelAcessoId, nivelAcesso: nomeDoNivel }, String(ator.id));
+  }
 }
 
 /**
@@ -498,5 +578,12 @@ function alterarSituacaoUsuarioPGO5(id, ativo) {
     Ativo: novoEstado,
     DataAtualizacao: toIso_(new Date())
   });
+
+  registrarAuditoria_(
+    novoEstado ? PGO5_ACOES_AUDITORIA.ACTIVATE : PGO5_ACOES_AUDITORIA.DEACTIVATE,
+    PGO5_ENTIDADES_AUDITORIA.USUARIO, registroId,
+    novoEstado ? 'Usuário reativado.' : 'Usuário desativado.',
+    {}, String(ator.id));
+
   return { success: true, id: registroId, ativo: novoEstado };
 }

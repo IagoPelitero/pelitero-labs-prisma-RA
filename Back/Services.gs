@@ -1690,7 +1690,24 @@ function lerIndicOpConfig_() {
 function getIndicadoresOperacionaisConfig() {
   requireAuth_();
   exigirAcesso_('configurarAnaliseSac', requireAdmin_);
-  return lerIndicOpConfig_();
+  const configuracao = lerIndicOpConfig_();
+
+  // No PGO 5.0 o link da planilha externa é RECURSO PROTEGIDO: ele só sai do
+  // servidor por obterLinkProtegidoPGO5(), que exige permissão E PIN. Aqui
+  // ele é removido da resposta e substituído por um simples "está
+  // configurado?" — assim a tela de configuração continua funcionando sem
+  // que a URL trafegue para o navegador.
+  //
+  // No banco 4.x nada muda: lá não existe PIN e a tela sempre mostrou o link.
+  if (estruturaEhPGO5_()) {
+    const semUrl = {};
+    Object.keys(configuracao).forEach(function(chave) {
+      if (chave !== 'planilhaUrl') semUrl[chave] = configuracao[chave];
+    });
+    semUrl.planilhaConfigurada = String(configuracao.planilhaUrl || '').trim() !== '';
+    return semUrl;
+  }
+  return configuracao;
 }
 
 /**
@@ -1703,6 +1720,13 @@ function salvarIndicadoresOperacionaisConfig(dados) {
   requireAuth_();
   exigirAcesso_('configurarAnaliseSac', requireAdmin_);
   const entrada = dados || {};
+
+  // Como no PGO 5.0 a tela não recebe mais a URL, ela também não a devolve
+  // ao salvar. Campo vazio significa "mantenha o link que já está lá" — sem
+  // isto, qualquer edição de outro campo apagaria a fonte da Análise de SAC.
+  if (estruturaEhPGO5_() && String(entrada.planilhaUrl || '').trim() === '') {
+    entrada.planilhaUrl = lerIndicOpConfig_().planilhaUrl;
+  }
   const limparLista = function(v) {
     return listaConfigOp_(v).map(function(item) { return sanitizeInput(item); })
       .filter(function(item) { return item !== ''; });
