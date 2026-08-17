@@ -611,6 +611,16 @@ function salvarItemCatalogoPGO5(tipo, dados, id) {
     if (String(atual.Tipo || '').toUpperCase() !== t) {
       throw new Error('O tipo de um item existente não pode ser alterado.');
     }
+
+    // A ORDEM SÓ MUDA SE FOR INFORMADA.
+    // Sem isto, editar apenas o rótulo zerava a Ordem (Number(undefined)
+    // vira 0) e o item pulava para o começo da lista — bagunçando a
+    // sequência dos campos no formulário e a das opções nos seletores.
+    // Quem reordena de propósito é moverItemCatalogoPGO5.
+    if (entrada.ordem === undefined || entrada.ordem === null || entrada.ordem === '') {
+      linha.Ordem = Number(atual.Ordem) || 0;
+    }
+
     pgo5AtualizarPorId(PGO5.SHEET_NAMES.FORMULARIO, registroId, linha);
     return { success: true, id: registroId };
   }

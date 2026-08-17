@@ -314,10 +314,29 @@ function pgo5MontarAtendimento_(canalId, valores, catalogo) {
     }
   });
 
-  // "Aguardando Retorno" só faz sentido enquanto o caso está Pendente.
-  aplicarRegraDeAguardandoRetorno_(estrutural, catalogo);
-
   return { estrutural: estrutural, dinamicos: dinamicos, erros: erros };
+}
+
+/**
+ * Monta o mapa "Id do status" → "Nome técnico".
+ *
+ * O rótulo é o que aparece na tela e o administrador pode trocá-lo quando
+ * quiser; o Nome é a chave estável que o sistema usa para decidir
+ * comportamento. Este mapa existe para a interface receber essa chave junto
+ * com o atendimento, em vez de tentar adivinhar pelo texto exibido.
+ *
+ * Sai do catálogo já lido — nenhuma lista de status é criada aqui.
+ *
+ * @param {Object} [catalogo] Catálogo já carregado (evita reler a aba).
+ * @returns {Object} { '0000001F': 'Pendente', ... }.
+ */
+function pgo5MapaNomeTecnicoDeStatus_(catalogo) {
+  const mapa = {};
+  const cat = catalogo || pgo5CatalogoBruto_();
+  (cat[PGO5_TIPOS.STATUS] || []).forEach(function(registro) {
+    mapa[String(registro.Id || '').trim()] = String(registro.Nome || '');
+  });
+  return mapa;
 }
 
 /**
@@ -363,13 +382,19 @@ function pgo5StatusEhPendente_(statusId, catalogo) {
  * @param {Object} [catalogo] Catálogo já lido.
  * @returns {void}
  */
-function aplicarRegraDeAguardandoRetorno_(estrutural, catalogo) {
-  // O campo pode nem existir no canal: aí não há o que limpar.
-  if (!('AguardandoRetornoId' in estrutural)) return;
+function aplicarRegraDeAguardandoRetorno_(estrutural, atendimentoAtual, catalogo) {
+  // STATUS EFETIVO: o que veio no formulário quando veio, senão o que já
+  // está gravado. Cada canal decide quais campos pergunta, então o payload
+  // pode chegar sem StatusId — e concluir "não é Pendente" a partir de um
+  // campo ausente apagaria um aguardo perfeitamente válido.
+  const statusEfetivo = String(estrutural.StatusId || '').trim() ||
+    String((atendimentoAtual && atendimentoAtual.StatusId) || '').trim();
 
-  if (!pgo5StatusEhPendente_(estrutural.StatusId, catalogo)) {
-    estrutural.AguardandoRetornoId = '';
-  }
+  if (pgo5StatusEhPendente_(statusEfetivo, catalogo)) return;
+
+  // Fora do Pendente o campo tem de ficar vazio — inclusive quando o canal
+  // não pergunta "Aguardando" e o valor antigo continuaria gravado.
+  estrutural.AguardandoRetornoId = '';
 }
 
 // ============================================================================
@@ -398,6 +423,10 @@ function criarAtendimentoPGO5(dados) {
 
   const montado = pgo5MontarAtendimento_(canalId, entrada.valores, catalogo);
   if (montado.erros.length > 0) throw new Error(montado.erros.join(' '));
+
+  // Atendimento novo não tem estado anterior: o status efetivo é o do
+  // formulário. Ver aplicarRegraDeAguardandoRetorno_.
+  aplicarRegraDeAguardandoRetorno_(montado.estrutural, null, catalogo);
 
   const responsavelId = pgo5ResolverResponsavel_(ator, entrada.responsavelId ||
     montado.estrutural.ResponsavelId);
@@ -465,6 +494,10 @@ function atualizarAtendimentoPGO5(id, dados) {
   const catalogo = pgo5CatalogoBruto_();
   const montado = pgo5MontarAtendimento_(canalId, entrada.valores, catalogo);
   if (montado.erros.length > 0) throw new Error(montado.erros.join(' '));
+
+  // Na edição o registro atual entra na conta: se o formulário deste canal
+  // não pergunta o status, vale o que já está gravado.
+  aplicarRegraDeAguardandoRetorno_(montado.estrutural, atual, catalogo);
 
   // A regra de delegação só vale quando o responsável REALMENTE muda.
   // Sem isso, um Supervisor não conseguiria sequer salvar a observação de um
@@ -672,6 +705,10 @@ function listarAtendimentosPGO5_() {
   });
 
   // O que cada um enxerga vem do NÍVEL DE ACESSO, nunca do cargo.
+  // Nome técnico de cada status, para a tela decidir comportamento sem
+  // depender do rótulo (que o ADM pode renomear a qualquer momento).
+  const nomeTecnicoDeStatus = pgo5MapaNomeTecnicoDeStatus_(catalogo);
+
   return pgo5FiltrarAtendimentosPorEscopo_(
     ator, pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS), 'ver'
   ).map(function(a) {
@@ -690,6 +727,9 @@ function listarAtendimentosPGO5_() {
       canalId: String(a.CanalId || ''),
       status: pgo5Rotulo_(rotulos, a.StatusId),
       statusId: String(a.StatusId || ''),
+      // Chave ESTÁVEL do status. "status" acima é só o rótulo de exibição:
+      // decisões de comportamento na tela usam este campo.
+      statusNomeTecnico: nomeTecnicoDeStatus[String(a.StatusId || '').trim()] || '',
       observacoes: String(a.Observacoes || ''),
       criadoPorId: String(a.CriadoPorId || ''),
       dataCriacao: a.DataCriacao,
@@ -734,6 +774,7 @@ function pgo5AtendimentosComoLegado_() {
 function pgo5ConverterParaLegado_(registros) {
   const catalogo = pgo5CatalogoBruto_();
   const rotulos = pgo5MapaRotulos_(catalogo);
+  const nomeTecnicoDeStatus = pgo5MapaNomeTecnicoDeStatus_(catalogo);
 
   const nomeUsuario = {};
   pgo5Ler(PGO5.SHEET_NAMES.USUARIOS).forEach(function(u) {
@@ -778,6 +819,9 @@ function pgo5ConverterParaLegado_(registros) {
       Categoria: pgo5Rotulo_(rotulos, a.CategoriaId, ''),
       Subcategoria: pgo5Rotulo_(rotulos, a.SubcategoriaId, ''),
       Status: pgo5Rotulo_(rotulos, a.StatusId, ''),
+      // Chave estável do status, ao lado do rótulo. No banco 4.x este campo
+      // não existe e as telas caem no comportamento antigo.
+      StatusNomeTecnico: nomeTecnicoDeStatus[String(a.StatusId || '').trim()] || '',
       MotivoPendencia: pgo5Rotulo_(rotulos, a.AguardandoRetornoId, ''),
       Responsavel: respId ? (nomeUsuario[respId] || '') : '',
       Observacoes: String(a.Observacoes || ''),

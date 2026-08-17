@@ -797,20 +797,59 @@ Pages.dashboard = {
   },
 
   /**
+   * Nomes TÉCNICOS dos status, usados para decidir comportamento.
+   *
+   * Vêm da coluna "Nome" do catálogo e são estáveis: quando o administrador
+   * renomeia um status, muda o Rotulo (o que aparece na tela), nunca o
+   * Nome. Por isso as regras olham para cá e não para o texto exibido.
+   */
+  STATUS_TECNICO: { PENDENTE: 'pendente', CONCLUIDO: 'concluido' },
+
+  /**
+   * Deixa um texto comparável: sem acento, sem espaços nas pontas, minúsculo.
+   * @param {string} texto Texto de entrada.
+   * @returns {string} Texto normalizado.
+   */
+  _semAcento: function(texto) {
+    return String(texto === undefined || texto === null ? '' : texto)
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .trim().toLowerCase();
+  },
+
+  /**
+   * Compara o status de um atendimento com um nome técnico.
+   *
+   * No PGO 5.0 o servidor manda statusNomeTecnico junto com o atendimento e
+   * a comparação é EXATA — é a chave estável. No banco 4.x esse campo não
+   * existe; ali a comparação cai no rótulo por prefixo, que é exatamente o
+   * comportamento que o 4.x sempre teve.
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @param {string} nomeTecnico Valor de STATUS_TECNICO a comparar.
+   * @returns {boolean} true quando o status corresponde.
+   */
+  _statusEh: function(item, nomeTecnico) {
+    var tecnico = this._semAcento(item.statusNomeTecnico);
+    if (tecnico) return tecnico === nomeTecnico;
+    return this._semAcento(item.status).indexOf(nomeTecnico.slice(0, 6)) === 0;
+  },
+
+  /**
    * Diz se o atendimento está no status Pendente.
-   *
-   * A tela recebe o RÓTULO do status (que o administrador pode
-   * personalizar), não a chave técnica. Por isso a comparação é tolerante:
-   * qualquer rótulo que comece por "pendente" conta. A decisão que vale é
-   * a do servidor, que usa o nome técnico e já apaga o campo — este teste
-   * serve para os registros gravados ANTES deste patch, que ainda podem
-   * ter o valor antigo guardado.
-   *
    * @param {Object} item Atendimento no formato do cliente.
    * @returns {boolean} true quando o status é Pendente.
    */
   _estaPendente: function(item) {
-    return String(item.status || '').trim().toLowerCase().indexOf('pendente') === 0;
+    return this._statusEh(item, this.STATUS_TECNICO.PENDENTE);
+  },
+
+  /**
+   * Diz se o atendimento está Concluído.
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {boolean} true quando o status é Concluído.
+   */
+  _estaConcluido: function(item) {
+    return this._statusEh(item, this.STATUS_TECNICO.CONCLUIDO);
   },
 
   /**
@@ -838,7 +877,8 @@ Pages.dashboard = {
    * @returns {string} HTML seguro, ou '' quando não se aplica.
    */
   _textoIdade: function(item) {
-    if (String(item.status || '').toLowerCase().indexOf('conclu') === 0) return '';
+    // Caso concluído não tem "idade": ele não está esperando nada.
+    if (this._estaConcluido(item)) return '';
     var abertura = App.parseDate(item.dataAbertura);
     if (!abertura) return '';
     var dias = Math.floor((Date.now() - abertura.getTime()) / 86400000);
@@ -861,7 +901,7 @@ Pages.dashboard = {
    */
   _badgeIdade: function(item) {
     // Concluído não precisa de atenção: célula neutra.
-    if (String(item.status || '').toLowerCase().indexOf('conclu') === 0) return '—';
+    if (this._estaConcluido(item)) return '—';
     var abertura = App.parseDate(item.dataAbertura);
     if (!abertura) return '—';
     var dias = Math.floor((Date.now() - abertura.getTime()) / 86400000);

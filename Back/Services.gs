@@ -2883,6 +2883,10 @@ function toClientAtendimento_(record, colorMap) {
     categoria: String(record.Categoria || ''),
     subcategoria: String(record.Subcategoria || ''), // v4.6: '' nos registros antigos
     status: String(record.Status || ''),
+    // Chave ESTÁVEL do status (PGO 5.0). O campo "status" acima é o rótulo
+    // de exibição, que o administrador pode renomear; regras de tela devem
+    // usar este. No banco 4.x vem vazio e as telas seguem o modo antigo.
+    statusNomeTecnico: String(record.StatusNomeTecnico || ''),
     statusCor: colorMap[String(record.Status || '')] || '',
     situacaoPendencia: String(record.MotivoPendencia || ''),
     motivoPendencia: String(record.MotivoPendencia || ''),
