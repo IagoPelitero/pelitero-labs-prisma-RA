@@ -66,7 +66,7 @@
         <li role="button" tabindex="0" title="Análise de SAC" aria-label="Análise de SAC" class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-pgo5-permissoes="analiseSac" data-tooltip="Análise de SAC" id="menu-indic-op">
           <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Análise de SAC</span>
         </li>
-        <li role="button" tabindex="0" title="Configurações" aria-label="Configurações" class="sidebar-item" data-page="configuracoes" data-supervisor-only data-pgo5-permissoes="gerenciarFormulario,gerenciarCanais,gerenciarCatalogos,gerenciarEquipe,gerenciarUsuariosTodos,gerenciarCargos,gerenciarNiveis" data-tooltip="Configurações">
+        <li role="button" tabindex="0" title="Configurações" aria-label="Configurações" class="sidebar-item" data-page="configuracoes" data-supervisor-only data-pgo5-permissoes="gerenciarFormulario,gerenciarCanais,gerenciarCatalogos,gerenciarEquipe,gerenciarUsuariosTodos,gerenciarCargos,gerenciarNiveis,alterarPermissoes,configurarSistema" data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
         </li>
       </ul>
@@ -148,6 +148,10 @@
   <!-- Usuários, Cargos e Níveis de Acesso do PGO 5.0. Carregado depois do
        ConfiguracoesPGO5 porque a navegação daquela tela delega para cá. -->
   <?!= include('AcessoPGO5'); ?>
+  <!-- Tombamento do banco 4.x para o PGO 5.0. Carregado depois do AcessoPGO5
+       porque reaproveita o mesmo modelo de seção externa de Configurações e
+       o mesmo fluxo de PIN administrativo. -->
+  <?!= include('TombamentoPGO5'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>

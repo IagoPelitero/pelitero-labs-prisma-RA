@@ -1,0 +1,703 @@
+<script>
+/* ============================================================
+   PRISMA Gestão Operacional — PGO 5.0
+   Arquivo: TombamentoPGO5.html
+
+   RESPONSABILIDADE
+   A tela de Configurações › Tombamento: quatro etapas que levam o
+   Administrador de "tenho a cópia da planilha antiga" até "os dados
+   estão no PGO 5.0", sem abrir o editor do Apps Script.
+
+       Etapa 1  Fonte da migração   → informar o link ou o Id
+       Etapa 2  Validação           → o que foi encontrado na cópia
+       Etapa 3  Resumo              → quantas linhas serão trazidas
+       Etapa 4  Executar            → a operação irreversível
+
+   ⚠️ ESTA TELA NÃO VÊ DADO NENHUM
+   Ela recebe do servidor apenas CONTAGENS e textos genéricos. Não passa
+   por aqui CPF, cliente, protocolo, e-mail, observações, nome de usuário,
+   nem o Id ou a URL da planilha de origem — o servidor nunca os devolve.
+
+   O único endereço que existe nesta página é o que o Administrador digita
+   na etapa 1. Ele é lido, enviado e apagado do campo na mesma ação: vive
+   só no escopo da função que o envia, e nunca em `state`, em atributo
+   data-*, em localStorage ou em sessionStorage. Ver _validarFonte.
+
+   ⚠️ ESCONDER BOTÃO NÃO É SEGURANÇA
+   Tudo o que esta tela oculta é conforto visual. Cada chamada é
+   revalidada no servidor por exigirPermissaoComPin_('configurarSistema')
+   — ver Pgo5Tombamento.gs.
+   ============================================================ */
+
+Pages.tombamentoPGO5 = {
+
+  /**
+   * state.dados      → retorno de obterEstadoTombamentoPGO5()
+   * state.contagens  → contagens da fonte já validada (etapa 3)
+   * state.relatorio  → relatório agregado, depois de executar
+   * state.ocupado    → trava de concorrência da própria tela
+   */
+  state: { dados: null, contagens: null, temSla: false, relatorio: null, ocupado: false },
+
+  /** Onde desenhar: o slot de Configurações ou o <main> inteiro. */
+  _alvo: function() {
+    return document.getElementById('pgo5cfg-externo') || document.getElementById('app');
+  },
+
+  /** true quando a tela está embutida em Configurações. */
+  _embutido: function() {
+    return !!document.getElementById('pgo5cfg-externo');
+  },
+
+  /**
+   * Abre a tela de Tombamento.
+   *
+   * O relatório de uma execução anterior NÃO é descartado no render: quem
+   * acabou de executar e clicou em outra seção por engano volta e continua
+   * vendo o resultado, em vez de uma tela que finge que nada aconteceu.
+   *
+   * @param {HTMLElement} [container] Destino; por padrão, o alvo calculado.
+   */
+  render: function(container) {
+    var self = this;
+    container = container || self._alvo();
+    self.state.ocupado = false;
+
+    container.innerHTML = '<div class="card">' +
+      Components.emptyState('swap_horiz', 'Carregando o estado do tombamento...') + '</div>';
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        self.state.dados = dados || {};
+        self._pintar();
+      })
+      .withFailureHandler(function(err) {
+        self._alvo().innerHTML = '<div class="card">' +
+          Components.emptyState('lock', 'Você não tem acesso a esta tela.',
+            App.escapeHtml((err && err.message) || '')) + '</div>';
+      })
+      .obterEstadoTombamentoPGO5();
+  },
+
+  /** Desenha a tela com o estado já carregado. */
+  _pintar: function() {
+    var self = this;
+    var dados = self.state.dados || {};
+
+    var html = '<div class="card">';
+    html += '<div class="card-header"><div class="card-title">' +
+      '<span class="material-icons">swap_horiz</span>Tombamento</div></div>';
+    html += '<p class="pgo5cfg-ajuda">O tombamento traz os dados da <strong>cópia</strong> da ' +
+      'planilha antiga (modelo 4.x) para o banco do PGO 5.0. A cópia é apenas <strong>lida</strong>: ' +
+      'ela sai desta operação exatamente como entrou.</p>';
+
+    // Concluído: a tela vira um comprovante. Nada mais a executar.
+    if (dados.concluida) {
+      html += self._blocoConcluido();
+      if (self.state.relatorio) html += self._blocoRelatorio(self.state.relatorio);
+      html += '</div>';
+      self._alvo().innerHTML = html;
+      self._ligarEventos();
+      return;
+    }
+
+    html += self._blocoEtapa1();
+    html += self._blocoEtapa2();
+    html += self._blocoEtapa3();
+    html += self._blocoEtapa4();
+    if (self.state.relatorio) html += self._blocoRelatorio(self.state.relatorio);
+    html += '</div>';
+
+    self._alvo().innerHTML = html;
+    self._ligarEventos();
+  },
+
+  /** Cabeçalho de uma etapa. */
+  _tituloEtapa: function(numero, texto) {
+    return '<h4 class="pgo5acc-titulo-permissoes">Etapa ' + numero + ' — ' +
+      App.escapeHtml(texto) + '</h4>';
+  },
+
+  // ============================================================
+  // Etapa 1 — Fonte da migração
+  // ============================================================
+
+  /**
+   * Campo do link/Id + botão de validar.
+   *
+   * Sem PIN definido o campo nem aparece: configurar a fonte exige PIN, e
+   * oferecer o campo para depois recusar no servidor seria só frustração.
+   * A orientação aponta para onde o PIN é definido.
+   *
+   * @returns {string} HTML da etapa 1.
+   */
+  _blocoEtapa1: function() {
+    var dados = this.state.dados || {};
+    var html = '<div class="pgo5seg-bloco">';
+    html += this._tituloEtapa(1, 'Fonte da migração');
+
+    if (!dados.pinDefinido) {
+      html += '<p class="pgo5seg-estado"><span class="badge badge-warning">PIN não definido</span> ' +
+        'Configurar a fonte do tombamento exige o PIN administrativo. Defina-o em ' +
+        '<strong>Configurações › Segurança</strong> e volte aqui.</p>';
+      return html + '</div>';
+    }
+
+    if (dados.fonteConfigurada) {
+      html += '<p class="pgo5seg-estado"><span class="badge badge-success">Fonte configurada</span> ' +
+        'A cópia já está vinculada. O endereço dela fica guardado no servidor e não é ' +
+        'exibido nesta tela.</p>';
+    }
+
+    html += '<div class="form-group">' +
+      '<label class="form-label" for="pgo5tmb-fonte">Link ou ID da cópia da planilha antiga' +
+      (dados.fonteConfigurada ? '' : ' <span class="required">*</span>') + '</label>' +
+      '<input class="form-control" id="pgo5tmb-fonte" type="text" autocomplete="off" ' +
+      'spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/... ou o ID"></div>';
+    html += '<small class="pgo5cfg-nota">Aceita a URL completa ou apenas o ID. Use a ' +
+      '<strong>cópia</strong> da planilha antiga, nunca a original — e nunca a própria planilha ' +
+      'do PGO 5.0.</small>';
+
+    html += '<div class="pgo5seg-acoes">' +
+      '<button class="btn btn-primary" id="pgo5tmb-validar">Validar fonte</button>' +
+      (dados.fonteConfigurada
+        ? '<button class="btn btn-secondary" id="pgo5tmb-revalidar">Reconferir a fonte atual</button>'
+        : '') +
+      '</div>';
+    return html + '</div>';
+  },
+
+  // ============================================================
+  // Etapa 2 — Validação
+  // ============================================================
+
+  /**
+   * O que a validação encontrou na cópia.
+   *
+   * Mostra as abas exigidas, a opcional e as que NÃO são importadas. Essa
+   * última lista existe para o Administrador não procurar depois pela
+   * Timeline no PGO 5.0 achando que houve perda de dado.
+   *
+   * @returns {string} HTML da etapa 2.
+   */
+  _blocoEtapa2: function() {
+    var self = this;
+    var dados = self.state.dados || {};
+    var html = '<div class="pgo5seg-bloco">';
+    html += self._tituloEtapa(2, 'Validação');
+
+    if (!self.state.contagens) {
+      html += '<p class="pgo5seg-estado"><span class="material-icons">pending</span> ' +
+        'Aguardando a validação da fonte.</p>';
+      html += '<p class="pgo5cfg-ajuda">Serão exigidas estas abas: <strong>' +
+        App.escapeHtml((dados.abasObrigatorias || []).join(', ')) + '</strong>. ' +
+        'A aba <strong>' + App.escapeHtml(dados.abaOpcional || '') + '</strong> é opcional e ' +
+        'migra quando existir. As abas <strong>' +
+        App.escapeHtml((dados.abasNaoImportadas || []).join(' e ')) +
+        '</strong> não são importadas: são o histórico do 4.x e continuam na cópia.</p>';
+      return html + '</div>';
+    }
+
+    html += '<p class="pgo5seg-estado"><span class="badge badge-success">Fonte válida</span> ' +
+      'Todas as abas obrigatórias foram encontradas.</p>';
+    html += '<p class="pgo5seg-estado">' +
+      '<span class="material-icons">' + (self.state.temSla ? 'check_circle' : 'remove_circle_outline') +
+      '</span> Aba <strong>' + App.escapeHtml(dados.abaOpcional || '') + '</strong> (opcional): ' +
+      (self.state.temSla ? 'encontrada — será migrada.' : 'não existe nesta cópia.') + '</p>';
+    html += '<p class="pgo5cfg-ajuda">Não são importadas: <strong>' +
+      App.escapeHtml((dados.abasNaoImportadas || []).join(' e ')) +
+      '</strong>. Permanecem apenas na cópia histórica.</p>';
+    return html + '</div>';
+  },
+
+  // ============================================================
+  // Etapa 3 — Resumo das contagens
+  // ============================================================
+
+  /** Linhas do resumo, na ordem em que o Administrador espera lê-las. */
+  RESUMO: [
+    { chave: 'reclameAqui', rotulo: 'Reclame Aqui' },
+    { chave: 'sacPreventivo', rotulo: 'SAC Preventivo' },
+    { chave: 'usuarios', rotulo: 'Usuários' },
+    { chave: 'canais', rotulo: 'Canais' },
+    { chave: 'produtos', rotulo: 'Produtos' },
+    { chave: 'categorias', rotulo: 'Categorias' },
+    { chave: 'subcategorias', rotulo: 'Subcategorias' },
+    { chave: 'campos', rotulo: 'Campos' },
+    { chave: 'sla', rotulo: 'SLA' }
+  ],
+
+  /**
+   * Tabela de contagens da fonte.
+   *
+   * São os MESMOS números que o motor vai processar — a contagem vem da
+   * mesma leitura que a migração usa, não de getLastRow().
+   *
+   * @returns {string} HTML da etapa 3.
+   */
+  _blocoEtapa3: function() {
+    var self = this;
+    var html = '<div class="pgo5seg-bloco">';
+    html += self._tituloEtapa(3, 'Resumo das contagens');
+
+    if (!self.state.contagens) {
+      html += '<p class="pgo5seg-estado"><span class="material-icons">pending</span> ' +
+        'O resumo aparece depois da validação.</p>';
+      return html + '</div>';
+    }
+
+    var contagens = self.state.contagens;
+    var total = 0;
+    html += '<p class="pgo5cfg-ajuda">Somente quantidades. Nenhum conteúdo da planilha antiga ' +
+      'é lido por esta tela.</p>';
+    html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+      '<th>Origem</th><th>Registros a migrar</th></tr></thead><tbody>';
+    self.RESUMO.forEach(function(item) {
+      var quantidade = Number(contagens[item.chave]) || 0;
+      total += quantidade;
+      html += '<tr><td><strong>' + App.escapeHtml(item.rotulo) + '</strong></td>' +
+        '<td>' + quantidade + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<p class="pgo5seg-estado"><span class="material-icons">functions</span> ' +
+      'Total de linhas a processar: <strong>' + total + '</strong>.</p>';
+    return html + '</div>';
+  },
+
+  // ============================================================
+  // Etapa 4 — Executar
+  // ============================================================
+
+  /**
+   * Pré-check do destino e o botão da operação irreversível.
+   *
+   * O botão só existe quando as três condições estão satisfeitas: fonte
+   * validada, destino aprovado e PIN definido. Faltando qualquer uma, a
+   * tela explica o que falta em vez de oferecer um botão que o servidor
+   * recusaria.
+   *
+   * @returns {string} HTML da etapa 4.
+   */
+  _blocoEtapa4: function() {
+    var self = this;
+    var dados = self.state.dados || {};
+    var destino = dados.destino || { ok: false, bloqueios: [], avisos: [] };
+
+    var html = '<div class="pgo5seg-bloco">';
+    html += self._tituloEtapa(4, 'Executar tombamento');
+
+    // ── Situação do destino ──
+    if (destino.ok) {
+      html += '<p class="pgo5seg-estado"><span class="badge badge-success">Destino limpo</span> ' +
+        'O banco PGO 5.0 está pronto para receber os dados.</p>';
+    } else {
+      html += '<p class="pgo5seg-estado"><span class="badge badge-warning">Destino bloqueado</span> ' +
+        'O destino não está limpo para um novo tombamento. Não execute novamente sobre uma ' +
+        'migração parcial.</p>';
+      if ((destino.bloqueios || []).length) {
+        html += '<ul class="pgo5cfg-ajuda">';
+        destino.bloqueios.forEach(function(motivo) {
+          html += '<li>' + App.escapeHtml(motivo) + '</li>';
+        });
+        html += '</ul>';
+      }
+    }
+    if ((destino.avisos || []).length) {
+      destino.avisos.forEach(function(aviso) {
+        html += '<p class="pgo5seg-estado"><span class="material-icons">info</span> ' +
+          App.escapeHtml(aviso) + '</p>';
+      });
+    }
+
+    // ── O aviso obrigatório, sempre visível antes do botão ──
+    html += '<p class="pgo5cfg-ajuda"><strong>Esta operação transfere os dados da cópia ' +
+      'histórica para o banco PGO 5.0. Não feche esta página durante a execução.</strong></p>';
+    html += '<small class="pgo5cfg-nota">Ela roda uma única vez: concluída, o sistema recusa ' +
+      'qualquer nova execução. Se falhar no meio, o caminho é reconstruir o destino a partir de ' +
+      'uma base limpa — nunca tentar de novo sobre a base parcial.</small>';
+
+    var pendencias = [];
+    if (!dados.pinDefinido) pendencias.push('definir o PIN em Configurações › Segurança');
+    if (!self.state.contagens) pendencias.push('validar a fonte na etapa 1');
+    if (!destino.ok) pendencias.push('deixar o destino limpo');
+
+    if (pendencias.length) {
+      html += '<p class="pgo5seg-estado"><span class="material-icons">block</span> ' +
+        'Para liberar a execução, falta: ' + App.escapeHtml(pendencias.join('; ')) + '.</p>';
+      return html + '</div>';
+    }
+
+    html += '<div class="pgo5seg-acoes">' +
+      '<button class="btn btn-danger" id="pgo5tmb-executar">Executar tombamento</button></div>';
+    return html + '</div>';
+  },
+
+  // ============================================================
+  // Estado concluído
+  // ============================================================
+
+  /** Comprovante de que o tombamento já rodou nesta instalação. */
+  _blocoConcluido: function() {
+    var dados = this.state.dados || {};
+    var html = '<div class="pgo5seg-bloco">';
+    html += '<p class="pgo5seg-estado"><span class="badge badge-success">✅ Tombamento concluído</span> ' +
+      (dados.concluidaEm
+        ? 'Concluído em <strong>' + App.escapeHtml(this._dataHora(dados.concluidaEm)) + '</strong>.'
+        : '') + '</p>';
+    html += '<p class="pgo5cfg-ajuda">Uma nova execução é recusada pelo sistema: ela duplicaria ' +
+      'todos os registros. O endereço da cópia antiga foi removido do servidor quando o ' +
+      'tombamento terminou.</p>';
+    html += '<small class="pgo5cfg-nota">Próximo passo: monte a hierarquia em ' +
+      '<strong>Configurações › Usuários</strong>. Todos os usuários foram migrados sem ' +
+      'supervisor, de propósito — hierarquia adivinhada daria acesso indevido.</small>';
+    return html + '</div>';
+  },
+
+  // ============================================================
+  // Relatório agregado
+  // ============================================================
+
+  /** Linhas do relatório final, na ordem de leitura. */
+  RELATORIO: [
+    { chave: 'reclameAqui', rotulo: 'RA' },
+    { chave: 'sacPreventivo', rotulo: 'SAC Preventivo' },
+    { chave: 'usuarios', rotulo: 'Usuários' },
+    { chave: 'canais', rotulo: 'Canais' },
+    { chave: 'produtos', rotulo: 'Produtos' },
+    { chave: 'categorias', rotulo: 'Categorias' },
+    { chave: 'subcategorias', rotulo: 'Subcategorias' },
+    { chave: 'campos', rotulo: 'Campos' },
+    { chave: 'valoresDinamicos', rotulo: 'Valores dinâmicos' },
+    { chave: 'sla', rotulo: 'SLA' }
+  ],
+
+  /**
+   * Resultado da execução: Encontrados / Migrados por entidade.
+   *
+   * "Valores dinâmicos" não tem "encontrados": eles não existem como linha na
+   * origem, são extraídos do JSON de CamposExtras de cada atendimento. A
+   * coluna mostra "—" em vez de 0, que daria a impressão de nada encontrado.
+   *
+   * @param {Object} relatorio Relatório agregado do servidor.
+   * @returns {string} HTML do bloco de resultado.
+   */
+  _blocoRelatorio: function(relatorio) {
+    var self = this;
+    var html = '<div class="pgo5seg-bloco">';
+
+    if (relatorio.sucesso) {
+      html += '<h4 class="pgo5acc-titulo-permissoes">✅ Tombamento concluído</h4>';
+    } else {
+      html += '<h4 class="pgo5acc-titulo-permissoes">❌ Tombamento não concluído</h4>';
+      html += '<p class="pgo5seg-estado"><span class="badge badge-warning">Falha ou resultado ' +
+        'parcial</span> O marcador de conclusão NÃO foi gravado.</p>';
+    }
+    if (relatorio.orientacao) {
+      html += '<p class="pgo5cfg-ajuda">' + App.escapeHtml(relatorio.orientacao) + '</p>';
+    }
+
+    html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
+      '<th>Entidade</th><th>Encontrados</th><th>Migrados</th></tr></thead><tbody>';
+    self.RELATORIO.forEach(function(item) {
+      var bloco = relatorio[item.chave] || {};
+      var encontrados = (item.chave === 'valoresDinamicos')
+        ? '—' : String(Number(bloco.encontrados) || 0);
+      html += '<tr><td><strong>' + App.escapeHtml(item.rotulo) + '</strong></td>' +
+        '<td>' + encontrados + '</td>' +
+        '<td>' + (Number(bloco.migrados) || 0) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    var usuarios = relatorio.usuarios || {};
+    if (Number(usuarios.jaExistentes) > 0) {
+      html += '<p class="pgo5seg-estado"><span class="material-icons">person_check</span> ' +
+        Number(usuarios.jaExistentes) + ' usuário(s) já existiam no destino e foram ' +
+        'reaproveitados, não duplicados.</p>';
+    }
+    if (Number(usuarios.semSupervisor) > 0) {
+      html += '<p class="pgo5seg-estado"><span class="material-icons">account_tree</span> ' +
+        Number(usuarios.semSupervisor) + ' usuário(s) migrados sem supervisor — monte a ' +
+        'hierarquia em Configurações › Usuários.</p>';
+    }
+
+    // Referências não resolvidas: somente a quantidade.
+    html += '<p class="pgo5seg-estado"><span class="material-icons">link_off</span> ' +
+      'Referências não resolvidas: <strong>' +
+      (Number(relatorio.referenciasNaoResolvidas) || 0) + '</strong>.</p>';
+
+    html += self._listaDeMensagens('Avisos', relatorio.avisos);
+    html += self._listaDeMensagens('Erros', relatorio.erros);
+    return html + '</div>';
+  },
+
+  /**
+   * Lista de avisos ou erros já sanitizados pelo servidor.
+   *
+   * O servidor manda { total, distintos }: o total conta as ocorrências e a
+   * lista traz os textos distintos. Sem isso, 4.000 atendimentos sem canal
+   * produziriam 4.000 linhas idênticas na tela.
+   *
+   * @param {string} titulo 'Avisos' ou 'Erros'.
+   * @param {Object} conjunto { total, distintos }.
+   * @returns {string} HTML da lista (vazio quando não há nada).
+   */
+  _listaDeMensagens: function(titulo, conjunto) {
+    var dados = conjunto || {};
+    var distintos = dados.distintos || [];
+    if (!distintos.length) return '';
+
+    var html = '<p class="pgo5seg-estado"><strong>' + App.escapeHtml(titulo) + '</strong> — ' +
+      (Number(dados.total) || distintos.length) + ' ocorrência(s), ' + distintos.length +
+      ' tipo(s):</p><ul class="pgo5cfg-ajuda">';
+    distintos.forEach(function(mensagem) {
+      html += '<li>' + App.escapeHtml(mensagem) + '</li>';
+    });
+    return html + '</ul>';
+  },
+
+  // ============================================================
+  // Eventos
+  // ============================================================
+
+  _ligarEventos: function() {
+    var self = this;
+    var ligar = function(id, acao) {
+      var botao = document.getElementById(id);
+      if (botao) botao.addEventListener('click', acao);
+    };
+    ligar('pgo5tmb-validar', function() { self._validarFonte(); });
+    ligar('pgo5tmb-revalidar', function() { self._revalidarFonte(); });
+    ligar('pgo5tmb-executar', function() { self._confirmarExecucao(); });
+  },
+
+  /** Lê e limpa o campo do link. */
+  _lerCampoFonte: function() {
+    var campo = document.getElementById('pgo5tmb-fonte');
+    if (!campo) return '';
+    var valor = String(campo.value || '').trim();
+    // O endereço não fica na página depois de ser enviado.
+    campo.value = '';
+    return valor;
+  },
+
+  /**
+   * Etapa 1 → 2 → 3: valida e configura a fonte.
+   *
+   * A validação e a gravação são um passo único no servidor. Se a planilha
+   * não servir, nada é configurado.
+   *
+   * SOBRE ONDE O ENDEREÇO VIVE ENQUANTO ESTA AÇÃO ACONTECE
+   * O valor é lido do campo (que é limpo em seguida) e fica apenas no
+   * ESCOPO desta chamada — nunca em `state`, nunca num atributo do DOM,
+   * nunca em localStorage. Ele existe pelo tempo do envio e desaparece
+   * quando a ação termina.
+   *
+   * Guardá-lo aqui é o que permite reenviar depois do PIN sem obrigar o
+   * Administrador a colar o link duas vezes: no primeiro uso a liberação do
+   * PIN quase sempre está fechada, e é justamente o caminho mais comum.
+   */
+  _validarFonte: function() {
+    var self = this;
+    var valor = self._lerCampoFonte();
+    if (!valor) {
+      Components.toast('Informe o link ou o ID da cópia da planilha antiga.', 'warning');
+      return;
+    }
+
+    var enviar = function() {
+      self._executarComPin('configurarFonteTombamentoPGO5', [valor],
+        'Configurar a fonte do tombamento exige o PIN administrativo.',
+        function(resposta) {
+          self.state.contagens = resposta.contagens || null;
+          self.state.temSla = !!resposta.temSla;
+          Components.toast('Fonte validada.', 'success');
+          self.render();
+        },
+        enviar);   // depois do PIN, reenvia o MESMO valor já digitado
+    };
+    enviar();
+  },
+
+  /** Reconferência da fonte já configurada (não exige PIN: só lê). */
+  _revalidarFonte: function() {
+    var self = this;
+    if (self.state.ocupado) return;
+    self.state.ocupado = true;
+    Components.showLoading('Reconferindo a fonte...');
+
+    google.script.run
+      .withSuccessHandler(function(resposta) {
+        self.state.ocupado = false;
+        Components.hideLoading();
+        self.state.contagens = (resposta && resposta.contagens) || null;
+        self.state.temSla = !!(resposta && resposta.temSla);
+        Components.toast('Fonte reconferida.', 'success');
+        self.render();
+      })
+      .withFailureHandler(function(err) {
+        self.state.ocupado = false;
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível reconferir a fonte.'), 'error');
+      })
+      .revalidarFonteTombamentoPGO5();
+  },
+
+  /**
+   * Confirmação explícita antes da operação irreversível.
+   *
+   * Um "Confirmar" sozinho é clicado no automático. A caixa de seleção
+   * obriga um segundo gesto deliberado, e o texto diz exatamente o que não
+   * tem volta.
+   */
+  _confirmarExecucao: function() {
+    var self = this;
+    var contagens = self.state.contagens || {};
+    var total = 0;
+    self.RESUMO.forEach(function(item) { total += Number(contagens[item.chave]) || 0; });
+
+    Components.modal({
+      title: 'Executar o tombamento',
+      type: 'danger',
+      confirmText: 'Executar agora',
+      cancelText: 'Cancelar',
+      body: '<p class="pgo5cfg-ajuda"><strong>Esta operação transfere os dados da cópia ' +
+        'histórica para o banco PGO 5.0. Não feche esta página durante a execução.</strong></p>' +
+        '<p class="pgo5cfg-ajuda">Serão processadas <strong>' + total + '</strong> linhas. ' +
+        'O tombamento roda <strong>uma única vez</strong> e não pode ser desfeito: o Google ' +
+        'Sheets não desfaz meia gravação.</p>' +
+        '<p class="pgo5cfg-ajuda">A cópia da planilha antiga <strong>não será alterada</strong>.</p>' +
+        '<div class="form-group"><label class="pgo5-checkbox">' +
+        '<input type="checkbox" id="pgo5tmb-confirmo"> Entendi que esta operação é definitiva ' +
+        'e que não devo fechar a página durante a execução.</label></div>',
+      onConfirm: function() {
+        var caixa = document.getElementById('pgo5tmb-confirmo');
+        if (!caixa || !caixa.checked) {
+          Components.toast('Marque a confirmação para continuar.', 'warning');
+          return false;   // mantém o modal aberto
+        }
+        self._executar();
+      }
+    });
+  },
+
+  /** Etapa 4: executa o tombamento. */
+  _executar: function() {
+    var self = this;
+    self._executarComPin('executarTombamentoSeguroPGO5', [],
+      'Executar o tombamento exige o PIN administrativo.',
+      function(relatorio) {
+        self.state.relatorio = relatorio || {};
+        Components.toast(
+          self.state.relatorio.sucesso ? 'Tombamento concluído.' : 'O tombamento não foi concluído.',
+          self.state.relatorio.sucesso ? 'success' : 'error', 8000);
+        // Relê o estado: o marcador de conclusão e a fonte mudaram no servidor.
+        self.render();
+      },
+      function() { self._executar(); });
+  },
+
+  /**
+   * Chama uma função protegida e trata as duas respostas de PIN.
+   *
+   * O servidor sinaliza a falta de PIN com prefixos no erro — 'PIN_NECESSARIO'
+   * e 'PIN_NAO_DEFINIDO' (ver exigirPermissaoComPin_). É o mesmo tratamento
+   * dos links protegidos em AcessoPGO5.html.
+   *
+   * @param {string} funcao Nome da função do servidor.
+   * @param {Array} args Argumentos.
+   * @param {string} motivoDoPin Texto exibido no modal do PIN.
+   * @param {Function} aoConcluir Recebe a resposta do servidor.
+   * @param {Function} aoLiberarPin O que fazer depois de validar o PIN.
+   * @returns {void}
+   */
+  _executarComPin: function(funcao, args, motivoDoPin, aoConcluir, aoLiberarPin) {
+    var self = this;
+    if (self.state.ocupado) return;
+    self.state.ocupado = true;
+    Components.showLoading('Processando... não feche esta página.');
+
+    var run = google.script.run
+      .withSuccessHandler(function(resposta) {
+        self.state.ocupado = false;
+        Components.hideLoading();
+        aoConcluir(resposta || {});
+      })
+      .withFailureHandler(function(err) {
+        self.state.ocupado = false;
+        Components.hideLoading();
+        var mensagem = (err && err.message) || '';
+
+        if (mensagem.indexOf('PIN_NECESSARIO') !== -1) {
+          self._pedirPin(aoLiberarPin, motivoDoPin);
+          return;
+        }
+        if (mensagem.indexOf('PIN_NAO_DEFINIDO') !== -1) {
+          Components.toast('Defina o PIN administrativo em Configurações › Segurança antes de ' +
+            'usar o tombamento.', 'warning', 7000);
+          self.render();
+          return;
+        }
+        Components.toast(mensagem || 'Não foi possível concluir a operação.', 'error', 8000);
+      });
+    run[funcao].apply(run, args);
+  },
+
+  /**
+   * Pede o PIN administrativo e, dando certo, segue com a ação.
+   *
+   * Usa o mecanismo existente do PGO 5.0 (validarPinPGO5): o PIN digitado vai
+   * direto para o servidor e não é guardado em nenhum lugar desta página.
+   *
+   * @param {Function} aoLiberar Executada depois de validar.
+   * @param {string} [motivo] Por que o PIN está sendo pedido.
+   */
+  _pedirPin: function(aoLiberar, motivo) {
+    var self = this;
+    var digitos = (self.state.dados && self.state.dados.digitosDoPin) || 6;
+
+    Components.modal({
+      title: 'Informe o PIN administrativo',
+      confirmText: 'Validar',
+      cancelText: 'Cancelar',
+      body: (motivo ? '<p class="pgo5cfg-ajuda">' + App.escapeHtml(motivo) + '</p>' : '') +
+        '<div class="form-group"><label class="form-label" for="pgo5tmb-pin">PIN ' +
+        '<span class="required">*</span></label>' +
+        '<input class="form-control pgo5seg-pin-campo" id="pgo5tmb-pin" type="password" ' +
+        'inputmode="numeric" autocomplete="off" maxlength="' + digitos + '" ' +
+        'placeholder="' + new Array(digitos + 1).join('•') + '"></div>' +
+        '<small class="pgo5cfg-nota">Depois de aceito, as ações protegidas ficam liberadas ' +
+        'por alguns minutos.</small>',
+      onConfirm: function() {
+        var campo = document.getElementById('pgo5tmb-pin');
+        var pin = campo ? campo.value.trim() : '';
+        if (pin.length !== digitos) {
+          Components.toast('O PIN deve ter ' + digitos + ' dígitos.', 'warning');
+          return false;
+        }
+        Components.showLoading('Validando...');
+        google.script.run
+          .withSuccessHandler(function() {
+            Components.hideLoading();
+            Components.toast('PIN aceito.', 'success');
+            if (typeof aoLiberar === 'function') aoLiberar();
+          })
+          .withFailureHandler(function(err) {
+            Components.hideLoading();
+            Components.toast(((err && err.message) || 'Não foi possível validar o PIN.'), 'error');
+            self.render();
+          })
+          .validarPinPGO5(pin);
+      }
+    });
+  },
+
+  /** Data e hora em formato brasileiro. */
+  _dataHora: function(iso) {
+    var data = new Date(iso);
+    if (isNaN(data.getTime())) return String(iso || '');
+    return ('0' + data.getDate()).slice(-2) + '/' + ('0' + (data.getMonth() + 1)).slice(-2) +
+      '/' + data.getFullYear() + ' ' +
+      ('0' + data.getHours()).slice(-2) + ':' + ('0' + data.getMinutes()).slice(-2);
+  }
+};
+</script>

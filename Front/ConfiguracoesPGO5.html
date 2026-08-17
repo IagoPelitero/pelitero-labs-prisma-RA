@@ -50,7 +50,11 @@ Pages.configuracoesPGO5 = {
     { tipo: 'ACESSOS', label: 'Cargos e Níveis', icone: 'security', externa: 'acessosPGO5',
       permissoes: ['gerenciarCargos', 'gerenciarNiveis'] },
     { tipo: 'SEGURANCA', label: 'Segurança', icone: 'lock', externa: 'segurancaPGO5',
-      permissoes: ['alterarPermissoes'] }
+      permissoes: ['alterarPermissoes'] },
+    // Tombamento do banco 4.x. Fica por último de propósito: é uma operação
+    // de instalação, executada uma única vez, e não parte da rotina.
+    { tipo: 'TOMBAMENTO', label: 'Tombamento', icone: 'swap_horiz', externa: 'tombamentoPGO5',
+      permissoes: ['configurarSistema'] }
   ],
 
   /**
@@ -86,9 +90,12 @@ Pages.configuracoesPGO5 = {
     var self = this;
     container = container || document.getElementById('app');
 
+    // Toda permissão que libera ALGUMA seção precisa estar aqui: sem isso,
+    // quem tem apenas 'configurarSistema' (a permissão do Tombamento) seria
+    // devolvido ao Dashboard e nunca alcançaria a seção que lhe pertence.
     var permissoesDaTela = ['gerenciarFormulario', 'gerenciarCanais', 'gerenciarCatalogos',
       'gerenciarEquipe', 'gerenciarUsuariosTodos', 'gerenciarCargos', 'gerenciarNiveis',
-      'alterarPermissoes'];
+      'alterarPermissoes', 'configurarSistema'];
     var podeEntrar = permissoesDaTela.some(function(p) { return AcessoPGO5.podeNaInterface(p); });
     if (!podeEntrar) { App.navigateTo('dashboard'); return; }
 
