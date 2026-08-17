@@ -859,14 +859,22 @@ function pgo5AssertPodeAcessar_(ator, registro, acao) {
  *   PROPRIOS → só onde ele é responsável ou criador
  *   NENHUM   → nenhum
  *
+ * ⚠️ CUSTO: resolver o escopo NÃO é uma conta em memória — passa por
+ * atorComoUsuario_ (lê a aba Usuários inteira) e por lerCargosENiveis_ (lê a
+ * aba Configurações inteira). São duas varreduras completas de planilha por
+ * chamada. Numa verificação avulsa isso é irrelevante; dentro de um laço,
+ * não é. Por isso quem filtra uma LISTA deve resolver o escopo uma única vez
+ * e passá-lo em `escopoResolvido` — ver pgo5FiltrarAtendimentosPorEscopo_.
+ *
  * @param {Object} ator Ator autenticado.
  * @param {Object} registro Linha do atendimento.
  * @param {string} acao 'ver', 'editar' ou 'excluir'.
  * @param {string[]} [subordinados] Árvore do ator, quando já calculada.
+ * @param {string} [escopoResolvido] Escopo já resolvido, quando já calculado.
  * @returns {boolean} true quando a ação é permitida sobre este registro.
  */
-function pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados) {
-  const escopo = obterEscopoAtendimentos_(atorComoUsuario_(ator), acao);
+function pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados, escopoResolvido) {
+  const escopo = escopoResolvido || obterEscopoAtendimentos_(atorComoUsuario_(ator), acao);
   if (escopo === 'NENHUM') return false;
   if (escopo === 'TODOS') return true;
 
@@ -883,9 +891,20 @@ function pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados) {
 /**
  * Filtra uma lista de atendimentos pelo escopo do ator.
  *
- * A árvore de subordinados é calculada UMA vez e reaproveitada para todas
- * as linhas — sem isso, uma base com centenas de atendimentos percorreria a
- * hierarquia repetidamente.
+ * TUDO O QUE CUSTA LEITURA DE PLANILHA É RESOLVIDO UMA ÚNICA VEZ, ANTES DO
+ * LAÇO — o escopo e a árvore de subordinados. Os dois são então repassados
+ * a cada verificação.
+ *
+ * POR QUE ISSO É CRÍTICO, E NÃO UM DETALHE DE PERFORMANCE
+ * Quem tem escopo TODOS sai na linha de cima e nunca entra no laço. Quem tem
+ * PROPRIOS ou EQUIPE — ou seja, os níveis Operacional e Gestão — entra. Se
+ * cada volta recalculasse o escopo, cada atendimento custaria mais duas
+ * varreduras completas de planilha (Usuários e Configurações), e uma base
+ * com N atendimentos faria 2N leituras só para decidir o que a pessoa pode
+ * ver. Com poucos registros ninguém percebe; com alguns milhares, a execução
+ * estoura o limite de tempo do Apps Script e a tela simplesmente não carrega
+ * — só para quem NÃO é administrador. A aba Configurações ainda guarda a
+ * auditoria, então ela cresce todo dia e o problema piora sozinho.
  *
  * @param {Object} ator Ator autenticado.
  * @param {Object[]} registros Linhas da aba Atendimentos.
@@ -899,7 +918,7 @@ function pgo5FiltrarAtendimentosPorEscopo_(ator, registros, acao) {
 
   const subordinados = escopo === 'EQUIPE' ? obterSubordinadosDaHierarquia_(ator.id) : [];
   return registros.filter(function(registro) {
-    return pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados);
+    return pgo5AtendimentoEstaNoEscopo_(ator, registro, acao, subordinados, escopo);
   });
 }
 

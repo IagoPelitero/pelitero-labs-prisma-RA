@@ -1253,6 +1253,39 @@ function verificarIntegridadeBuildPGO5() {
   pgo5Afirmar_(r, 'pgo5IdDaFonteConfigurada_ é interna (não chamável pelo front)',
     'pgo5IdDaFonteConfigurada_'.slice(-1) === '_');
 
+  // ── Recorte por escopo: o custo não pode voltar a crescer com a base ──
+  //
+  // POR QUE ESTE TESTE EXISTE
+  // Resolver o escopo custa DUAS varreduras completas de planilha (Usuários e
+  // Configurações). Enquanto pgo5FiltrarAtendimentosPorEscopo_ resolver o
+  // escopo uma única vez e repassá-lo, o custo é constante. Se alguém remover
+  // esse repasse, cada atendimento volta a custar duas leituras e o Dashboard
+  // deixa de carregar — só para quem NÃO é administrador, porque o escopo
+  // TODOS sai antes do laço. É uma regressão que passa despercebida numa base
+  // pequena e derruba a produção numa base grande.
+  //
+  // As chamadas abaixo são PURAS: com o escopo já resolvido, a função não
+  // pode precisar da planilha para responder.
+  r.linhas.push('');
+  r.linhas.push('RECORTE POR ESCOPO (custo constante)');
+  const atorFalso = { id: '00000001' };
+  const deOutro = { ResponsavelId: '000000FF', CriadoPorId: '000000FF' };
+  const meuRegistro = { ResponsavelId: '00000001', CriadoPorId: '00000001' };
+
+  pgo5Afirmar_(r, 'o escopo pré-resolvido é honrado (TODOS libera)',
+    pgo5AtendimentoEstaNoEscopo_(atorFalso, deOutro, 'ver', [], 'TODOS') === true,
+    'o 5º parâmetro foi ignorado — o escopo está sendo recalculado por registro');
+  pgo5Afirmar_(r, 'o escopo pré-resolvido é honrado (NENHUM bloqueia)',
+    pgo5AtendimentoEstaNoEscopo_(atorFalso, meuRegistro, 'ver', [], 'NENHUM') === false);
+  pgo5Afirmar_(r, 'PROPRIOS libera o próprio registro',
+    pgo5AtendimentoEstaNoEscopo_(atorFalso, meuRegistro, 'ver', [], 'PROPRIOS') === true);
+  pgo5Afirmar_(r, 'PROPRIOS bloqueia o registro de terceiro',
+    pgo5AtendimentoEstaNoEscopo_(atorFalso, deOutro, 'ver', [], 'PROPRIOS') === false);
+  pgo5Afirmar_(r, 'EQUIPE libera quem está na árvore recebida',
+    pgo5AtendimentoEstaNoEscopo_(atorFalso, deOutro, 'ver', ['000000FF'], 'EQUIPE') === true);
+  pgo5Afirmar_(r, 'EQUIPE bloqueia quem está fora da árvore recebida',
+    pgo5AtendimentoEstaNoEscopo_(atorFalso, deOutro, 'ver', ['000000AA'], 'EQUIPE') === false);
+
   // ── IDs hexadecimais: o tombamento não pode mudar o formato ──
   r.linhas.push('');
   r.linhas.push('IDs DO PGO 5.0');
