@@ -178,7 +178,17 @@ function criarMapasMigracao_() {
     subcategorias: {},
     campos: {},
     status: {},
-    aguardando: {}
+    aguardando: {},
+
+    // Definição de cada CAMPO do destino, indexada pelo Id novo:
+    //   { '0000000A': { rotulo: 'Resumo do caso', tipo: 'textarea' } }
+    //
+    // Preenchida por migrarCatalogo_ e consumida por migrarCamposDinamicos_,
+    // que precisa do rótulo e do tipo para gravar o snapshot de cada valor.
+    // Sem ela, cada valor dinâmico releria a aba Formulário inteira só para
+    // descobrir o rótulo de um campo — e valores dinâmicos são a coisa MAIS
+    // numerosa de um tombamento (um por campo extra de cada atendimento).
+    definicoesDeCampo: {}
   };
 }
 
@@ -244,12 +254,52 @@ function buscarNoMapa_(mapa, valorAntigo) {
  * @returns {void}
  */
 function migrarCatalogo_(fonte, mapas, relatorio) {
+  // ── ÍNDICES EM MEMÓRIA (uma leitura só, no começo) ──
+  //
+  // POR QUE ISTO EXISTE
+  // As buscas abaixo são as MESMAS de antes — mudou só de onde vem a lista.
+  // Antes, cada item consultado relia a aba Formulário inteira; um catálogo
+  // de algumas centenas de linhas fazia centenas de varreduras completas de
+  // planilha, e o tombamento chegava ao limite de tempo do Apps Script sem
+  // ter saído do catálogo. Agora a aba é lida UMA vez e os índices são
+  // atualizados a cada criação — o que mantém o comportamento anterior, em
+  // que um item criado no meio do laço já era encontrado pelos seguintes.
+  const catalogoInicial = pgo5CatalogoBruto_();
+
+  // "TIPO|nome normalizado" → Id. A chave de busca é a mesma de antes:
+  // Rotulo quando existe, Nome como alternativa, sempre normalizado.
+  const idPorNome = {};
+  const chaveDeNome = function(tipo, nome) { return tipo + '|' + normalizeText_(nome); };
+  Object.keys(catalogoInicial).forEach(function(tipo) {
+    catalogoInicial[tipo].forEach(function(registro) {
+      const chave = chaveDeNome(tipo, registro.Rotulo || registro.Nome);
+      // O primeiro vence, como no find() original.
+      if (idPorNome[chave] === undefined) idPorNome[chave] = String(registro.Id);
+    });
+  });
+
+  // Campos são procurados pela CHAVE TÉCNICA exata (sem normalizar): é ela
+  // que liga o valor dinâmico à coluna de destino, e "CPF" e "cpf" são
+  // chaves diferentes.
+  const campoPorChaveTecnica = {};
+  catalogoInicial[PGO5_TIPOS.CAMPO].forEach(function(registro) {
+    const chave = String(registro.Nome || '').trim();
+    if (chave && campoPorChaveTecnica[chave] === undefined) campoPorChaveTecnica[chave] = registro;
+  });
+
+  /** Guarda a definição de um CAMPO para migrarCamposDinamicos_ usar depois. */
+  const anotarDefinicaoDeCampo = function(registro) {
+    mapas.definicoesDeCampo[String(registro.Id)] = {
+      rotulo: String(registro.Rotulo || registro.Nome || ''),
+      tipo: String(registro.TipoCampo || 'text')
+    };
+  };
+  catalogoInicial[PGO5_TIPOS.CAMPO].forEach(anotarDefinicaoDeCampo);
+
   /** Reaproveita um item já existente no destino, ou cria um novo. */
   const garantirItem = function(tipo, nome, paiId) {
-    const existente = pgo5CatalogoBruto_()[tipo].find(function(registro) {
-      return normalizeText_(registro.Rotulo || registro.Nome) === normalizeText_(nome);
-    });
-    if (existente) return String(existente.Id);
+    const chave = chaveDeNome(tipo, nome);
+    if (idPorNome[chave] !== undefined) return idPorNome[chave];
 
     const criado = pgo5Inserir(PGO5.SHEET_NAMES.FORMULARIO, {
       Tipo: tipo,
@@ -259,7 +309,10 @@ function migrarCatalogo_(fonte, mapas, relatorio) {
       Ativo: true,
       Ordem: 0
     });
-    return String(criado.Id);
+    // O índice acompanha a criação: o próximo item com o mesmo nome
+    // reaproveita este, exatamente como acontecia relendo a planilha.
+    idPorNome[chave] = String(criado.Id);
+    return idPorNome[chave];
   };
 
   // ── Canais ──
@@ -328,9 +381,7 @@ function migrarCatalogo_(fonte, mapas, relatorio) {
     // Campo estrutural já existe no PGO 5.0 — só precisa entrar no mapa
     // para os valores dinâmicos saberem que NÃO devem ser criados de novo.
     const estrutural = pgo5CampoEhEstrutural_(chave);
-    const existente = pgo5CatalogoBruto_()[PGO5_TIPOS.CAMPO].find(function(registro) {
-      return String(registro.Nome || '').trim() === chave;
-    });
+    const existente = campoPorChaveTecnica[chave];
 
     let idNovo = existente ? String(existente.Id) : '';
     if (!idNovo && !estrutural) {
@@ -344,6 +395,10 @@ function migrarCatalogo_(fonte, mapas, relatorio) {
         Ordem: Number(campo.Ordem) || 0
       });
       idNovo = String(criado.Id);
+      // Dois registros legados com a MESMA chave técnica: o segundo
+      // reaproveita o campo criado pelo primeiro, como antes.
+      campoPorChaveTecnica[chave] = criado;
+      anotarDefinicaoDeCampo(criado);
     }
 
     if (idNovo) {
@@ -408,6 +463,15 @@ function migrarUsuarios_(fonte, mapas, relatorio) {
 
   relatorio.usuarios.encontrados = fonte.usuarios.length;
 
+  // Quem já está no destino, indexado pelo e-mail normalizado — a MESMA
+  // comparação de antes, feita sobre uma única leitura da aba em vez de uma
+  // leitura por usuário da origem.
+  const usuarioPorEmail = {};
+  pgo5Ler(PGO5.SHEET_NAMES.USUARIOS).forEach(function(registro) {
+    const chave = normalizeText_(registro.Email);
+    if (chave && usuarioPorEmail[chave] === undefined) usuarioPorEmail[chave] = registro;
+  });
+
   fonte.usuarios.forEach(function(usuario) {
     const nome = String(usuario.Nome || '').trim();
     const email = String(usuario.Email || '').trim();
@@ -418,9 +482,9 @@ function migrarUsuarios_(fonte, mapas, relatorio) {
 
     // Já existe alguém com este e-mail? Então o destino já foi semeado com
     // esta pessoa (o administrador inicial, por exemplo) e não se duplica.
-    const jaExiste = pgo5Ler(PGO5.SHEET_NAMES.USUARIOS).find(function(registro) {
-      return normalizeText_(registro.Email) === normalizeText_(email);
-    });
+    // ⚠️ É esta regra que faz o administrador criado por
+    // prepararInstalacaoPGO5 ser REAPROVEITADO, e não duplicado.
+    const jaExiste = usuarioPorEmail[normalizeText_(email)];
     if (jaExiste) {
       registrarNoMapa_(mapas.usuarios, usuario.Id, nome, String(jaExiste.Id));
       relatorio.usuarios.jaExistentes++;
@@ -444,6 +508,10 @@ function migrarUsuarios_(fonte, mapas, relatorio) {
       Ativo: usuario.Ativo === undefined ? true : isTrue_(usuario.Ativo),
       DataCadastro: toIso_(new Date())
     });
+
+    // Dois registros legados com o mesmo e-mail: o segundo reaproveita o
+    // usuário criado pelo primeiro, como acontecia relendo a aba.
+    usuarioPorEmail[normalizeText_(email)] = criado;
 
     registrarNoMapa_(mapas.usuarios, usuario.Id, nome, String(criado.Id));
     relatorio.usuarios.migrados++;
@@ -552,9 +620,11 @@ function migrarCamposDinamicos_(antigo, atendimentoId, mapas, relatorio) {
       return;
     }
 
-    const definicao = pgo5CatalogoBruto_()[PGO5_TIPOS.CAMPO].find(function(registro) {
-      return String(registro.Id) === campoId;
-    });
+    // A definição do campo vem do índice montado por migrarCatalogo_. Nenhum
+    // CAMPO é criado depois dele, então o índice é equivalente a reler a aba
+    // — e reler aqui seria o pior lugar possível: esta função roda uma vez
+    // por campo extra de CADA atendimento.
+    const definicao = mapas.definicoesDeCampo[campoId];
 
     pgo5Inserir(PGO5.SHEET_NAMES.VALORES_ATENDIMENTO, {
       AtendimentoId: atendimentoId,
@@ -562,8 +632,8 @@ function migrarCamposDinamicos_(antigo, atendimentoId, mapas, relatorio) {
       Valor: String(valor),
       // Snapshot: o atendimento antigo continua legível mesmo que o campo
       // seja renomeado ou excluído da configuração no futuro.
-      RotuloSnapshot: definicao ? String(definicao.Rotulo || definicao.Nome) : chave,
-      TipoSnapshot: definicao ? String(definicao.TipoCampo || 'text') : 'text'
+      RotuloSnapshot: definicao ? definicao.rotulo : chave,
+      TipoSnapshot: definicao ? definicao.tipo : 'text'
     });
     relatorio.valoresDinamicos.migrados++;
   });
