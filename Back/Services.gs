@@ -1572,6 +1572,20 @@ function getRelatorio(filtros, options) {
  */
 
 /**
+ * Diz se a Análise de SAC deve ignorar os registros sem status mapeado.
+ *
+ * Decisão do PO válida para o PGO 5.0: esses registros não trazem análise
+ * útil e poluíam a tela com uma categoria que ninguém acompanha. No banco
+ * 4.x o comportamento fica como sempre foi — lá o "Não Classificado" serve
+ * de alerta para o administrador terminar o mapeamento dos status.
+ *
+ * @returns {boolean} true quando os registros devem ser descartados.
+ */
+function descartarNaoClassificadoNaAnalise_() {
+  return estruturaEhPGO5_();
+}
+
+/**
  * Nomes visíveis resolvidos de todas as telas renomeáveis.
  * Campo vazio ou ausente cai automaticamente no padrão.
  * @returns {Object} { <pagina>: <nome visível> }.
@@ -2177,6 +2191,21 @@ function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
       labelPorChave[data.chave] = data.label;
     }
     const grupo = classificarStatusOp_(statusTxt, mapa);
+
+    // PGO 5.0: o PO decidiu que registro sem status mapeado não tem análise
+    // útil e sai da tela. O descarte acontece AQUI, antes de qualquer
+    // agregação — assim ele some de uma vez dos KPIs, dos gráficos, do
+    // Top 5, das dimensões e da exportação, sem precisar de um ajuste em
+    // cada lugar.
+    //
+    // ⚠️ Isto NÃO altera a planilha de origem: ela continua somente
+    // leitura e mantém todas as linhas. O que muda é só o que entra na
+    // análise.
+    //
+    // No banco 4.x nada muda: lá o "Não Classificado" continua sendo
+    // exibido como aviso para o ADM completar o mapeamento.
+    if (grupo === 'naoClassificado' && descartarNaoClassificadoNaAnalise_()) continue;
+
     porData[data.chave].casos++;
     porData[data.chave][grupo]++;
     totalCasos++;

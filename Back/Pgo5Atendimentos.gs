@@ -314,7 +314,62 @@ function pgo5MontarAtendimento_(canalId, valores, catalogo) {
     }
   });
 
+  // "Aguardando Retorno" só faz sentido enquanto o caso está Pendente.
+  aplicarRegraDeAguardandoRetorno_(estrutural, catalogo);
+
   return { estrutural: estrutural, dinamicos: dinamicos, erros: erros };
+}
+
+/**
+ * Diz se um Id de status corresponde ao status PENDENTE.
+ *
+ * COMO O PENDENTE É IDENTIFICADO
+ * Pelo NOME TÉCNICO do registro no catálogo, não pelo rótulo que aparece
+ * na tela. O administrador pode renomear "Pendente" para "Aguardando
+ * Análise" — nesse caso o Rotulo muda, mas o Nome continua 'Pendente'
+ * (ver pgo5StatusIniciais_ em Pgo5Catalogo.gs). Comparar o rótulo faria a
+ * regra parar de valer no dia em que alguém renomeasse o status.
+ *
+ * Não existe segunda lista de status aqui: a fonte continua sendo o
+ * catálogo do banco.
+ *
+ * @param {string} statusId Id do status a verificar.
+ * @param {Object} [catalogo] Catálogo já lido (evita reler a aba).
+ * @returns {boolean} true quando o status é o Pendente.
+ */
+function pgo5StatusEhPendente_(statusId, catalogo) {
+  const id = String(statusId || '').trim();
+  if (!id) return false;
+
+  const status = pgo5Status_(catalogo).find(function(s) { return s.id === id; });
+  if (!status) return false;
+
+  return normalizeText_(status.nome) === 'pendente';
+}
+
+/**
+ * Apaga o "Aguardando Retorno" quando o status não é mais Pendente.
+ *
+ * POR QUE LIMPAR NO BANCO, E NÃO SÓ ESCONDER NA TELA
+ * Se o valor continuasse gravado, ele voltaria a aparecer no dia em que o
+ * atendimento fosse reaberto como Pendente — mostrando "Aguardando: Área"
+ * de um aguardo que terminou há semanas. Apagar na hora da mudança deixa o
+ * dado coerente com o que a operação realmente está esperando.
+ *
+ * Altera apenas AguardandoRetornoId. Responsável, criador e os demais
+ * campos não são tocados aqui.
+ *
+ * @param {Object} estrutural Colunas já montadas (alterado aqui).
+ * @param {Object} [catalogo] Catálogo já lido.
+ * @returns {void}
+ */
+function aplicarRegraDeAguardandoRetorno_(estrutural, catalogo) {
+  // O campo pode nem existir no canal: aí não há o que limpar.
+  if (!('AguardandoRetornoId' in estrutural)) return;
+
+  if (!pgo5StatusEhPendente_(estrutural.StatusId, catalogo)) {
+    estrutural.AguardandoRetornoId = '';
+  }
 }
 
 // ============================================================================
@@ -488,11 +543,17 @@ function alterarStatusAtendimentoPGO5(id, statusId, aguardandoId) {
   const status = pgo5Status_(catalogo).find(function(s) { return s.id === novoStatus; });
   if (!status) throw new Error('Selecione um status válido.');
 
-  const novoAguardando = String(aguardandoId || '').trim();
+  let novoAguardando = String(aguardandoId || '').trim();
   if (novoAguardando) {
     const ag = pgo5Aguardando_(catalogo).find(function(a) { return a.id === novoAguardando; });
     if (!ag) throw new Error('Selecione uma opção válida de "Aguardando Retorno".');
   }
+
+  // Saindo de Pendente, o "Aguardando Retorno" deixa de fazer sentido e é
+  // apagado — mesma regra da edição normal (ver
+  // aplicarRegraDeAguardandoRetorno_). Sem isso, o valor antigo
+  // reapareceria se o caso voltasse a Pendente no futuro.
+  if (!pgo5StatusEhPendente_(novoStatus, catalogo)) novoAguardando = '';
 
   return withScriptLock_(function() {
     pgo5AtualizarPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, atendimentoId, {

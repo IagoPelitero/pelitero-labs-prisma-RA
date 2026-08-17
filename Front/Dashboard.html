@@ -779,11 +779,38 @@ Pages.dashboard = {
       ? '<div class="dash-responsavel">' + App.escapeHtml(item.responsavel) + '</div>'
       : '<div class="dash-vazio">Sem responsável</div>';
 
+    // "Aguardando Retorno" só aparece enquanto o caso está PENDENTE: um
+    // atendimento em análise ou concluído não está esperando ninguém, e
+    // mostrar "Aguardando: Área" ali seria informação errada.
+    //
+    // O backend também apaga o campo quando o status sai de Pendente
+    // (ver aplicarRegraDeAguardandoRetorno_ em Pgo5Atendimentos.gs) — aqui
+    // é só a metade visual da mesma regra.
     var aguardando = String(item.situacaoPendencia || '').trim();
-    var linhaAguardando = '<div class="dash-aguardando">Aguardando: ' +
-      (aguardando ? App.escapeHtml(aguardando) : '—') + '</div>';
+    var linhaAguardando = '';
+    if (this._estaPendente(item) && aguardando) {
+      linhaAguardando = '<div class="dash-aguardando">Aguardando: ' +
+        App.escapeHtml(aguardando) + '</div>';
+    }
 
     return '<div class="dash-grupo">' + responsavel + linhaAguardando + '</div>';
+  },
+
+  /**
+   * Diz se o atendimento está no status Pendente.
+   *
+   * A tela recebe o RÓTULO do status (que o administrador pode
+   * personalizar), não a chave técnica. Por isso a comparação é tolerante:
+   * qualquer rótulo que comece por "pendente" conta. A decisão que vale é
+   * a do servidor, que usa o nome técnico e já apaga o campo — este teste
+   * serve para os registros gravados ANTES deste patch, que ainda podem
+   * ter o valor antigo guardado.
+   *
+   * @param {Object} item Atendimento no formato do cliente.
+   * @returns {boolean} true quando o status é Pendente.
+   */
+  _estaPendente: function(item) {
+    return String(item.status || '').trim().toLowerCase().indexOf('pendente') === 0;
   },
 
   /**

@@ -235,8 +235,13 @@ Pages.indicadoresOperacionais = {
     html += Components.kpiCard('task_alt', App.formatNumber(t.fechado || 0), 'Fechado + Rejeitado', cores[2]);
     html += Components.kpiCard('timer_off', App.formatNumber(dados.totalForaSLA || 0), 'Fora da SLA', cores[5],
       null, null, 'Informado manualmente');
-    html += Components.kpiCard('help_outline', App.formatNumber(t.naoClassificado || 0), 'Não Classificado',
-      (t.naoClassificado ? cores[4] : '#9E9E9E'), null, null, 'Status ainda não mapeado');
+    // No PGO 5.0 esses registros não entram na análise, então o cartão não
+    // faz sentido — mostrar "Não Classificado: 0" seria ruído. No 4.x ele
+    // continua, avisando o ADM sobre status ainda sem mapeamento.
+    if (App.schemaBanco !== 'PGO5') {
+      html += Components.kpiCard('help_outline', App.formatNumber(t.naoClassificado || 0), 'Não Classificado',
+        (t.naoClassificado ? cores[4] : '#9E9E9E'), null, null, 'Status ainda não mapeado');
+    }
     html += '</div>';
     return html;
   },
@@ -272,6 +277,9 @@ Pages.indicadoresOperacionais = {
    * um status desconhecido NUNCA é contado como "Em Aberto".
    */
   _alertaNaoClassificadoHtml: function(dados) {
+    // No PGO 5.0 esses registros foram descartados da análise. Manter o
+    // aviso faria a tela alertar sobre algo que ela nem exibe mais.
+    if (App.schemaBanco === 'PGO5') return '';
     var lista = dados.statusNaoMapeados || [];
     if (!lista.length) return '';
     var amostra = lista.slice(0, 8).map(function(s) {
@@ -520,15 +528,27 @@ Pages.indicadoresOperacionais = {
       rodape + '</div>';
   },
 
-  /** Linhas automáticas da matriz (mesma ordem na tela e na exportação). */
+  /**
+   * Linhas da matriz de detalhamento (mesma ordem na tela e na exportação).
+   *
+   * No PGO 5.0 os registros sem status mapeado são descartados antes da
+   * agregação, então a linha "Não Classificado" viria sempre zerada — e
+   * mostrar uma linha de zeros é pior do que não mostrar nada. No banco
+   * 4.x ela continua, avisando o ADM sobre status ainda sem mapeamento.
+   *
+   * @returns {Object[]} Linhas { chave, rotulo }.
+   */
   _linhasMatriz: function() {
-    return [
+    var linhas = [
       { chave: 'casos', rotulo: 'Casos' },
       { chave: 'emAberto', rotulo: 'Em Aberto' },
       { chave: 'emAnalise', rotulo: 'Em Análise' },
-      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' },
-      { chave: 'naoClassificado', rotulo: 'Não Classificado' }
+      { chave: 'fechado', rotulo: 'Fechado (Fechado + Rejeitado)' }
     ];
+    if (App.schemaBanco !== 'PGO5') {
+      linhas.push({ chave: 'naoClassificado', rotulo: 'Não Classificado' });
+    }
+    return linhas;
   },
 
   /**
