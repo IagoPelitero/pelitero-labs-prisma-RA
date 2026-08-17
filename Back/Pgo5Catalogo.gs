@@ -316,10 +316,63 @@ function pgo5Rotulo_(mapa, id, vazio) {
  * ITEM EXCLUÍDO NÃO VOLTA: o seed grava em Script Property a lista de itens
  * que já semeou uma vez. Se o ADM excluir "SAC Reclamação", rodar o seed de
  * novo não o ressuscita.
+ *
+ * ⚠️ ESSA MEMÓRIA É POR PLANILHA, E ISSO É ESSENCIAL
+ * Script Properties pertencem ao PROJETO do Apps Script, não à planilha. O
+ * mesmo projeto pode ser apontado para outra planilha (configurarPlanilha, ou
+ * o destino novo de um tombamento). Com uma chave única, a memória da base
+ * antiga valeria para a base nova: o seed concluiria que "já semeou tudo" e a
+ * instalação nasceria com ZERO canais, campos e status — Novo Atendimento
+ * sem canal para escolher, e todo atendimento existente exibindo "Sem dados"
+ * onde deveria aparecer o rótulo. Por isso a chave carrega o Id da planilha.
  */
 
-/** Script Property com os itens já semeados alguma vez (JSON de chaves). */
+/**
+ * Prefixo da Script Property com os itens já semeados (JSON de chaves).
+ *
+ * Mantido com o nome de sempre: a chave em uso hoje continua sendo lida, e
+ * nenhuma instalação existente perde a memória do que já foi excluído.
+ */
 const PGO5_SEED_APLICADO_ = 'PGO5_SEED_APLICADO';
+
+/**
+ * Chave da memória de seed DESTA planilha.
+ * @returns {string} Ex.: 'PGO5_SEED_APLICADO_1a2b3c...'.
+ */
+function pgo5ChaveDaMemoriaDeSeed_() {
+  return PGO5_SEED_APLICADO_ + '_' + String(getSpreadsheet().getId() || '');
+}
+
+/**
+ * Lê a memória de seed da planilha atual.
+ *
+ * COMPATIBILIDADE COM QUEM JÁ ESTÁ INSTALADO
+ * Antes desta correção a memória vivia numa chave única, sem o Id da
+ * planilha. Se a chave por planilha ainda não existe MAS a base já tem
+ * catálogo, essa memória antiga é desta base — e é adotada, para que um item
+ * que o ADM excluiu continue excluído. Numa base VAZIA a memória antiga é
+ * ignorada, porque ali ela só poderia ter vindo de outra planilha: é
+ * exatamente o caso que impedia a instalação nova de receber o seed.
+ *
+ * @param {Object} props Script Properties.
+ * @param {Object} catalogo Catálogo já lido (para saber se a base tem itens).
+ * @returns {Object} Mapa { chaveDeSeed: true } do que já foi semeado aqui.
+ */
+function pgo5LerMemoriaDeSeed_(props, catalogo) {
+  const analisar = function(bruto) {
+    try { return JSON.parse(bruto || '{}') || {}; } catch (e) { return {}; }
+  };
+
+  const daPlanilha = props.getProperty(pgo5ChaveDaMemoriaDeSeed_());
+  if (daPlanilha !== null && daPlanilha !== undefined) return analisar(daPlanilha);
+
+  const baseTemCatalogo = Object.keys(catalogo).some(function(tipo) {
+    return (catalogo[tipo] || []).length > 0;
+  });
+  if (!baseTemCatalogo) return {};
+
+  return analisar(props.getProperty(PGO5_SEED_APLICADO_));
+}
 
 /**
  * Definição dos canais e dos campos iniciais de cada um.
@@ -385,12 +438,9 @@ function pgo5AplicarSeedEstrutural_() {
 
   return withScriptLock_(function() {
     const props = PropertiesService.getScriptProperties();
-    let jaSemeados = {};
-    try {
-      jaSemeados = JSON.parse(props.getProperty(PGO5_SEED_APLICADO_) || '{}') || {};
-    } catch (e) { jaSemeados = {}; }
-
     const catalogo = pgo5CatalogoBruto_();
+    // A memória é desta planilha. Ver pgo5LerMemoriaDeSeed_.
+    const jaSemeados = pgo5LerMemoriaDeSeed_(props, catalogo);
 
     // Índice do que já existe: "TIPO|nome|pai" → registro.
     const existentes = {};
@@ -460,7 +510,10 @@ function pgo5AplicarSeedEstrutural_() {
       }, '');
     });
 
-    props.setProperty(PGO5_SEED_APLICADO_, JSON.stringify(jaSemeados));
+    // Grava sempre na chave DESTA planilha. A chave antiga é deixada como
+    // está: apagá-la quebraria a memória de qualquer outra base que o mesmo
+    // projeto ainda venha a usar antes de gravar a sua própria.
+    props.setProperty(pgo5ChaveDaMemoriaDeSeed_(), JSON.stringify(jaSemeados));
     relatorio.total = relatorio.criados.length;
     Logger.log('[PGO5] Seed estrutural: ' + relatorio.criados.length + ' criado(s), ' +
       relatorio.jaExistentes.length + ' já existente(s), ' +

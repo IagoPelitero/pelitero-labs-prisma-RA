@@ -823,9 +823,14 @@ function pgo5ConverterParaLegado_(registros) {
       // não existe e as telas caem no comportamento antigo.
       StatusNomeTecnico: nomeTecnicoDeStatus[String(a.StatusId || '').trim()] || '',
       MotivoPendencia: pgo5Rotulo_(rotulos, a.AguardandoRetornoId, ''),
-      Responsavel: respId ? (nomeUsuario[respId] || '') : '',
+      // Vazio ('') = não há responsável. 'Sem dados' = havia, e o usuário foi
+      // excluído da aba Usuários. É a MESMA distinção que pgo5Rotulo_ faz
+      // para o catálogo e que listarAtendimentosPGO5_ já aplica no Dashboard;
+      // sem ela, um responsável apagado apareceria nos Indicadores como se o
+      // campo nunca tivesse sido preenchido.
+      Responsavel: respId ? (nomeUsuario[respId] || 'Sem dados') : '',
       Observacoes: String(a.Observacoes || ''),
-      CriadoPor: criadorId ? (nomeUsuario[criadorId] || '') : '',
+      CriadoPor: criadorId ? (nomeUsuario[criadorId] || 'Sem dados') : '',
       DataCriacao: a.DataCriacao,
       AtualizadoPor: String(a.AtualizadoPorId || ''),
       DataAtualizacao: a.DataAtualizacao,

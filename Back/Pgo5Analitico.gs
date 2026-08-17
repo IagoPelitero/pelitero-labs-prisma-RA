@@ -320,8 +320,22 @@ function montarKpisProdutividade_(atendimentos) {
  * Conta quantos atendimentos há em cada valor de uma coluna.
  *
  * Devolve ordenado do maior para o menor, que é como os gráficos de barra
- * e as listas "Top" precisam receber. Valor vazio vira 'Sem dados' para a
- * tela nunca mostrar uma barra sem nome.
+ * e as listas "Top" precisam receber.
+ *
+ * ⚠️ VAZIO ≠ REFERÊNCIA QUEBRADA — são dois fatos diferentes e a tela
+ * precisa distingui-los:
+ *
+ *   '(não informado)' → o atendimento não tem esse campo preenchido. É o
+ *                       normal numa operação que não usa Produto, e numa
+ *                       base onde o catálogo ainda não foi cadastrado.
+ *   'Sem dados'       → o campo APONTA para um registro que não existe
+ *                       mais (o ADM excluiu o produto, por exemplo). Isso
+ *                       é anomalia e merece atenção.
+ *
+ * Antes os dois caíam em 'Sem dados', e um Indicadores inteiro de base
+ * recém-instalada parecia quebrado quando estava apenas vazio. O rótulo de
+ * vazio segue a convenção que o sistema já usa na Análise de SAC. Quem
+ * produz o 'Sem dados' é pgo5Rotulo_, no conversor — não esta função.
  *
  * @param {Object[]} atendimentos Atendimentos já filtrados.
  * @param {string} coluna Nome da coluna no formato legado (ex.: 'Canal').
@@ -330,7 +344,7 @@ function montarKpisProdutividade_(atendimentos) {
 function agruparProdutividadePor_(atendimentos, coluna) {
   const contagem = {};
   atendimentos.forEach(function(atendimento) {
-    const valor = String(atendimento[coluna] || '').trim() || 'Sem dados';
+    const valor = String(atendimento[coluna] || '').trim() || '(não informado)';
     contagem[valor] = (contagem[valor] || 0) + 1;
   });
 

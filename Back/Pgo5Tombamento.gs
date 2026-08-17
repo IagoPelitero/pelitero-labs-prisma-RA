@@ -1286,6 +1286,46 @@ function verificarIntegridadeBuildPGO5() {
   pgo5Afirmar_(r, 'EQUIPE bloqueia quem está fora da árvore recebida',
     pgo5AtendimentoEstaNoEscopo_(atorFalso, deOutro, 'ver', ['000000AA'], 'EQUIPE') === false);
 
+  // ── Memória do seed: precisa ser POR PLANILHA ──
+  //
+  // POR QUE ESTE TESTE EXISTE
+  // Script Properties pertencem ao PROJETO. Se a memória do seed voltar a ser
+  // uma chave única, apontar o projeto para outra planilha (o destino novo de
+  // um tombamento, por exemplo) faz o seed concluir que "já semeou tudo": a
+  // instalação nasce sem canal, sem campo e sem status. O sintoma é Novo
+  // Atendimento sem canal para escolher e todo atendimento exibindo
+  // "Sem dados" — sem nenhum erro no log que aponte para a causa.
+  r.linhas.push('');
+  r.linhas.push('MEMÓRIA DO SEED (por planilha)');
+  let idDaBase = '';
+  try { idDaBase = String(getSpreadsheet().getId() || ''); } catch (e) { idDaBase = ''; }
+  pgo5Afirmar_(r, 'a chave da memória de seed carrega o Id da planilha',
+    !!idDaBase && pgo5ChaveDaMemoriaDeSeed_().indexOf(idDaBase) !== -1,
+    'a memória voltou a ser global ao projeto');
+  pgo5Afirmar_(r, 'a chave da memória é diferente da chave legada',
+    pgo5ChaveDaMemoriaDeSeed_() !== PGO5_SEED_APLICADO_);
+
+  // Regra da compatibilidade, isolada: um repositório de propriedades onde
+  // SÓ existe a chave legada (o estado de quem já está instalado).
+  const propsSoLegado = {
+    _dados: (function() {
+      const d = {};
+      d[PGO5_SEED_APLICADO_] = JSON.stringify({ 'CANAL|exemplo|': true });
+      return d;
+    })(),
+    getProperty: function(chave) {
+      return this._dados[chave] === undefined ? null : this._dados[chave];
+    }
+  };
+  pgo5Afirmar_(r, 'base COM catálogo adota a memória legada (exclusão continua valendo)',
+    Object.keys(pgo5LerMemoriaDeSeed_(propsSoLegado,
+      { CANAL: [{ Id: '00000001' }], CAMPO: [], STATUS: [] })).length === 1,
+    'uma instalação existente ressuscitaria itens que o ADM excluiu');
+  pgo5Afirmar_(r, 'base SEM catálogo ignora a memória legada',
+    Object.keys(pgo5LerMemoriaDeSeed_(propsSoLegado,
+      { CANAL: [], CAMPO: [], STATUS: [] })).length === 0,
+    'uma instalação nova herdaria a memória de outra base e nasceria sem catálogo');
+
   // ── IDs hexadecimais: o tombamento não pode mudar o formato ──
   r.linhas.push('');
   r.linhas.push('IDs DO PGO 5.0');
