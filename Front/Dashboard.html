@@ -91,7 +91,15 @@ Pages.dashboard = {
     html += '    <h1 class="page-title">' + App.escapeHtml(App.nomeTela('dashboard', 'Dashboard')) + '</h1>';
     html += '    <p style="color: var(--text-secondary, #6c757d); margin: 4px 0 0 0;">Visão geral dos atendimentos</p>';
     html += '  </div>';
-    html += '  <button class="btn btn-primary" onclick="App.navigateTo(\'novoAtendimento\')">➕ Novo Atendimento</button>';
+    // O botão é um SEGUNDO caminho para a mesma tela — esconder o item do
+    // menu não bastava, ele continuava aqui. Sem a permissão, clicar levava
+    // a pessoa de volta ao Dashboard com uma recusa: um botão que só serve
+    // para dizer não. No banco 4.x não há permissão declarada e ele aparece
+    // como sempre apareceu.
+    if (!App.usandoPGO5() || AcessoPGO5.podeVerTela('novoAtendimento')) {
+      html += '  <button class="btn btn-primary" onclick="App.navigateTo(\'novoAtendimento\')">➕ ' +
+        App.escapeHtml(App.nomeTela('novoAtendimento', 'Novo Atendimento')) + '</button>';
+    }
     html += '</div>';
 
     html += '<div class="grid-4" id="dashboard-kpis">';
@@ -1016,19 +1024,29 @@ Pages.dashboard = {
     // Ordem e ícones alinhados com a linguagem visual de Configurações.
     // "change_circle" em vez de bandeira: bandeira seria lida como
     // prioridade ou marcação, não como troca de situação.
-    var actions = [
-      {
+    // Alterar status é uma edição, então segue a permissão de edição. No
+    // banco 4.x não existe permissão declarada e as três ações aparecem como
+    // sempre apareceram.
+    var pgo5 = App.usandoPGO5();
+    var podeEditar = !pgo5 || AcessoPGO5.podeAgirEmAtendimento('editar');
+    var podeExcluir = !pgo5 || AcessoPGO5.podeAgirEmAtendimento('excluir');
+
+    var actions = [];
+    if (podeEditar) {
+      actions.push({
         icon: 'edit',
         title: 'Editar',
         // Edição em modal: o usuário permanece no Dashboard.
         onClick: function(row) { self.abrirEdicao(row.raw); }
-      },
-      {
+      });
+      actions.push({
         icon: 'change_circle',
         title: 'Alterar status',
         onClick: function(row) { self.alterarStatus(row.raw); }
-      },
-      {
+      });
+    }
+    if (podeExcluir) {
+      actions.push({
         icon: 'delete',
         title: 'Excluir',
         onClick: function(row) {
@@ -1036,8 +1054,8 @@ Pages.dashboard = {
             self.excluir(row.id);
           });
         }
-      }
-    ];
+      });
+    }
 
     container.innerHTML = Components.dataTable({
       headers: headers,

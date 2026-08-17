@@ -596,16 +596,42 @@ function garantirAdministradorRestante_(alteracao) {
  * Numa instalação 4.x devolve um resumo vazio, e as telas antigas seguem
  * usando as regras de perfil de sempre.
  *
- * @returns {Object} { schema, cargo, nivelAcesso, permissoes, escopos }.
+ * ⚠️ "SEM PERMISSÃO" E "NÃO CONSEGUI RESOLVER" SÃO COISAS DIFERENTES
+ * Os dois casos produziam a mesma resposta: uma lista de permissões vazia.
+ * Numa base PGO 5.0 o front usa essa lista para decidir o que mostrar, então
+ * uma falha ao montar o resumo apagava o menu inteiro — sem erro, sem aviso,
+ * sem nada no que o suporte pudesse se apoiar. A pessoa via um sistema vazio
+ * e concluía que "perdeu o acesso".
+ *
+ * Agora a falha é declarada em `indisponivel`, com um motivo técnico. O
+ * comportamento continua FECHADO (nenhuma permissão é concedida), mas passa a
+ * ser diagnosticável. O motivo não carrega e-mail, nome nem conteúdo de
+ * registro — só a natureza do problema, porque este texto chega ao navegador.
+ *
+ * @returns {Object} { schema, cargo, nivelAcesso, permissoes, escopos,
+ *   indisponivel?, motivo? }.
  */
 function montarResumoDeAcessoPGO5_() {
   const vazio = { schema: 'LEGADO', cargo: '', nivelAcesso: '', permissoes: [], escopos: {} };
   if (typeof estruturaEhPGO5_ !== 'function' || !estruturaEhPGO5_()) return vazio;
 
+  // Falha numa base que É PGO 5.0: o front precisa saber que a lista vazia
+  // não significa "esta pessoa não pode nada".
+  const indisponivel = function(motivo) {
+    Logger.log('[PGO5] Resumo de acesso indisponível: ' + motivo);
+    return {
+      schema: 'PGO5', cargo: '', nivelAcesso: '', permissoes: [], escopos: {},
+      indisponivel: true, motivo: motivo
+    };
+  };
+
   try {
     const ator = getActor_();
     const usuario = atorComoUsuario_(ator);
-    if (!usuario) return vazio;
+    // Autenticou (logo existe na aba Usuários e está ativo), mas o registro
+    // não foi reencontrado pelo Id — a aba mudou embaixo da sessão. Não é
+    // "sem permissão": é inconsistência de cadastro.
+    if (!usuario) return indisponivel('USUARIO_NAO_RESOLVIDO: registro não encontrado pelo Id da sessão.');
 
     const dados = lerCargosENiveis_();
     const nivel = resolverNivelAcessoUsuario_(usuario, dados);
@@ -626,10 +652,12 @@ function montarResumoDeAcessoPGO5_() {
       }
     };
   } catch (e) {
-    // Falhar aqui não pode derrubar o bootstrap inteiro; sem resumo, a
-    // interface simplesmente não mostra os atalhos administrativos.
-    Logger.log('[PGO5] Resumo de acesso indisponível: ' + e.message);
-    return vazio;
+    // Falhar aqui não pode derrubar o bootstrap inteiro — o sistema abre e a
+    // pessoa consegue ler a explicação. Só a primeira linha da mensagem, e
+    // curta: mensagens de erro do Sheets às vezes ecoam conteúdo de célula, e
+    // isto vai para o navegador.
+    const primeiraLinha = String((e && e.message) || e || 'erro desconhecido').split('\n')[0];
+    return indisponivel('FALHA_AO_RESOLVER: ' + primeiraLinha.slice(0, 120));
   }
 }
 

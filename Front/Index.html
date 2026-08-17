@@ -49,24 +49,27 @@
         <li role="button" tabindex="0" title="Dashboard" aria-label="Dashboard" class="sidebar-item active" data-page="dashboard" data-tooltip="Dashboard">
           <span class="material-icons">dashboard</span><span class="sidebar-label">Dashboard</span>
         </li>
-        <li role="button" tabindex="0" title="Novo Atendimento" aria-label="Novo Atendimento" class="sidebar-item" data-page="novoAtendimento" data-pgo5-permissoes="criarAtendimento" data-tooltip="Novo Atendimento">
+        <!-- As permissões de cada tela ficam em AcessoPGO5.PERMISSOES_DA_TELA
+             (fonte única). Repeti-las aqui foi o que deixou o menu fora de
+             sincronia com as telas que ele abre. -->
+        <li role="button" tabindex="0" title="Novo Atendimento" aria-label="Novo Atendimento" class="sidebar-item" data-page="novoAtendimento" data-tooltip="Novo Atendimento">
           <span class="material-icons">add_circle</span><span class="sidebar-label">Novo Atendimento</span>
         </li>
-        <li role="button" tabindex="0" title="Relatórios" aria-label="Relatórios" class="sidebar-item" data-page="relatorios" data-pgo5-permissoes="relatoriosProprios,relatoriosEquipe,relatoriosTodos" data-tooltip="Relatórios">
+        <li role="button" tabindex="0" title="Relatórios" aria-label="Relatórios" class="sidebar-item" data-page="relatorios" data-tooltip="Relatórios">
           <span class="material-icons">description</span><span class="sidebar-label">Relatórios</span>
         </li>
         <!-- Produtividade Equipe (rota técnica: "indicadores", preservada de
              propósito). Quem vê é decidido pelas permissões de produtividade. -->
-        <li role="button" tabindex="0" title="Produtividade Equipe" aria-label="Produtividade Equipe" class="sidebar-item" data-page="indicadores" data-supervisor-only data-pgo5-permissoes="produtividadeEquipe,produtividadeTodos" data-tooltip="Produtividade Equipe">
+        <li role="button" tabindex="0" title="Produtividade Equipe" aria-label="Produtividade Equipe" class="sidebar-item" data-page="indicadores" data-supervisor-only data-tooltip="Produtividade Equipe">
           <span class="material-icons">insights</span><span class="sidebar-label">Produtividade Equipe</span>
         </li>
         <!-- v4.7: Indicadores Operacionais (planilha externa). Rótulo dinâmico
              definido pelo ADM — App.aplicarRotuloIndicOp() atualiza o texto e o
              tooltip a partir do bootstrap. Restrito à supervisão. -->
-        <li role="button" tabindex="0" title="Análise de SAC" aria-label="Análise de SAC" class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-pgo5-permissoes="analiseSac" data-tooltip="Análise de SAC" id="menu-indic-op">
+        <li role="button" tabindex="0" title="Análise de SAC" aria-label="Análise de SAC" class="sidebar-item" data-page="indicadoresOperacionais" data-supervisor-only data-tooltip="Análise de SAC" id="menu-indic-op">
           <span class="material-icons">query_stats</span><span class="sidebar-label" id="menu-indic-op-label">Análise de SAC</span>
         </li>
-        <li role="button" tabindex="0" title="Configurações" aria-label="Configurações" class="sidebar-item" data-page="configuracoes" data-supervisor-only data-pgo5-permissoes="gerenciarFormulario,gerenciarCanais,gerenciarCatalogos,gerenciarEquipe,gerenciarUsuariosTodos,gerenciarCargos,gerenciarNiveis,alterarPermissoes,configurarSistema" data-tooltip="Configurações">
+        <li role="button" tabindex="0" title="Configurações" aria-label="Configurações" class="sidebar-item" data-page="configuracoes" data-supervisor-only data-tooltip="Configurações">
           <span class="material-icons">settings</span><span class="sidebar-label">Configurações</span>
         </li>
       </ul>

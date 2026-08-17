@@ -90,14 +90,12 @@ Pages.configuracoesPGO5 = {
     var self = this;
     container = container || document.getElementById('app');
 
-    // Toda permissão que libera ALGUMA seção precisa estar aqui: sem isso,
-    // quem tem apenas 'configurarSistema' (a permissão do Tombamento) seria
-    // devolvido ao Dashboard e nunca alcançaria a seção que lhe pertence.
-    var permissoesDaTela = ['gerenciarFormulario', 'gerenciarCanais', 'gerenciarCatalogos',
-      'gerenciarEquipe', 'gerenciarUsuariosTodos', 'gerenciarCargos', 'gerenciarNiveis',
-      'alterarPermissoes', 'configurarSistema'];
-    var podeEntrar = permissoesDaTela.some(function(p) { return AcessoPGO5.podeNaInterface(p); });
-    if (!podeEntrar) { App.navigateTo('dashboard'); return; }
+    // Quem tem acesso a QUALQUER seção entra. A lista sai das próprias
+    // seções (AcessoPGO5.permissoesDeConfiguracoes) em vez de ser repetida
+    // aqui: manter a cópia à mão foi o que barrou no Dashboard quem tinha só
+    // 'alterarPermissoes' — a seção Segurança existia para essa pessoa, mas a
+    // porta da tela não a reconhecia. Seção nova passa a valer sozinha.
+    if (!AcessoPGO5.podeVerTela('configuracoes')) { App.navigateTo('dashboard'); return; }
 
     // Estado sempre limpo ao abrir a tela. Sem isso, uma gravação que ficou
     // pelo caminho (o usuário navegou antes da resposta chegar) deixaria a

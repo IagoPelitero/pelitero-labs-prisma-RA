@@ -30,6 +30,125 @@ var AcessoPGO5 = {
   podeNaInterface: function(permissao) {
     var acesso = App.acessoPGO5 || {};
     return (acesso.permissoes || []).indexOf(permissao) !== -1;
+  },
+
+  /**
+   * Permissões que liberam cada tela — FONTE ÚNICA do PGO 5.0.
+   *
+   * POR QUE ESTE MAPA EXISTE
+   * A mesma lista vivia em três lugares: no data-pgo5-permissoes de cada item
+   * do menu (Index.html), na guarda de entrada de cada tela e na definição das
+   * seções de Configurações. Três cópias da mesma regra saem de sincronia — e
+   * saíram: o menu Configurações não listava 'alterarPermissoes', então quem
+   * tinha exatamente essa permissão (e só ela) via a seção Segurança existir
+   * sem nunca conseguir chegar até ela. É a mesma classe de defeito que faz
+   * uma funcionalidade "sumir" para quem tem direito a ela.
+   *
+   * Lista VAZIA = tela livre para qualquer pessoa autenticada (Dashboard).
+   * 'SECOES' = derivada das seções de Configurações, que já declaram a
+   * permissão de cada uma; ver permissoesDeConfiguracoes.
+   *
+   * ⚠️ Isto decide o que APARECE. Quem decide o que acontece é o servidor,
+   * que revalida cada chamada com exigirPermissao_ (Pgo5Permissoes.gs).
+   */
+  PERMISSOES_DA_TELA: {
+    dashboard: [],
+    novoAtendimento: ['criarAtendimento'],
+    relatorios: ['relatoriosProprios', 'relatoriosEquipe', 'relatoriosTodos'],
+    indicadores: ['produtividadeEquipe', 'produtividadeTodos'],
+    indicadoresOperacionais: ['analiseSac'],
+    configuracoes: 'SECOES'
+  },
+
+  /**
+   * Permissões que liberam uma tela.
+   * @param {string} pagina Identificador técnico (data-page).
+   * @returns {string[]} Lista; vazia quando a tela não é restrita.
+   */
+  permissoesDaTela: function(pagina) {
+    var regra = this.PERMISSOES_DA_TELA[pagina];
+    if (regra === 'SECOES') return this.permissoesDeConfiguracoes();
+    return regra || [];
+  },
+
+  /**
+   * União das permissões de todas as seções de Configurações.
+   *
+   * Derivada em tempo de chamada (e não de carga) porque ConfiguracoesPGO5 é
+   * incluído depois deste arquivo. Toda seção nova entra aqui sozinha — que é
+   * exatamente o que impede a lista do menu de envelhecer.
+   *
+   * @returns {string[]} Permissões que dão acesso a alguma seção.
+   */
+  permissoesDeConfiguracoes: function() {
+    var secoes = ((window.Pages || {}).configuracoesPGO5 || {}).SECOES || [];
+    var todas = [];
+    secoes.forEach(function(secao) {
+      (secao.permissoes || []).forEach(function(permissao) {
+        if (todas.indexOf(permissao) === -1) todas.push(permissao);
+      });
+    });
+    return todas;
+  },
+
+  /**
+   * Diz se a interface deve abrir uma tela para o usuário logado.
+   * @param {string} pagina Identificador técnico (data-page).
+   * @returns {boolean} true quando a tela pode ser exibida.
+   */
+  podeVerTela: function(pagina) {
+    var exigidas = this.permissoesDaTela(pagina);
+    if (!exigidas.length) return true;
+    var self = this;
+    return exigidas.some(function(permissao) { return self.podeNaInterface(permissao); });
+  },
+
+  /** Permissões que abrem a EDIÇÃO de um atendimento (qualquer escopo). */
+  PERMISSOES_DE_EDICAO: ['editarProprios', 'editarEquipe', 'editarTodos'],
+
+  /** Permissões que permitem EXCLUIR um atendimento (qualquer escopo). */
+  PERMISSOES_DE_EXCLUSAO: ['excluirProprios', 'excluirEquipe', 'excluirTodos'],
+
+  /**
+   * Diz se a pessoa pode, em ALGUM escopo, executar uma ação sobre
+   * atendimentos. Serve para decidir se o botão aparece.
+   *
+   * Qual REGISTRO ela pode tocar continua sendo decisão do servidor: o
+   * escopo (próprios / equipe / todos) é aplicado lá, a cada gravação. Aqui
+   * só evitamos oferecer um botão que a pessoa nunca conseguiria usar.
+   *
+   * @param {string} acao 'editar' ou 'excluir'.
+   * @returns {boolean} true quando a ação faz sentido para esta pessoa.
+   */
+  podeAgirEmAtendimento: function(acao) {
+    var lista = acao === 'excluir' ? this.PERMISSOES_DE_EXCLUSAO : this.PERMISSOES_DE_EDICAO;
+    var self = this;
+    return lista.some(function(permissao) { return self.podeNaInterface(permissao); });
+  },
+
+  /**
+   * Diz se uma NAVEGAÇÃO pode acontecer.
+   *
+   * ⚠️ UMA ROTA, DUAS AÇÕES
+   * 'novoAtendimento' é a tela de criar E a de editar: o Dashboard abre a
+   * edição por ela, passando o id do atendimento. Cobrar 'criarAtendimento'
+   * na edição tiraria o botão Editar de quem tem só permissão de editar —
+   * pessoa que pode corrigir o próprio atendimento, mas não abrir um novo.
+   * Quem decide é a AÇÃO, não o nome da rota.
+   *
+   * O escopo (próprios / equipe / todos) continua sendo do servidor: ele
+   * recusa a gravação sobre um registro fora do alcance da pessoa.
+   *
+   * @param {string} pagina Identificador técnico (data-page).
+   * @param {string} [idDoRegistro] Preenchido quando a rota abre em edição.
+   * @returns {boolean} true quando a navegação é permitida.
+   */
+  podeAbrirRota: function(pagina, idDoRegistro) {
+    if (pagina === 'novoAtendimento' && idDoRegistro) {
+      var self = this;
+      return this.PERMISSOES_DE_EDICAO.some(function(p) { return self.podeNaInterface(p); });
+    }
+    return this.podeVerTela(pagina);
   }
 };
 

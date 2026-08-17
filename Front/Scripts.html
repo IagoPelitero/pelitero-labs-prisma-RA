@@ -92,6 +92,7 @@ var App = {
         App.renderUser();
         App.applyRoleVisibility();
         App.aplicarNomesTelas();
+        App.avisarSeAcessoIndisponivel();
         if (typeof onSuccess === 'function') onSuccess(result);
       })
       .withFailureHandler(function(error) {
@@ -145,6 +146,28 @@ var App = {
     }
     if (target === 'novo') target = 'novoAtendimento';
     if (!Pages[target]) target = 'dashboard';
+
+    // GUARDA DE ROTA (PGO 5.0). Esconder o item do menu não fecha a porta:
+    // a rota continua alcançável pelo #hash, por um link salvo ou por uma
+    // chamada a navigateTo. Sem esta guarda, quem não tem 'criarAtendimento'
+    // abria o Novo Atendimento, preenchia o formulário inteiro e só descobria
+    // que não podia no momento de salvar. A guarda vale para TODA tela
+    // declarada na fonte única — não só para esta.
+    //
+    // O id é lido das duas formas que o sistema usa para passá-lo, porque
+    // 'novoAtendimento' COM id é edição e responde a outra permissão
+    // (ver AcessoPGO5.podeAbrirRota).
+    //
+    // Continua sendo conforto: o servidor recusa a gravação de quem não tem
+    // a permissão, com ou sem interface (ver exigirPermissao_).
+    var idDaRota = options.id || (typeof params === 'string' ? params : null);
+    if (this.usandoPGO5() && !AcessoPGO5.podeAbrirRota(target, idDaRota)) {
+      if (typeof Components !== 'undefined' && Components.toast) {
+        Components.toast('Você não tem acesso a esta tela.', 'error');
+      }
+      target = 'dashboard';
+      options = {};
+    }
 
     // Antes de sair da tela atual, anota de onde o usuário veio quando ele
     // está ENTRANDO em Configurações. É o que faz o botão Voltar devolver
@@ -301,6 +324,49 @@ var App = {
   /** Descarta o catálogo em memória (usado após alterar Configurações). */
   invalidarFormularioPGO5: function() { this.formularioPGO5 = null; },
 
+  /**
+   * Diz se o resumo de acesso do PGO 5.0 não pôde ser resolvido.
+   *
+   * São dois modos de falha, e os dois chegavam aqui como "lista de
+   * permissões vazia" — indistinguíveis de alguém que realmente não pode nada:
+   *
+   *   indisponivel:true   → o servidor tentou montar o resumo e não conseguiu.
+   *   schema !== 'PGO5'   → o banco é 5.0 mas veio o resumo do 4.x. Acontece
+   *                         quando o projeto foi publicado pela metade
+   *                         (Services.gs novo, Pgo5Permissoes.gs ainda não).
+   *
+   * @returns {boolean} true quando as permissões NÃO são confiáveis.
+   */
+  acessoPGO5Indisponivel: function() {
+    if (!this.usandoPGO5()) return false;
+    var acesso = this.acessoPGO5 || {};
+    return acesso.indisponivel === true ||
+      String(acesso.schema || '').toUpperCase() !== 'PGO5';
+  },
+
+  /**
+   * Avisa, uma vez por sessão, que o acesso não pôde ser resolvido.
+   *
+   * NÃO concede nada: o menu segue fechado, como já estava. O que muda é que
+   * a pessoa (e o suporte) passam a ver O MOTIVO, em vez de um sistema que
+   * silenciosamente perdeu as telas. Recarregar sem entender a causa era o
+   * caminho mais provável — e não resolve nada quando o problema é cadastro.
+   */
+  avisarSeAcessoIndisponivel: function() {
+    if (!this.acessoPGO5Indisponivel() || this._avisouAcessoIndisponivel) return;
+    this._avisouAcessoIndisponivel = true;
+    var motivo = String((this.acessoPGO5 || {}).motivo || 'RESUMO_AUSENTE: o servidor não devolveu as permissões.');
+    if (typeof Components !== 'undefined' && Components.toast) {
+      Components.toast('Não foi possível carregar suas permissões, então nenhuma tela ' +
+        'restrita foi liberada. Informe ao Administrador: ' + motivo, 'error');
+    }
+    if (window.console && console.error) {
+      console.error('[PGO5] Resumo de acesso indisponível — ' + motivo);
+    }
+  },
+
+  _avisouAcessoIndisponivel: false,
+
   // Indica se o usuário logado é ADM (acesso total).
   isAdmin: function() {
     var profile = String((this.user || {}).perfil || '').toLowerCase();
@@ -340,9 +406,14 @@ var App = {
    * o nome esconderia o menu de gente que tem a permissão, e é justamente
    * essa decisão por rótulo que a Etapa 3A elimina.
    *
-   * Cada item do menu declara em data-pgo5-permissoes as permissões que o
-   * liberam (basta UMA). Item sem o atributo é visível para todos os
-   * usuários autenticados — é o caso do Dashboard.
+   * Quem manda é AcessoPGO5.PERMISSOES_DA_TELA — a fonte única. O menu não
+   * repete mais a lista de permissões de cada tela: repetir foi o que deixou
+   * o item Configurações fora de sincronia com as seções que ele abre.
+   * Tela sem permissão declarada é visível para qualquer pessoa autenticada
+   * — é o caso do Dashboard.
+   *
+   * Elementos soltos (fora do menu) continuam declarando o que os libera em
+   * data-pgo5-permissoes: são poucos e não têm data-page para consultar.
    *
    * ⚠️ Isto é conforto visual, não segurança: o servidor revalida cada
    * chamada com exigirPermissao_() (ver Pgo5Permissoes.gs).
@@ -359,7 +430,7 @@ var App = {
 
     var telasPermitidas = {};
     document.querySelectorAll('.sidebar-item').forEach(function(item) {
-      var visivel = podeVer(item);
+      var visivel = AcessoPGO5.podeVerTela(item.getAttribute('data-page'));
       item.style.display = visivel ? '' : 'none';
       telasPermitidas[item.getAttribute('data-page')] = visivel;
     });
