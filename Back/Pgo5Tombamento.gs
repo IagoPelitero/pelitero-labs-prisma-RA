@@ -1286,6 +1286,65 @@ function verificarIntegridadeBuildPGO5() {
   pgo5Afirmar_(r, 'EQUIPE bloqueia quem está fora da árvore recebida',
     pgo5AtendimentoEstaNoEscopo_(atorFalso, deOutro, 'ver', ['000000AA'], 'EQUIPE') === false);
 
+  // ── Constantes compartilhadas entre arquivos ──
+  //
+  // POR QUE ISTO EXISTE
+  // No Apps Script os .gs dividem UM escopo global, mas o deploy é arquivo a
+  // arquivo. Enviar um arquivo e esquecer outro — ou deixar uma cópia velha —
+  // produz um projeto que abre normalmente e só quebra quando a função que
+  // usa a constante ausente é chamada, com um "ReferenceError: X is not
+  // defined" apontando para o arquivo que USA, nunca para o que FALTA. As
+  // checagens abaixo transformam esse erro tardio e enganoso num diagnóstico
+  // que diz qual arquivo republicar.
+  //
+  // O typeof é obrigatório: referenciar direto uma constante ausente lançaria
+  // o mesmo ReferenceError que estamos tentando diagnosticar.
+  r.linhas.push('');
+  r.linhas.push('CONSTANTES COMPARTILHADAS ENTRE ARQUIVOS');
+  const constante = function(nome, arquivo, valor) {
+    pgo5Afirmar_(r, nome + ' disponível (' + arquivo + ')',
+      valor !== undefined && valor !== null,
+      'republique ' + arquivo + ' — sem ela, quem a usa quebra com ReferenceError');
+  };
+  constante('CONFIG', 'Config.gs',
+    typeof CONFIG === 'undefined' ? undefined : CONFIG);
+  constante('PGO5', 'Pgo5.gs',
+    typeof PGO5 === 'undefined' ? undefined : PGO5);
+  constante('COLUMNS_PGO5', 'Pgo5.gs',
+    typeof COLUMNS_PGO5 === 'undefined' ? undefined : COLUMNS_PGO5);
+  constante('PGO5_TIPOS', 'Pgo5Catalogo.gs',
+    typeof PGO5_TIPOS === 'undefined' ? undefined : PGO5_TIPOS);
+  constante('PGO5_TIPOS_CAMPO', 'Pgo5Catalogo.gs',
+    typeof PGO5_TIPOS_CAMPO === 'undefined' ? undefined : PGO5_TIPOS_CAMPO);
+  constante('PGO5_CAMPOS_ESTRUTURAIS', 'Pgo5Catalogo.gs',
+    typeof PGO5_CAMPOS_ESTRUTURAIS === 'undefined' ? undefined : PGO5_CAMPOS_ESTRUTURAIS);
+  constante('PGO5_PERMISSOES', 'Pgo5Permissoes.gs',
+    typeof PGO5_PERMISSOES === 'undefined' ? undefined : PGO5_PERMISSOES);
+  constante('PGO5_TIPOS_CONFIG', 'Pgo5Permissoes.gs',
+    typeof PGO5_TIPOS_CONFIG === 'undefined' ? undefined : PGO5_TIPOS_CONFIG);
+  constante('PGO5_ACOES_AUDITORIA', 'Pgo5Auditoria.gs',
+    typeof PGO5_ACOES_AUDITORIA === 'undefined' ? undefined : PGO5_ACOES_AUDITORIA);
+  constante('PGO5_ENTIDADES_AUDITORIA', 'Pgo5Auditoria.gs',
+    typeof PGO5_ENTIDADES_AUDITORIA === 'undefined' ? undefined : PGO5_ENTIDADES_AUDITORIA);
+  constante('PGO5_PIN_DIGITOS', 'Pgo5Seguranca.gs',
+    typeof PGO5_PIN_DIGITOS === 'undefined' ? undefined : PGO5_PIN_DIGITOS);
+  constante('PGO5_LINKS_PROTEGIDOS', 'Pgo5Seguranca.gs',
+    typeof PGO5_LINKS_PROTEGIDOS === 'undefined' ? undefined : PGO5_LINKS_PROTEGIDOS);
+  constante('PGO5_ABAS_LEGADAS', 'Pgo5Migracao.gs',
+    typeof PGO5_ABAS_LEGADAS === 'undefined' ? undefined : PGO5_ABAS_LEGADAS);
+  constante('PGO5_TIPO_SLA', 'Pgo5Analitico.gs',
+    typeof PGO5_TIPO_SLA === 'undefined' ? undefined : PGO5_TIPO_SLA);
+
+  // As oito chaves de PGO5_TIPOS são o contrato da aba Formulário: um arquivo
+  // desatualizado pode trazer a constante, mas sem um dos tipos.
+  if (typeof PGO5_TIPOS !== 'undefined' && PGO5_TIPOS) {
+    ['CANAL', 'CAMPO', 'OPCAO', 'PRODUTO', 'CATEGORIA', 'SUBCATEGORIA',
+      'STATUS', 'AGUARDANDO'].forEach(function(chave) {
+      pgo5Afirmar_(r, 'PGO5_TIPOS.' + chave + ' presente', !!PGO5_TIPOS[chave],
+        'Pgo5Catalogo.gs está desatualizado');
+    });
+  }
+
   // ── Memória do seed: precisa ser POR PLANILHA ──
   //
   // POR QUE ESTE TESTE EXISTE
@@ -1297,6 +1356,18 @@ function verificarIntegridadeBuildPGO5() {
   // "Sem dados" — sem nenhum erro no log que aponte para a causa.
   r.linhas.push('');
   r.linhas.push('MEMÓRIA DO SEED (por planilha)');
+  // Estas checagens dependem de Pgo5Catalogo.gs. Se ele não estiver publicado,
+  // as constantes acima já apontaram isso — aqui a função apenas registra que
+  // não pôde verificar, em vez de morrer. Um diagnóstico que quebra junto com
+  // o projeto quebrado não diagnostica nada.
+  const temSeedDoCatalogo = typeof pgo5ChaveDaMemoriaDeSeed_ === 'function' &&
+    typeof pgo5LerMemoriaDeSeed_ === 'function' &&
+    typeof PGO5_SEED_APLICADO_ !== 'undefined';
+
+  if (!temSeedDoCatalogo) {
+    pgo5Afirmar_(r, 'memória do seed verificável', false,
+      'Pgo5Catalogo.gs não está publicado ou está desatualizado');
+  } else {
   let idDaBase = '';
   try { idDaBase = String(getSpreadsheet().getId() || ''); } catch (e) { idDaBase = ''; }
   pgo5Afirmar_(r, 'a chave da memória de seed carrega o Id da planilha',
@@ -1325,6 +1396,7 @@ function verificarIntegridadeBuildPGO5() {
     Object.keys(pgo5LerMemoriaDeSeed_(propsSoLegado,
       { CANAL: [], CAMPO: [], STATUS: [] })).length === 0,
     'uma instalação nova herdaria a memória de outra base e nasceria sem catálogo');
+  }
 
   // ── IDs hexadecimais: o tombamento não pode mudar o formato ──
   r.linhas.push('');
