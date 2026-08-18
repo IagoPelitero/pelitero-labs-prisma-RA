@@ -7,11 +7,9 @@
    Tela "Importar Base Legada": traz o histórico de uma planilha do
    sistema antigo (4.x) para dentro do banco PGO 5.0 em produção.
 
-   ⚠️ ISTO NÃO É TOMBAMENTO
-   Tombamento cria um banco novo e roda uma vez. Esta importação
-   ACRESCENTA registros ao banco que já está rodando, e pode ser
-   repetida: cada linha importada leva uma etiqueta, e reimportar a
-   mesma planilha reconhece o que já entrou em vez de duplicar.
+   PODE RODAR MAIS DE UMA VEZ
+   Cada linha importada leva uma etiqueta; reimportar a mesma planilha
+   reconhece o que já entrou em vez de duplicar.
 
    Nada é apagado, limpo ou sobrescrito — ver Pgo5Importacao.gs.
    ============================================================ */

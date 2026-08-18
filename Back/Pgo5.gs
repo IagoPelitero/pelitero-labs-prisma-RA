@@ -340,7 +340,7 @@ function pgo5ValidarCabecalho_(aba, esperado) {
  * SEGURANÇA — o que esta função NUNCA faz:
  *   - não apaga dados, não limpa abas e não exclui abas;
  *   - não substitui cabeçalho existente;
- *   - não converte o banco 4.x (o tombamento é uma etapa própria);
+ *   - não converte dados de outros sistemas (isso é da Importação);
  *   - não cria dados de exemplo (produto/categoria/status nascem vazios).
  *
  * FUNCIONAMENTO EM DOIS PASSOS:
@@ -518,7 +518,7 @@ function pgo5PossuiUsuarios_() {
  * publicado, não há versão nova: só é preciso levar as bases SINTÉTICAS de
  * desenvolvimento do formato antigo para o atual.
  *
- * Isto NÃO é tombamento: não toca em nada do 4.x e só reconhece duas formas
+ * Só reconhece duas formas
  * exatas — a de 15 colunas e a de 17. Qualquer outra estrutura falha e é
  * reportada, nunca "consertada" às cegas.
  */

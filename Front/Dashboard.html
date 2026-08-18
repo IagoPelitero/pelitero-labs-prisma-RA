@@ -19,9 +19,9 @@
    Campos novos adicionados na configuração aparecem automaticamente,
    sem alteração de código (_colunasTabela lê App.formConfig).
 
-   Edição: o botão "Editar" abre um MODAL (abrirEdicao) que reutiliza o
-   AtendimentoForm (NovoAtendimento.html), salva sem recarregar a página
-   e atualiza a tabela mantendo o usuário no Dashboard.
+   Edição: o botão "Editar" abre a tela do formulário dinâmico já no canal
+   salvo do registro — cada canal pergunta campos diferentes, e isso não
+   caberia num modal de campos fixos.
 
    Tudo vem de UMA única chamada ao servidor (getDashboardData em
    Services.gs), para evitar telas de carregamento em sequência.
@@ -1091,112 +1091,16 @@ Pages.dashboard = {
   },
 
   /**
-   * Abre o MODAL de edição do atendimento: carrega os dados completos do
-   * servidor e reutiliza o AtendimentoForm (mesmo formulário da tela
-   * Novo Atendimento). O usuário permanece no Dashboard.
-   * @param {Object} atendimento - Linha da tabela (formato do cliente).
+   * Abre a edição do atendimento na tela do formulário dinâmico.
+   *
+   * Cada canal pergunta campos diferentes, montados a partir da
+   * configuração — não cabe num modal de campos fixos. A tela abre já no
+   * canal salvo do registro.
+   *
+   * @param {Object} atendimento Linha da tabela (formato do cliente).
    */
   abrirEdicao: function(atendimento) {
-    var self = this;
-
-    // BANCO PGO 5.0: o formulário é montado pela configuração do canal, e
-    // cada canal tem campos diferentes — não cabe no modal de campos fixos
-    // do 4.x. A edição abre na tela do motor dinâmico, já no canal salvo.
-    // Lá também não existe justificativa: ela foi removida da edição.
-    if (App.usandoPGO5 && App.usandoPGO5()) {
-      App.navigateTo('novoAtendimento', atendimento.id);
-      return;
-    }
-
-    Components.showLoading('Carregando atendimento...');
-    google.script.run
-      .withSuccessHandler(function(result) {
-        Components.hideLoading();
-        if (!result || !result.atendimento) {
-          Components.toast('Atendimento não encontrado.', 'error');
-          return;
-        }
-        self._renderModalEdicao(result.atendimento);
-      })
-      .withFailureHandler(function(err) {
-        Components.hideLoading();
-        Components.toast('Erro ao carregar atendimento: ' + err.message, 'error');
-      })
-      .getAtendimento(atendimento.id);
-  },
-
-  // Desenha o modal de edição com o formulário completo + justificativa
-  // (obrigatória para auditoria, como na edição em tela cheia).
-  _renderModalEdicao: function(atd) {
-    var self = this;
-    var dd = App.dropdownData || {};
-
-    var body = '<form id="form-atendimento" autocomplete="off">';
-    body += AtendimentoForm.camposHtml(atd, dd);
-    body += '<div class="form-group">';
-    body += '  <label class="form-label" for="campo-justificativa-modal">Justificativa da alteração <span style="color:var(--danger)">*</span></label>';
-    body += '  <textarea id="campo-justificativa-modal" class="form-control" rows="2" placeholder="Informe o motivo da edição (registrado no histórico)..."></textarea>';
-    body += '</div>';
-    body += '</form>';
-
-    Components.modal({
-      title: 'Editar Atendimento — ' + App.escapeHtml(atd.numeroRA || ''),
-      body: body,
-      size: 'xl',
-      confirmText: '💾 Salvar',
-      cancelText: 'Cancelar',
-      onConfirm: function() {
-        // return false mantém o modal aberto (validação/gravação assíncrona).
-        return self._salvarEdicaoModal(atd.id);
-      }
-    });
-
-    // O formulário só existe no DOM depois que o modal foi desenhado.
-    AtendimentoForm.popularCategorias(atd.categoria || '');
-    AtendimentoForm.popularSubcategorias(atd.subcategoria || ''); // v4.6
-    AtendimentoForm.bindFieldEvents(atd.id);
-  },
-
-  /**
-   * Valida e grava a edição feita no modal. Em caso de erro de validação
-   * retorna false (modal permanece aberto, edições preservadas); a
-   * gravação é assíncrona e o modal é fechado apenas no sucesso, com a
-   * tabela atualizada sem recarregar a página.
-   * @param {string} id - Id do atendimento em edição.
-   * @returns {boolean} false para o modal não fechar automaticamente.
-   */
-  _salvarEdicaoModal: function(id) {
-    var self = this;
-    var erros = AtendimentoForm.validar();
-    var campoJust = document.getElementById('campo-justificativa-modal');
-    var justificativa = campoJust ? campoJust.value.trim() : '';
-    if (!justificativa) erros.push('Justificativa é obrigatória para alterações.');
-
-    if (erros.length > 0) {
-      Components.toast(erros.join('\n'), 'danger', 5000);
-      return false;
-    }
-
-    var dados = AtendimentoForm.coletar();
-    Components.showLoading('Salvando atendimento...');
-    google.script.run
-      .withSuccessHandler(function(result) {
-        Components.hideLoading();
-        if (result && result.success) {
-          Components.closeModal();
-          Components.toast('Atendimento atualizado com sucesso!', 'success');
-          self.carregarDados(); // atualiza a tabela mantendo o usuário na tela
-        } else {
-          Components.toast((result && result.message) || 'Erro ao atualizar atendimento.', 'danger');
-        }
-      })
-      .withFailureHandler(function(err) {
-        Components.hideLoading();
-        Components.toast('Erro ao atualizar: ' + err.message, 'danger');
-      })
-      .atualizarAtendimento(id, dados, justificativa);
-
-    return false;
+    App.navigateTo('novoAtendimento', atendimento.id);
   },
 
   /**

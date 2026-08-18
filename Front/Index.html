@@ -139,7 +139,6 @@
   <?!= include('Scripts'); ?>
   <?!= include('Components'); ?>
   <?!= include('Dashboard'); ?>
-  <?!= include('NovoAtendimento'); ?>
   <!-- Motor de formulário dinâmico do PGO 5.0. Carregado depois do
        NovoAtendimento porque a página do 4.x delega para ele quando a
        instalação já está no banco 5.0. -->
@@ -151,17 +150,13 @@
   <!-- Usuários, Cargos e Níveis de Acesso do PGO 5.0. Carregado depois do
        ConfiguracoesPGO5 porque a navegação daquela tela delega para cá. -->
   <?!= include('AcessoPGO5'); ?>
-  <!-- Tombamento do banco 4.x para o PGO 5.0. Carregado depois do AcessoPGO5
-       porque reaproveita o mesmo modelo de seção externa de Configurações e
-       o mesmo fluxo de PIN administrativo. -->
-  <?!= include('TombamentoPGO5'); ?>
-  <!-- Importar Base Legada: traz o histórico do 4.x para dentro do banco
-       que já está em produção. Diferente do Tombamento, pode rodar mais de
-       uma vez sem duplicar. -->
+  <!-- Importar Base Legada: traz o histórico de um sistema anterior para
+       dentro da base atual. Carregado depois do AcessoPGO5 porque reaproveita
+       o mesmo modelo de seção externa de Configurações e o mesmo fluxo de
+       PIN administrativo. -->
   <?!= include('ImportacaoPGO5'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>
-  <?!= include('Configuracoes'); ?>
 </body>
 </html>

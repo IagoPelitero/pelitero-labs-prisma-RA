@@ -306,7 +306,7 @@ function pgo5Rotulo_(mapa, id, vazio) {
  * as opções de "Aguardando Retorno" e os campos dos formulários iniciais.
  *
  * NÃO cria produto, categoria, subcategoria, cliente, CPF nem atendimento —
- * esses dados vêm da operação (ou do tombamento, na etapa própria).
+ * esses dados vêm da operação.
  *
  * IDEMPOTENTE E NÃO INTRUSIVO: cada item é identificado por Tipo + Nome. Se
  * já existir, é deixado exatamente como está — inclusive se o ADM tiver
@@ -319,12 +319,12 @@ function pgo5Rotulo_(mapa, id, vazio) {
  *
  * ⚠️ ESSA MEMÓRIA É POR PLANILHA, E ISSO É ESSENCIAL
  * Script Properties pertencem ao PROJETO do Apps Script, não à planilha. O
- * mesmo projeto pode ser apontado para outra planilha (configurarPlanilha, ou
- * o destino novo de um tombamento). Com uma chave única, a memória da base
- * antiga valeria para a base nova: o seed concluiria que "já semeou tudo" e a
- * instalação nasceria com ZERO canais, campos e status — Novo Atendimento
- * sem canal para escolher, e todo atendimento existente exibindo "Sem dados"
- * onde deveria aparecer o rótulo. Por isso a chave carrega o Id da planilha.
+ * mesmo projeto pode ser apontado para outra planilha (configurarPlanilha).
+ * Com uma chave única, a memória da base antiga valeria para a base nova: o
+ * seed concluiria que "já semeou tudo" e a instalação nasceria com ZERO
+ * canais, campos e status — Novo Atendimento sem canal para escolher, e todo
+ * atendimento existente exibindo "Sem dados" onde deveria aparecer o rótulo.
+ * Por isso a chave carrega o Id da planilha.
  */
 
 /**

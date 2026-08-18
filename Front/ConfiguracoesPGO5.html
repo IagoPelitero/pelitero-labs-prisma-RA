@@ -51,12 +51,9 @@ Pages.configuracoesPGO5 = {
       permissoes: ['gerenciarCargos', 'gerenciarNiveis'] },
     { tipo: 'SEGURANCA', label: 'Segurança', icone: 'lock', externa: 'segurancaPGO5',
       permissoes: ['alterarPermissoes'] },
-    // Tombamento do banco 4.x. Fica por último de propósito: é uma operação
-    // de instalação, executada uma única vez, e não parte da rotina.
-    { tipo: 'TOMBAMENTO', label: 'Tombamento', icone: 'swap_horiz', externa: 'tombamentoPGO5',
-      permissoes: ['configurarSistema'] },
-    // Importar Base Legada: acrescenta o histórico do sistema antigo ao
-    // banco atual. Ao contrário do Tombamento, pode ser repetida.
+    // Importar Base Legada: traz o histórico de um sistema anterior para
+    // dentro da base atual. Fica por último por ser uma operação pontual,
+    // fora da rotina — mas pode ser repetida quantas vezes for preciso.
     { tipo: 'IMPORTACAO', label: 'Importar Base Legada', icone: 'file_download',
       externa: 'importacaoPGO5', permissoes: ['configurarSistema'] }
   ],
@@ -518,4 +515,8 @@ Pages.configuracoesPGO5 = {
     run[funcao].apply(run, args);
   }
 };
+
+/* Mesmo caso de novoAtendimento: a rota "configuracoes" já existia e
+   continua valendo — quem responde por ela agora é esta tela. */
+Pages.configuracoes = Pages.configuracoesPGO5;
 </script>

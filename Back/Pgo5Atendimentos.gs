@@ -108,11 +108,11 @@ function pgo5PadroesDoSistema_(catalogo, atual) {
       : pgo5HojeEmSaoPaulo_(),
     // Na edição vale o status JÁ GRAVADO.
     //
-    // ⚠️ E quando não há nenhum? A base de produção veio de um tombamento e
-    // tem registros antigos sem StatusId. Sem este recuo, abrir um desses e
-    // salvar era recusado com «Informe "Status"» — o analista via o erro de
-    // um campo em que não tocou, e não tinha como corrigir o registro. Aqui
-    // o vazio recebe Pendente; um status já gravado nunca é substituído.
+    // ⚠️ E quando não há nenhum? Existem registros antigos na base sem
+    // StatusId. Sem este recuo, abrir um desses e salvar era recusado com
+    // «Informe "Status"» — o analista via o erro de um campo em que não
+    // tocou, e não tinha como corrigir o registro. Aqui o vazio recebe
+    // Pendente; um status já gravado nunca é substituído.
     status: atual
       ? (String(atual.StatusId || '').trim() || pgo5IdDoStatusPendente_(catalogo))
       : pgo5IdDoStatusPendente_(catalogo)
@@ -504,6 +504,14 @@ function pgo5MontarAtendimento_(canalId, valores, catalogo, padroes) {
     if (!r.ok) { erros.push(r.erro); return; }
 
     if (campo.estrutural) {
+      // ⚠️ ID ESTRUTURAL PRECISA EXISTIR NO CATÁLOGO.
+      // Estes campos guardam um Id, não um texto. Um Id inventado passava
+      // direto e era gravado: o atendimento aparecia com "Sem dados" na
+      // coluna e ficava fora de qualquer filtro por aquele campo — um
+      // registro que existe mas ninguém encontra. A conferência acontece
+      // aqui porque é onde o catálogo já está em mãos.
+      const erroDeReferencia = pgo5ConferirReferenciaEstrutural_(campo, r.valor, catalogo);
+      if (erroDeReferencia) { erros.push(erroDeReferencia); return; }
       estrutural[campo.colunaEstrutural] = r.valor;
     } else {
       dinamicos.push({
@@ -605,6 +613,44 @@ function aplicarRegraDeAguardandoRetorno_(estrutural, atendimentoAtual, catalogo
 // ============================================================================
 
 /**
+ * Confere se o Id de um campo estrutural existe no catálogo.
+ *
+ * Vale só para os campos que REFERENCIAM catálogo (produto, categoria,
+ * subcategoria, status, aguardando). Cliente, CPF e Protocolo são texto
+ * digitado e não têm o que conferir; responsável é resolvido à parte, contra
+ * a aba Usuários.
+ *
+ * @param {Object} campo Campo do catálogo.
+ * @param {*} valor Valor já normalizado.
+ * @param {Object} catalogo Catálogo lido uma vez pelo chamador.
+ * @returns {string} Mensagem de erro, ou '' quando está tudo certo.
+ */
+function pgo5ConferirReferenciaEstrutural_(campo, valor, catalogo) {
+  const tipoDoCampo = PGO5_REFERENCIA_ESTRUTURAL_[campo.nome];
+  if (!tipoDoCampo) return '';
+
+  const id = String(valor || '').trim();
+  if (!id) return '';        // vazio é ausência, tratada pela obrigatoriedade
+
+  const existe = (catalogo[tipoDoCampo] || []).some(function(registro) {
+    return String(registro.Id || '').trim() === id;
+  });
+  return existe ? '' : 'Opção inválida em "' + (campo.rotulo || campo.nome) + '".';
+}
+
+/**
+ * De qual tipo do catálogo vem o Id de cada campo estrutural.
+ * Campos fora deste mapa não referenciam catálogo.
+ */
+const PGO5_REFERENCIA_ESTRUTURAL_ = {
+  produto: PGO5_TIPOS.PRODUTO,
+  categoria: PGO5_TIPOS.CATEGORIA,
+  subcategoria: PGO5_TIPOS.SUBCATEGORIA,
+  status: PGO5_TIPOS.STATUS,
+  aguardandoRetorno: PGO5_TIPOS.AGUARDANDO
+};
+
+/**
  * Cria um atendimento no PGO 5.0.
  *
  * ATOMICIDADE: o atendimento e todos os seus valores dinâmicos são gravados
@@ -629,13 +675,16 @@ function criarAtendimentoPGO5(dados) {
     pgo5PadroesDoSistema_(catalogo, null));
   if (montado.erros.length > 0) throw new Error(montado.erros.join(' '));
 
-  // Atendimento novo não tem estado anterior: o status efetivo é o do
-  // formulário. Ver aplicarRegraDeAguardandoRetorno_.
-  aplicarRegraDeAguardandoRetorno_(montado.estrutural, null, catalogo);
   // A data existe mesmo quando o canal não a pergunta, e o status inicial é
   // Pendente mesmo quando o canal não oferece o campo Status.
   pgo5GarantirDataDeAbertura_(montado.estrutural, null);
   pgo5GarantirStatusInicial_(montado.estrutural, catalogo);
+
+  // ⚠️ A REGRA DO AGUARDANDO VEM DEPOIS DO STATUS INICIAL, E A ORDEM IMPORTA.
+  // Ela decide olhando o status efetivo: rodando antes, num canal que não
+  // pergunta o Status o campo ainda estaria vazio, a regra concluiria "não é
+  // Pendente" e apagaria um Aguardando que o analista acabou de informar.
+  aplicarRegraDeAguardandoRetorno_(montado.estrutural, null, catalogo);
 
   const responsavelId = pgo5ResolverResponsavel_(ator, entrada.responsavelId ||
     montado.estrutural.ResponsavelId);
