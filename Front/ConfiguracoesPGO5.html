@@ -54,7 +54,11 @@ Pages.configuracoesPGO5 = {
     // Tombamento do banco 4.x. Fica por último de propósito: é uma operação
     // de instalação, executada uma única vez, e não parte da rotina.
     { tipo: 'TOMBAMENTO', label: 'Tombamento', icone: 'swap_horiz', externa: 'tombamentoPGO5',
-      permissoes: ['configurarSistema'] }
+      permissoes: ['configurarSistema'] },
+    // Importar Base Legada: acrescenta o histórico do sistema antigo ao
+    // banco atual. Ao contrário do Tombamento, pode ser repetida.
+    { tipo: 'IMPORTACAO', label: 'Importar Base Legada', icone: 'file_download',
+      externa: 'importacaoPGO5', permissoes: ['configurarSistema'] }
   ],
 
   /**

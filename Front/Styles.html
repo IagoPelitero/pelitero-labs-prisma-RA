@@ -1371,70 +1371,51 @@ body[data-theme="dark"] .header-title {
 .pgo5-header-compacto { margin-bottom: 10px; }
 .pgo5-header-compacto .page-title { font-size: 20px; }
 
-/* GRADE DO FORMULÁRIO — 12 COLUNAS, LINHAS QUE FECHAM.
+/* LAYOUT DO FORMULÁRIO — OS CAMPOS PREENCHEM A LINHA SOZINHOS.
 
-   Antes cada campo ocupava uma coluna inteira e os curtos (Data, CPF)
-   deixavam um vão à direita: a tela ficava com buracos e o olho perdia o
-   alinhamento entre uma linha e outra. Com 12 colunas, cada campo recebe a
-   fração que o seu conteúdo pede e as linhas FECHAM certinho:
+   Era uma grade de 12 colunas com um span fixo por campo. Ficava perfeita
+   no canal completo, mas cada canal pergunta o que quiser: o SAC Reclamação
+   tem 5 campos, e os spans somavam 9 de 12 — sobrava um quarto da linha
+   vazio à direita, com cara de tela inacabada.
 
-     Data 2  | Protocolo 3 | Cliente 4 | CPF 3        = 12
-     Produto 4       | Categoria 4    | Subcategoria 4 = 12
-     Status 4        | Aguardando 4   | Responsável 4  = 12
-     Observações ................................. 12 = 12
+   Flex resolve na raiz: cada campo declara uma largura BASE e o quanto pode
+   crescer. O que sobra na linha é distribuído entre os campos que crescem,
+   então a linha fecha com qualquer combinação — inclusive nos canais que o
+   ADM criar depois, que ninguém previu aqui.
 
-   O agrupamento acompanha o sentido do preenchimento — identificação,
-   classificação, destino — e é o que dá a leitura em blocos.
-   Campo criado pelo ADM que não esteja na lista cai no padrão de 4 (um
-   terço), então um formulário customizado continua alinhado. */
+     campos curtos (Data, CPF, Protocolo) → base pequena, NÃO crescem;
+     demais                               → base de 240px e crescem;
+     textarea                             → linha inteira.
+*/
 .pgo5-grid {
-  display: grid; gap: 10px 14px;
-  grid-template-columns: 1fr;
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-start;
 }
 
-/* Duas colunas no notebook estreito: metade da tela por campo. */
-@media (min-width: 620px) and (max-width: 999px) {
-  .pgo5-grid { grid-template-columns: repeat(2, 1fr); }
-  .pgo5-grid .form-group[data-campo="observacoes"] { grid-column: 1 / -1; }
-}
+/* min-width: 0 é o que permite o campo encolher abaixo do conteúdo — sem
+   ele o flex usa o tamanho intrínseco e estoura a linha. */
+.pgo5-grid .form-group { flex: 1 1 240px; min-width: 0; margin-bottom: 0; }
 
-@media (min-width: 1000px) {
-  .pgo5-grid { grid-template-columns: repeat(12, 1fr); }
+/* Comprimento conhecido e pequeno: ocupam o que precisam e cedem o resto.
+   Esticá-los criava caixas enormes para dez caracteres. */
+.pgo5-grid .form-group[data-campo="dataAbertura"] { flex: 0 1 150px; }
+.pgo5-grid .form-group[data-campo="protocolo"]    { flex: 0 1 190px; }
+.pgo5-grid .form-group[data-campo="cpf"]          { flex: 0 1 190px; }
 
-  /* Padrão: um terço da linha. */
-  .pgo5-grid .form-group { grid-column: span 4; }
-
-  /* Identificação — a linha que o analista digita primeiro. */
-  .pgo5-grid .form-group[data-campo="dataAbertura"] { grid-column: span 2; }
-  .pgo5-grid .form-group[data-campo="protocolo"]    { grid-column: span 3; }
-  .pgo5-grid .form-group[data-campo="cpf"]          { grid-column: span 3; }
-  .pgo5-grid .form-group[data-campo="cliente"]      { grid-column: span 4; }
-
-  /* Texto corrido ocupa a linha inteira. */
-  .pgo5-grid .form-group[data-campo="observacoes"] { grid-column: 1 / -1; }
-}
-
-.pgo5-grid .form-group { margin-bottom: 0; }
+/* Texto corrido ocupa a linha inteira — vale para Observações, Resumo e
+   qualquer campo de texto longo que o ADM criar. */
+.pgo5-grid .form-group:has(textarea) { flex: 1 1 100%; }
+.pgo5-grid .form-group[data-campo="observacoes"] { flex: 1 1 100%; }
 
 .pgo5-grid .form-label {
   font-size: 11.5px; margin-bottom: 3px; letter-spacing: .3px;
 }
 
-.pgo5-grid .form-control { padding: 7px 10px; font-size: 14px; }
+.pgo5-grid .form-control { padding: 7px 10px; font-size: 14px; width: 100%; }
 
-/* Todo controle preenche a fatia que a grade lhe deu. O tamanho de cada
-   campo é decidido pelo span (acima), não por um teto em pixels: assim a
-   caixa termina exatamente onde a coluna termina e as linhas ficam
-   alinhadas de cima a baixo. */
-.pgo5-grid .form-control { width: 100%; }
-
-/* Observações ocupa a linha inteira: é texto corrido e fica ilegível
-   espremido numa coluna estreita. O textarea segue baixo — 2 linhas — e
-   cresce quando o analista precisa. */
-.pgo5-grid .form-group[data-campo="observacoes"] { grid-column: 1 / -1; }
 .pgo5-grid textarea.form-control { min-height: 52px; resize: vertical; }
-
 
 .pgo5-acoes {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

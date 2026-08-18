@@ -155,6 +155,10 @@
        porque reaproveita o mesmo modelo de seção externa de Configurações e
        o mesmo fluxo de PIN administrativo. -->
   <?!= include('TombamentoPGO5'); ?>
+  <!-- Importar Base Legada: traz o histórico do 4.x para dentro do banco
+       que já está em produção. Diferente do Tombamento, pode rodar mais de
+       uma vez sem duplicar. -->
+  <?!= include('ImportacaoPGO5'); ?>
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>

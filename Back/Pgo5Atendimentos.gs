@@ -106,9 +106,16 @@ function pgo5PadroesDoSistema_(catalogo, atual) {
     dataAbertura: atual
       ? (pgo5DataComoTextoCurto_(atual.DataAbertura) || pgo5HojeEmSaoPaulo_())
       : pgo5HojeEmSaoPaulo_(),
-    // Na edição não há status padrão: o que vale é o que já está gravado,
-    // aplicado depois por pgo5GarantirStatusInicial_.
-    status: atual ? String(atual.StatusId || '').trim() : pgo5IdDoStatusPendente_(catalogo)
+    // Na edição vale o status JÁ GRAVADO.
+    //
+    // ⚠️ E quando não há nenhum? A base de produção veio de um tombamento e
+    // tem registros antigos sem StatusId. Sem este recuo, abrir um desses e
+    // salvar era recusado com «Informe "Status"» — o analista via o erro de
+    // um campo em que não tocou, e não tinha como corrigir o registro. Aqui
+    // o vazio recebe Pendente; um status já gravado nunca é substituído.
+    status: atual
+      ? (String(atual.StatusId || '').trim() || pgo5IdDoStatusPendente_(catalogo))
+      : pgo5IdDoStatusPendente_(catalogo)
   };
 }
 
