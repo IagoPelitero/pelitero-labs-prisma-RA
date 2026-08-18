@@ -818,11 +818,7 @@ Pages.dashboard = {
    * @param {string} texto Texto de entrada.
    * @returns {string} Texto normalizado.
    */
-  _semAcento: function(texto) {
-    return String(texto === undefined || texto === null ? '' : texto)
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .trim().toLowerCase();
-  },
+  _semAcento: function(texto) { return App.semAcento(texto); },
 
   /**
    * Compara o status de um atendimento com um nome técnico.

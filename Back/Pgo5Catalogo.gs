@@ -382,23 +382,39 @@ function pgo5LerMemoriaDeSeed_(props, catalogo) {
  * "Resumo" é dinâmico de propósito: não existe coluna Resumo em Atendimentos.
  * @returns {Object[]} Canais com seus campos.
  */
+/**
+ * O FORMULÁRIO PADRÃO DA OPERAÇÃO.
+ *
+ * É o conjunto que o canal Reclame Aqui usa, e serve de ponto de partida
+ * para qualquer canal — inclusive os que o ADM criar depois. Antes, um canal
+ * novo nascia SEM campo nenhum e caía direto na tela "este canal ainda não
+ * possui formulário configurado": quem acabou de criar o canal precisava
+ * cadastrar onze campos à mão antes de registrar o primeiro atendimento.
+ *
+ * Nasce completo e o ADM tira o que não usa: em Configurações → Campos cada
+ * um pode ser desativado (deixa de aparecer no formulário, sem apagar o
+ * histórico de quem já respondeu) ou excluído de vez.
+ *
+ * @returns {Object[]} Lista de campos, na ordem em que aparecem na tela.
+ */
+function pgo5FormularioPadrao_() {
+  return [
+    { nome: 'dataAbertura', rotulo: 'Data', tipo: 'date', obrigatorio: true },
+    { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'protocolo', obrigatorio: true, placeholder: 'Somente números' },
+    { nome: 'cliente', rotulo: 'Nome do Cliente', tipo: 'text', obrigatorio: true },
+    { nome: 'cpf', rotulo: 'CPF', tipo: 'cpf', obrigatorio: true, placeholder: 'Somente números' },
+    { nome: 'produto', rotulo: 'Produto', tipo: 'select', obrigatorio: false },
+    { nome: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false },
+    { nome: 'subcategoria', rotulo: 'Subcategoria', tipo: 'select', obrigatorio: false },
+    { nome: 'status', rotulo: 'Status', tipo: 'select', obrigatorio: true },
+    { nome: 'aguardandoRetorno', rotulo: 'Aguardando Retorno de', tipo: 'select', obrigatorio: false },
+    { nome: 'responsavel', rotulo: 'Responsável', tipo: 'select', obrigatorio: false },
+    { nome: 'observacoes', rotulo: 'Observações', tipo: 'textarea', obrigatorio: false }
+  ];
+}
+
 function pgo5DefinicaoInicial_() {
-  // Campos comuns aos dois canais que já existem na operação.
-  const camposOperacionais = function() {
-    return [
-      { nome: 'dataAbertura', rotulo: 'Data', tipo: 'date', obrigatorio: true },
-      { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'protocolo', obrigatorio: true, placeholder: 'Somente números' },
-      { nome: 'cliente', rotulo: 'Nome do Cliente', tipo: 'text', obrigatorio: true },
-      { nome: 'cpf', rotulo: 'CPF', tipo: 'cpf', obrigatorio: true, placeholder: 'Somente números' },
-      { nome: 'produto', rotulo: 'Produto', tipo: 'select', obrigatorio: false },
-      { nome: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false },
-      { nome: 'subcategoria', rotulo: 'Subcategoria', tipo: 'select', obrigatorio: false },
-      { nome: 'status', rotulo: 'Status', tipo: 'select', obrigatorio: true },
-      { nome: 'aguardandoRetorno', rotulo: 'Aguardando Retorno de', tipo: 'select', obrigatorio: false },
-      { nome: 'responsavel', rotulo: 'Responsável', tipo: 'select', obrigatorio: false },
-      { nome: 'observacoes', rotulo: 'Observações', tipo: 'textarea', obrigatorio: false }
-    ];
-  };
+  const camposOperacionais = pgo5FormularioPadrao_;
 
   return [
     { nome: 'Reclame Aqui', campos: camposOperacionais() },
@@ -697,7 +713,52 @@ function salvarItemCatalogoPGO5(tipo, dados, id) {
   }
   if (!linha.Ordem) linha.Ordem = pgo5ProximaOrdem_(t, pai || linha.CanalId);
   const novo = pgo5Inserir(PGO5.SHEET_NAMES.FORMULARIO, linha);
+
+  // CANAL NOVO JÁ NASCE UTILIZÁVEL.
+  // Sem isto ele vinha sem campo algum, e o Novo Atendimento parava em
+  // "este canal ainda não possui formulário configurado" — o ADM tinha de
+  // cadastrar onze campos antes do primeiro registro. Agora recebe o mesmo
+  // formulário da operação e o ADM desativa ou exclui o que não usar.
+  if (t === PGO5_TIPOS.CANAL) {
+    pgo5CriarFormularioPadraoDoCanal_(String(novo.Id || ''));
+  }
+
   return { success: true, id: String(novo.Id || '') };
+}
+
+/**
+ * Cria o formulário padrão para um canal recém-criado.
+ *
+ * Silencioso por escolha: se algum campo falhar, o canal já existe e
+ * continua editável à mão. Derrubar a criação do canal inteiro por causa de
+ * um campo seria pior do que entregá-lo com o formulário incompleto.
+ *
+ * @param {string} canalId Id do canal recém-criado.
+ * @returns {number} Quantos campos foram criados.
+ */
+function pgo5CriarFormularioPadraoDoCanal_(canalId) {
+  if (!canalId) return 0;
+  let criados = 0;
+  pgo5FormularioPadrao_().forEach(function(campo, indice) {
+    try {
+      pgo5Inserir(PGO5.SHEET_NAMES.FORMULARIO, {
+        Tipo: PGO5_TIPOS.CAMPO,
+        Nome: campo.nome,
+        Rotulo: campo.rotulo,
+        TipoCampo: campo.tipo,
+        CanalId: canalId,
+        Obrigatorio: !!campo.obrigatorio,
+        Ativo: true,
+        Ordem: indice + 1,
+        Placeholder: campo.placeholder || '',
+        ValorPadrao: ''
+      });
+      criados++;
+    } catch (e) {
+      Logger.log('[PGO5] Campo padrão "' + campo.nome + '" não criado: ' + e.message);
+    }
+  });
+  return criados;
 }
 
 /**

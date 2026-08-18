@@ -28,6 +28,166 @@
  */
 
 // ============================================================================
+// DATA DE ABERTURA — REGRA DO SISTEMA
+// ============================================================================
+
+/**
+ * Nome técnico do campo que registra quando o atendimento entrou.
+ *
+ * É uma REGRA DO SISTEMA, não uma configuração do canal: mesmo que o ADM
+ * remova o campo do formulário, a coluna DataAbertura continua sendo
+ * preenchida. Um atendimento sem data de abertura não é ordenável, não entra
+ * em filtro de período e não aparece direito em nenhum relatório.
+ */
+const PGO5_CAMPO_DATA_ABERTURA_ = 'dataAbertura';
+
+/** Nome técnico do campo de status do atendimento. */
+const PGO5_CAMPO_STATUS_ = 'status';
+
+/** Fuso oficial da operação. O servidor do Apps Script roda em UTC. */
+const PGO5_FUSO_OFICIAL_ = 'America/Sao_Paulo';
+
+/**
+ * O dia de HOJE no fuso oficial da operação, como 'YYYY-MM-DD'.
+ *
+ * ⚠️ POR QUE NÃO DÁ PARA USAR new Date() DIRETO
+ * O Apps Script executa em UTC. São Paulo está 3 horas atrás, então entre
+ * 21:00 e 23:59 de São Paulo o servidor JÁ ESTÁ no dia seguinte. Usar a data
+ * do servidor faria o sistema recusar como "futura" a data de hoje que o
+ * analista vê no relógio dele — todo fim de expediente, todo dia.
+ *
+ * @returns {string} Ex.: '2026-08-17'.
+ */
+function pgo5HojeEmSaoPaulo_() {
+  return Utilities.formatDate(new Date(), PGO5_FUSO_OFICIAL_, 'yyyy-MM-dd');
+}
+
+/**
+ * Diz se 'YYYY-MM-DD' é um dia que existe no calendário.
+ *
+ * O formato passa no teste de expressão regular mesmo quando o dia não
+ * existe ('2026-02-31', '2026-13-01'). Sem esta checagem, o valor seria
+ * gravado e só quebraria depois, na hora de ordenar ou filtrar.
+ *
+ * @param {string} texto Data no formato ISO curto.
+ * @returns {boolean} true quando a data existe de fato.
+ */
+function pgo5DataDeCalendarioEhReal_(texto) {
+  const partes = String(texto).split('-');
+  const ano = Number(partes[0]);
+  const mes = Number(partes[1]);
+  const dia = Number(partes[2]);
+  if (!ano || !mes || !dia || mes < 1 || mes > 12 || dia < 1 || dia > 31) return false;
+  // Meses têm comprimentos diferentes e fevereiro muda com o ano bissexto;
+  // deixar o próprio calendário responder evita reimplementar essa conta.
+  const data = new Date(Date.UTC(ano, mes - 1, dia));
+  return data.getUTCFullYear() === ano &&
+    data.getUTCMonth() === mes - 1 &&
+    data.getUTCDate() === dia;
+}
+
+/**
+ * Padrões que o SISTEMA garante, independentemente do que o canal pergunta.
+ *
+ * Data de abertura e Status inicial são regra do produto, não configuração:
+ * um atendimento sem data não entra em relatório, e um sem status não entra
+ * em fila de trabalho. Os dois são resolvidos ANTES da checagem de campo
+ * obrigatório — senão a gravação seria recusada por falta de um valor que o
+ * próprio sistema sabe preencher.
+ *
+ * @param {Object} [catalogo] Catálogo já lido.
+ * @param {Object} [atual] Registro existente, quando é edição.
+ * @returns {Object} { dataAbertura, status }.
+ */
+function pgo5PadroesDoSistema_(catalogo, atual) {
+  return {
+    // Criação: hoje. Edição: a data já gravada — registro histórico não
+    // muda sozinho.
+    dataAbertura: atual
+      ? (pgo5DataComoTextoCurto_(atual.DataAbertura) || pgo5HojeEmSaoPaulo_())
+      : pgo5HojeEmSaoPaulo_(),
+    // Na edição não há status padrão: o que vale é o que já está gravado,
+    // aplicado depois por pgo5GarantirStatusInicial_.
+    status: atual ? String(atual.StatusId || '').trim() : pgo5IdDoStatusPendente_(catalogo)
+  };
+}
+
+/**
+ * Id do status cujo NOME TÉCNICO é "pendente".
+ *
+ * O ADM pode renomear o rótulo para qualquer coisa; o Nome é o contrato.
+ *
+ * @param {Object} [catalogo] Catálogo já lido.
+ * @returns {string} Id, ou '' quando a instalação não tem esse status.
+ */
+function pgo5IdDoStatusPendente_(catalogo) {
+  const cat = catalogo || pgo5CatalogoBruto_();
+  const pendente = (cat[PGO5_TIPOS.STATUS] || []).find(function(registro) {
+    return normalizeText_(registro.Nome) === 'pendente' && isTrue_(registro.Ativo);
+  });
+  return pendente ? String(pendente.Id || '').trim() : '';
+}
+
+/**
+ * Garante que um atendimento novo nasça no status técnico "Pendente".
+ *
+ * ⚠️ IDENTIFICADO PELO NOME TÉCNICO, NUNCA PELO RÓTULO
+ * O ADM pode renomear "Pendente" para "Aguardando Análise Interna" a
+ * qualquer momento — o Rotulo é apresentação, o Nome é contrato. Procurar
+ * pelo texto exibido faria o status inicial deixar de ser encontrado no dia
+ * em que alguém reescrevesse a lista.
+ *
+ * Se o canal não pergunta o Status (ou a instalação não tem um status
+ * chamado Pendente), o campo fica como veio: forçar um Id inventado seria
+ * pior do que deixar a ausência visível.
+ *
+ * @param {Object} estrutural Colunas já montadas para a aba Atendimentos.
+ * @param {Object} [catalogo] Catálogo já lido, quando disponível.
+ */
+function pgo5GarantirStatusInicial_(estrutural, catalogo) {
+  if (String(estrutural.StatusId || '').trim()) return;
+
+  const id = pgo5IdDoStatusPendente_(catalogo);
+  if (id) estrutural.StatusId = id;
+}
+
+/**
+ * Garante que o atendimento tenha DataAbertura.
+ *
+ * Na CRIAÇÃO sem data informada, assume hoje (fuso oficial) — é o caso do
+ * canal cujo formulário não pergunta a data. Na EDIÇÃO, preserva o que já
+ * estava gravado: registro histórico não muda sozinho.
+ *
+ * @param {Object} estrutural Colunas já montadas para a aba Atendimentos.
+ * @param {Object} [atual] Registro existente, quando é edição.
+ */
+function pgo5DataComoTextoCurto_(valor) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  if (valor instanceof Date) {
+    return Utilities.formatDate(valor, PGO5_FUSO_OFICIAL_, 'yyyy-MM-dd');
+  }
+  const texto = String(valor).trim();
+  // Valores gravados como ISO completo ('2025-03-10T03:00:00.000Z') carregam
+  // a hora junto; só a parte do dia interessa para comparar e reexibir.
+  const casa = texto.match(/^(d{4}-d{2}-d{2})/);
+  return casa ? casa[1] : texto;
+}
+
+/**
+ * Garante que o atendimento tenha DataAbertura.
+ *
+ * @param {Object} estrutural Colunas já montadas para a aba Atendimentos.
+ * @param {Object} [atual] Registro existente, quando é edição.
+ */
+function pgo5GarantirDataDeAbertura_(estrutural, atual) {
+  const informada = String(estrutural.DataAbertura || '').trim();
+  if (informada) return;
+
+  const jaGravada = atual ? String(atual.DataAbertura || '').trim() : '';
+  estrutural.DataAbertura = jaGravada || pgo5HojeEmSaoPaulo_();
+}
+
+// ============================================================================
 // VALIDAÇÃO E NORMALIZAÇÃO POR TIPO DE CAMPO
 // ============================================================================
 
@@ -45,7 +205,7 @@
  * @param {*} valor - Valor cru vindo do formulário.
  * @returns {Object} { ok, valor, erro }.
  */
-function pgo5NormalizarValorCampo_(campo, valor) {
+function pgo5NormalizarValorCampo_(campo, valor, padroes) {
   const rotulo = campo.rotulo || campo.nome;
   const tipo = campo.tipo;
 
@@ -56,6 +216,29 @@ function pgo5NormalizarValorCampo_(campo, valor) {
     (Array.isArray(bruto) && bruto.length === 0);
 
   if (vazio && campo.valorPadrao !== '') bruto = campo.valorPadrao;
+
+  // A DATA DE ABERTURA TEM PADRÃO PRÓPRIO: HOJE.
+  // Ela é regra do sistema, não configuração do canal — não pode faltar só
+  // porque o formulário não perguntou ou porque a chamada veio sem ela. O
+  // padrão é aplicado ANTES da checagem de obrigatoriedade, senão a
+  // gravação seria recusada por ausência de um valor que o sistema sabe
+  // preencher sozinho.
+  //
+  // ⚠️ O PADRÃO VEM DO CONTEXTO, E ISSO É O QUE PROTEGE O HISTÓRICO:
+  // na criação é HOJE; na edição é a data JÁ GRAVADA no registro. Assumir
+  // 'hoje' também na edição reescreveria a data de abertura de um
+  // atendimento antigo toda vez que alguém salvasse uma correção de texto —
+  // alteração silenciosa de registro histórico.
+  const semValor = bruto === undefined || bruto === null ||
+    (typeof bruto === 'string' && bruto.trim() === '');
+  const doSistema = padroes || {};
+  if (semValor && campo.nome === PGO5_CAMPO_DATA_ABERTURA_ && campo.tipo === 'date') {
+    bruto = doSistema.dataAbertura || pgo5HojeEmSaoPaulo_();
+  }
+  // Status inicial: Pendente, pelo Nome técnico (ver pgo5PadroesDoSistema_).
+  if (semValor && campo.nome === PGO5_CAMPO_STATUS_ && doSistema.status) {
+    bruto = doSistema.status;
+  }
 
   const aindaVazio = bruto === undefined || bruto === null ||
     (typeof bruto === 'string' && String(bruto).trim() === '') ||
@@ -95,6 +278,19 @@ function pgo5NormalizarValorCampo_(campo, valor) {
       const t = String(bruto).trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) {
         return { ok: false, valor: '', erro: '"' + rotulo + '" deve ser uma data válida.' };
+      }
+      if (!pgo5DataDeCalendarioEhReal_(t)) {
+        return { ok: false, valor: '', erro: '"' + rotulo + '" não é uma data existente.' };
+      }
+      // A REGRA DE "NÃO PODE SER FUTURA" É SÓ DA DATA DE ABERTURA.
+      // Um campo de data criado pelo ADM pode legitimamente apontar para o
+      // futuro (um retorno prometido, um prazo). Quem não pode é o registro
+      // de quando o atendimento entrou: ele descreve algo que já aconteceu.
+      if (campo.nome === PGO5_CAMPO_DATA_ABERTURA_ && t > pgo5HojeEmSaoPaulo_()) {
+        return {
+          ok: false, valor: '',
+          erro: '"' + rotulo + '" não pode ser uma data futura.'
+        };
       }
       return { ok: true, valor: t, erro: '' };
     }
@@ -285,7 +481,7 @@ function pgo5ResponsaveisElegiveis_(ator) {
  * @param {Object} catalogo - Catálogo já lido.
  * @returns {Object} { estrutural, dinamicos, erros }.
  */
-function pgo5MontarAtendimento_(canalId, valores, catalogo) {
+function pgo5MontarAtendimento_(canalId, valores, catalogo, padroes) {
   const campos = pgo5CamposDoCanal_(canalId, catalogo);
   const entrada = valores || {};
   const estrutural = {};
@@ -297,7 +493,7 @@ function pgo5MontarAtendimento_(canalId, valores, catalogo) {
     // campo "canal", ele é ignorado para não pedir a mesma coisa duas vezes.
     if (campo.nome === 'canal') return;
 
-    const r = pgo5NormalizarValorCampo_(campo, entrada[campo.nome]);
+    const r = pgo5NormalizarValorCampo_(campo, entrada[campo.nome], padroes);
     if (!r.ok) { erros.push(r.erro); return; }
 
     if (campo.estrutural) {
@@ -421,12 +617,18 @@ function criarAtendimentoPGO5(dados) {
   const canal = pgo5Canais_(catalogo).find(function(c) { return c.id === canalId; });
   if (!canal) throw new Error('Selecione um canal válido para registrar o atendimento.');
 
-  const montado = pgo5MontarAtendimento_(canalId, entrada.valores, catalogo);
+  // Atendimento novo: sem data vale HOJE, sem status vale Pendente.
+  const montado = pgo5MontarAtendimento_(canalId, entrada.valores, catalogo,
+    pgo5PadroesDoSistema_(catalogo, null));
   if (montado.erros.length > 0) throw new Error(montado.erros.join(' '));
 
   // Atendimento novo não tem estado anterior: o status efetivo é o do
   // formulário. Ver aplicarRegraDeAguardandoRetorno_.
   aplicarRegraDeAguardandoRetorno_(montado.estrutural, null, catalogo);
+  // A data existe mesmo quando o canal não a pergunta, e o status inicial é
+  // Pendente mesmo quando o canal não oferece o campo Status.
+  pgo5GarantirDataDeAbertura_(montado.estrutural, null);
+  pgo5GarantirStatusInicial_(montado.estrutural, catalogo);
 
   const responsavelId = pgo5ResolverResponsavel_(ator, entrada.responsavelId ||
     montado.estrutural.ResponsavelId);
@@ -492,12 +694,19 @@ function atualizarAtendimentoPGO5(id, dados) {
 
   const canalId = String(atual.CanalId || '').trim();
   const catalogo = pgo5CatalogoBruto_();
-  const montado = pgo5MontarAtendimento_(canalId, entrada.valores, catalogo);
+  // EDIÇÃO: o padrão da data é a que JÁ ESTÁ GRAVADA, nunca hoje. Assim um
+  // atendimento aberto em março continua sendo de março depois de qualquer
+  // correção — inclusive quando o canal deixou de perguntar a data.
+  const montado = pgo5MontarAtendimento_(canalId, entrada.valores, catalogo,
+    pgo5PadroesDoSistema_(catalogo, atual));
   if (montado.erros.length > 0) throw new Error(montado.erros.join(' '));
 
   // Na edição o registro atual entra na conta: se o formulário deste canal
   // não pergunta o status, vale o que já está gravado.
   aplicarRegraDeAguardandoRetorno_(montado.estrutural, atual, catalogo);
+  // Edição NUNCA reescreve a data de um registro histórico: sem valor novo,
+  // permanece o que já estava gravado.
+  pgo5GarantirDataDeAbertura_(montado.estrutural, atual);
 
   // A regra de delegação só vale quando o responsável REALMENTE muda.
   // Sem isso, um Supervisor não conseguiria sequer salvar a observação de um
@@ -956,7 +1165,16 @@ function getFormularioPGO5() {
     aguardando: pgo5Aguardando_(catalogo),
     responsaveis: pgo5ResponsaveisElegiveis_(ator),
     podeDelegar: obterEscopoDelegacao_(atorComoUsuario_(ator)) !== 'NENHUM',
-    usuarioId: String(ator.id)
+    usuarioId: String(ator.id),
+    // HOJE no fuso da operação, decidido pelo SERVIDOR.
+    // O navegador do analista pode estar em outro fuso, com o relógio
+    // errado ou com a data trocada de propósito. A tela usa este valor para
+    // preencher a data e para limitar o seletor; o servidor revalida assim
+    // mesmo, então divergir aqui só produziria uma recusa confusa.
+    hoje: pgo5HojeEmSaoPaulo_(),
+    // Id do status inicial (Nome técnico 'pendente'), para a tela já abrir
+    // marcada sem ter de adivinhar pelo rótulo exibido.
+    statusInicialId: pgo5IdDoStatusPendente_(catalogo)
   };
 }
 

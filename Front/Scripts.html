@@ -321,6 +321,23 @@ var App = {
       .getFormularioPGO5();
   },
 
+  /**
+   * Deixa um texto comparável: sem acento, sem espaços nas pontas, minúsculo.
+   *
+   * Vive aqui porque mais de uma tela compara NOME TÉCNICO de status — o
+   * Dashboard e o formulário de atendimento. Duas cópias da mesma
+   * normalização divergem com o tempo, e comparação de status é exatamente
+   * o lugar onde divergir causa comportamento errado e silencioso.
+   *
+   * @param {string} texto Texto de entrada.
+   * @returns {string} Texto normalizado.
+   */
+  semAcento: function(texto) {
+    return String(texto === undefined || texto === null ? '' : texto)
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .trim().toLowerCase();
+  },
+
   /** Descarta o catálogo em memória (usado após alterar Configurações). */
   invalidarFormularioPGO5: function() { this.formularioPGO5 = null; },
 

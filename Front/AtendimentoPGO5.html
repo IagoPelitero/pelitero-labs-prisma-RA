@@ -96,6 +96,14 @@ var FormularioPGO5 = {
     var obrigatorio = campo.obrigatorio ? ' <span class="required">*</span>' : '';
     var v = (valor === undefined || valor === null) ? '' : valor;
     if (v === '' && campo.valorPadrao) v = campo.valorPadrao;
+    // Padrões do SISTEMA (não do canal): a data já abre em hoje e o status
+    // já abre em Pendente, para o analista não gastar dois cliques no que
+    // é sempre a mesma coisa. Os dois valores vêm do servidor — o relógio e
+    // o Nome técnico do status são decididos lá, nunca aqui.
+    if (v === '' && !estado.emEdicao) {
+      if (campo.nome === 'dataAbertura') v = (dados && dados.hoje) || '';
+      if (campo.nome === 'status') v = (dados && dados.statusInicialId) || '';
+    }
 
     var html = '<div class="form-group" data-campo="' + App.escapeHtml(campo.nome) + '">';
     html += '<label class="form-label" for="' + id + '">' +
@@ -182,6 +190,12 @@ var FormularioPGO5 = {
     //   - a classe pgo5-so-digitos liga o filtro de digitação.
     // O filtro é conforto: quem colar texto ou desligar o JavaScript ainda
     // passa pela validação do servidor.
+    // A data de abertura descreve algo que JÁ aconteceu: o seletor não
+    // oferece dias futuros. É conforto — quem editar o DOM ou chamar a API
+    // direto continua sendo recusado pelo servidor.
+    if (tipo === 'date' && campo.nome === 'dataAbertura' && dados && dados.hoje) {
+      extra = ' max="' + App.escapeHtml(dados.hoje) + '"';
+    }
     if (tipo === 'cpf') extra = ' maxlength="14" inputmode="numeric" class-extra="pgo5-so-digitos"';
     if (tipo === 'protocolo') extra = ' maxlength="30" inputmode="numeric" class-extra="pgo5-so-digitos"';
     if (tipo === 'telefone') extra = ' maxlength="15" inputmode="numeric"';
@@ -268,21 +282,27 @@ Pages.novoAtendimentoPGO5 = {
 
     // UMA chamada traz canais, campos de cada canal, hierarquia, status,
     // aguardando e responsáveis. A cascata roda local, sem novas idas.
-    google.script.run
-      .withSuccessHandler(function(dados) {
-        self.state.dados = dados || {};
-        // Compartilha com o resto do sistema (a troca rápida de status no
-        // Dashboard usa o mesmo catálogo e não precisa buscá-lo de novo).
-        App.formularioPGO5 = self.state.dados;
-        if (self.state.atendimentoId) { self._carregarParaEdicao(); return; }
-        self._decidirCanal();
-      })
-      .withFailureHandler(function(err) {
-        self.state.fase = 'erro';
-        self.state.erro = (err && err.message) || 'Não foi possível carregar o formulário.';
-        self._pintar();
-      })
-      .getFormularioPGO5();
+    //
+    // E ela só acontece de verdade na PRIMEIRA vez: App.carregarFormularioPGO5
+    // guarda o catálogo em memória e o entrega de imediato nas seguintes. Para
+    // quem registra atendimentos em série, isso tira uma ida ao servidor de
+    // cada abertura da tela — e o catálogo é justamente a parte que não muda
+    // entre um caso e outro.
+    //
+    // A memória é descartada assim que o ADM altera QUALQUER lista em
+    // Configurações (canal, campo, opção, produto, categoria, subcategoria,
+    // status, aguardando): a invalidação está no funil único de gravação
+    // daquela tela, então nenhuma alteração escapa e ninguém digita sobre um
+    // catálogo vencido.
+    App.carregarFormularioPGO5(function(dados) {
+      self.state.dados = dados || {};
+      if (self.state.atendimentoId) { self._carregarParaEdicao(); return; }
+      self._decidirCanal();
+    }, function(err) {
+      self.state.fase = 'erro';
+      self.state.erro = (err && err.message) || 'Não foi possível carregar o formulário.';
+      self._pintar();
+    });
   },
 
   /** Aplica a regra de 0 / 1 / vários canais. */
@@ -335,7 +355,9 @@ Pages.novoAtendimentoPGO5 = {
       ? 'Editar Atendimento'
       : App.nomeTela('novoAtendimento', 'Novo Atendimento');
 
-    var html = '<div class="page-header"><h1 class="page-title">' +
+    // Cabeçalho baixo: em 1366x768 cada linha gasta aqui é uma linha a menos
+    // de formulário visível.
+    var html = '<div class="page-header pgo5-header-compacto"><h1 class="page-title">' +
       App.escapeHtml(titulo) + '</h1></div>';
 
     if (s.fase === 'carregando') {
@@ -390,7 +412,10 @@ Pages.novoAtendimentoPGO5 = {
       produtoId: s.valores.produto || '',
       categoriaId: s.valores.categoria || '',
       // Este canal tem campo Produto? Define se Categoria filtra ou lista tudo.
-      temProduto: s.campos.some(function(c) { return c.nome === 'produto'; })
+      temProduto: s.campos.some(function(c) { return c.nome === 'produto'; }),
+      // Em edição os padrões do sistema NÃO se aplicam: o registro já tem
+      // data e status próprios, e sobrepô-los reescreveria o histórico.
+      emEdicao: !!s.atendimentoId
     };
 
     var canal = (s.dados.canais || []).find(function(c) { return c.id === s.canalId; });
@@ -405,7 +430,7 @@ Pages.novoAtendimentoPGO5 = {
     }
     html += '</div>';
 
-    html += '<form id="pgo5-form" autocomplete="off"><div class="form-grid">';
+    html += '<form id="pgo5-form" autocomplete="off"><div class="pgo5-grid">';
     s.campos.forEach(function(campo) {
       // O Analista não delega: mostra o próprio nome, sem seletor editável.
       if (campo.nome === 'responsavel' && !s.dados.podeDelegar) {
@@ -420,9 +445,12 @@ Pages.novoAtendimentoPGO5 = {
     });
     html += '</div>';
 
-    html += '<div class="form-actions">';
+    // Barra de ação GRUDADA no rodapé do cartão: com o formulário compacto
+    // ela fica sempre visível, e o analista não precisa procurar o Salvar.
+    html += '<div class="form-actions pgo5-acoes">';
     html += '<button type="button" class="btn btn-primary" id="pgo5-salvar">💾 Salvar</button>';
     html += '<button type="button" class="btn btn-secondary" id="pgo5-cancelar">Cancelar</button>';
+    html += '<span class="pgo5-dica-teclado">Ctrl + Enter salva</span>';
     if (s.atendimentoId) {
       html += '<button type="button" class="btn btn-danger" id="pgo5-excluir" style="margin-left:auto;">🗑 Excluir</button>';
     }
@@ -490,14 +518,100 @@ Pages.novoAtendimentoPGO5 = {
       self._redesenharCascata();
     });
 
+    // STATUS → AGUARDANDO: a regra roda a cada troca, e também agora, para
+    // a tela nascer coerente (um atendimento já Concluído abre sem o campo).
+    var selStatus = document.getElementById('pgo5-campo-status');
+    if (selStatus) selStatus.addEventListener('change', function() {
+      s.valores.status = selStatus.value;
+      self._aplicarRegraAguardando();
+    });
+    self._aplicarRegraAguardando();
+
     var salvar = document.getElementById('pgo5-salvar');
     if (salvar) salvar.addEventListener('click', function() { self._salvar(); });
+
+    // CTRL + ENTER SALVA — e Enter sozinho, não.
+    // Num formulário de digitação rápida o Enter é apertado o tempo todo por
+    // engano (ao terminar um campo, ao fechar o autocomplete). Se ele
+    // gravasse, metade dos atendimentos sairia pela metade. O atalho exige
+    // uma combinação deliberada e passa pelo MESMO _salvar do botão, então
+    // herda validação, trava de duplo envio e permissão.
+    var form = document.getElementById('pgo5-form');
+    if (form) {
+      form.addEventListener('keydown', function(evento) {
+        if (evento.key === 'Enter' && (evento.ctrlKey || evento.metaKey)) {
+          evento.preventDefault();
+          self._salvar();
+          return;
+        }
+        // Enter sozinho fora do textarea apenas NÃO envia o formulário.
+        if (evento.key === 'Enter' && evento.target.tagName !== 'TEXTAREA') {
+          evento.preventDefault();
+        }
+      });
+    }
+
+    self._focarPrimeiroCampo();
 
     var cancelar = document.getElementById('pgo5-cancelar');
     if (cancelar) cancelar.addEventListener('click', function() { App.navigateTo('dashboard'); });
 
     var excluir = document.getElementById('pgo5-excluir');
     if (excluir) excluir.addEventListener('click', function() { self._excluir(); });
+  },
+
+  /**
+   * Nome técnico do status atualmente escolhido na tela.
+   *
+   * ⚠️ NUNCA pelo texto exibido: o ADM pode renomear "Pendente" para
+   * "Aguardando Análise Interna" e a regra tem de continuar valendo. O Nome
+   * é contrato; o Rotulo é apresentação.
+   *
+   * @returns {string} Ex.: 'pendente', 'em analise', '' quando não há status.
+   */
+  _statusTecnicoAtual: function() {
+    var campo = this.state.campos.find(function(c) { return c.nome === 'status'; });
+    var id = '';
+    if (campo) {
+      var el = document.getElementById(FormularioPGO5.idDoCampo(campo));
+      id = el ? el.value : (this.state.valores.status || '');
+    } else {
+      id = this.state.valores.status || '';
+    }
+    var achado = (this.state.dados.status || []).find(function(st) { return st.id === id; });
+    return achado ? App.semAcento(achado.nome) : '';
+  },
+
+  /**
+   * Mostra ou esconde "Aguardando Retorno de" conforme o status.
+   *
+   * REGRA OPERACIONAL:
+   *   Pendente        → o campo aparece;
+   *   qualquer outro  → o campo some E a seleção é APAGADA.
+   *
+   * O apagamento é o ponto sensível. Só esconder deixaria o valor no DOM e
+   * ele seria enviado junto na gravação: um atendimento "Em análise" com
+   * aguardando preenchido, que nenhuma tela sabe explicar. E ao voltar para
+   * Pendente o campo reaparece VAZIO — ressuscitar a escolha anterior faria
+   * o sistema afirmar algo que o analista não disse.
+   *
+   * O servidor aplica a mesma regra (aplicarRegraDeAguardandoRetorno_): esta
+   * camada é conforto e coerência visual, não a garantia.
+   */
+  _aplicarRegraAguardando: function() {
+    var campo = this.state.campos.find(function(c) { return c.nome === 'aguardandoRetorno'; });
+    if (!campo) return;
+    var grupo = document.querySelector('.form-group[data-campo="aguardandoRetorno"]');
+    if (!grupo) return;
+
+    var ehPendente = this._statusTecnicoAtual() === 'pendente';
+    grupo.style.display = ehPendente ? '' : 'none';
+
+    var el = document.getElementById(FormularioPGO5.idDoCampo(campo));
+    if (!ehPendente) {
+      if (el) el.value = '';
+      this.state.valores.aguardandoRetorno = '';
+    }
   },
 
   /**
@@ -514,7 +628,8 @@ Pages.novoAtendimentoPGO5 = {
 
     var estado = {
       produtoId: s.valores.produto || '', categoriaId: s.valores.categoria || '',
-      temProduto: s.campos.some(function(c) { return c.nome === 'produto'; })
+      temProduto: s.campos.some(function(c) { return c.nome === 'produto'; }),
+      emEdicao: !!s.atendimentoId
     };
     ['categoria', 'subcategoria'].forEach(function(nome) {
       var campo = s.campos.find(function(c) { return c.nome === nome; });
@@ -529,17 +644,46 @@ Pages.novoAtendimentoPGO5 = {
     this._ligarEventos();
   },
 
+  /**
+   * Põe o cursor no primeiro campo útil assim que o formulário aparece.
+   *
+   * Preferência por Protocolo: é o dado que o analista tem em mãos quando
+   * abre a tela, vindo do canal de atendimento. A Data já vem preenchida com
+   * hoje, então parar nela custaria um Tab a cada registro.
+   *
+   * Em EDIÇÃO não rouba o foco: a pessoa veio corrigir um campo específico e
+   * pode já estar com o cursor nele.
+   */
+  _focarPrimeiroCampo: function() {
+    if (this.state.fase !== 'formulario' || this.state.atendimentoId) return;
+    var preferidos = ['protocolo', 'cliente', 'cpf'];
+    for (var i = 0; i < preferidos.length; i++) {
+      var campo = this.state.campos.find(function(c) { return c.nome === preferidos[i]; });
+      if (!campo) continue;
+      var el = document.getElementById(FormularioPGO5.idDoCampo(campo));
+      if (el && !el.disabled) { el.focus(); return; }
+    }
+    // Nenhum dos preferidos existe neste canal: usa o primeiro campo editável.
+    var primeiro = document.querySelector('#pgo5-form .form-control:not([disabled])');
+    if (primeiro) primeiro.focus();
+  },
+
   /** Envia a criação ou a atualização — sempre uma requisição só. */
   _salvar: function() {
     var self = this;
     var s = self.state;
-    if (s.salvando) return;              // trava contra duplo clique
+    if (s.salvando) return;
+
+    // TRAVA ANTES DE QUALQUER OUTRA COISA.
+    // Ler a tela e montar o payload leva alguns milissegundos, e um duplo
+    // clique cabe folgado nessa janela: os dois cliques passariam pela
+    // checagem acima antes de qualquer um travar, e o atendimento seria
+    // criado DUAS vezes. Uma interação = uma gravação.
+    self._travarBotao(true);
 
     var valores = FormularioPGO5.coletar(s.campos);
     // O Analista não delega: o backend fixa o responsável nele mesmo.
     if (!s.dados.podeDelegar) delete valores.responsavel;
-
-    self._travarBotao(true);
 
     var aoFalhar = function(err) {
       self._travarBotao(false);
@@ -564,9 +708,8 @@ Pages.novoAtendimentoPGO5 = {
     google.script.run
       .withSuccessHandler(function() {
         self._travarBotao(false);
-        Components.toast('Atendimento criado com sucesso! ✓', 'success');
-        // Estado limpo: nova escolha de canal, sem resquício do anterior.
-        self.render();
+        Components.toast('Atendimento criado. ✓', 'success');
+        self._prepararProximo();
       })
       .withFailureHandler(aoFalhar)
       .criarAtendimentoPGO5({
@@ -574,6 +717,32 @@ Pages.novoAtendimentoPGO5 = {
         valores: valores,
         responsavelId: valores.responsavel || ''
       });
+  },
+
+  /**
+   * Deixa a tela pronta para o PRÓXIMO atendimento, sem ida ao servidor.
+   *
+   * Antes isto chamava render(), que refazia getFormularioPGO5 e voltava à
+   * escolha de canal. Para quem registra em série era uma espera e um clique
+   * a cada caso — e o catálogo já está em memória, não mudou.
+   *
+   * DECISÃO REGISTRADA: o CANAL É MANTIDO.
+   * Atendimentos costumam vir em lote do mesmo canal, e voltar à seleção
+   * cobraria um clique por registro. O canal continua declarado no alto do
+   * formulário e o botão "Trocar canal" segue à mão, então a escolha
+   * permanece visível — o que evita registrar no canal errado por inércia.
+   *
+   * Os valores são zerados: nada do caso anterior sobra. Data e Status
+   * voltam aos padrões do sistema (hoje / Pendente), que é o estado em que
+   * um atendimento novo nasce.
+   */
+  _prepararProximo: function() {
+    var s = this.state;
+    s.valores = {};
+    s.historicos = [];
+    s.atendimentoId = null;
+    s.salvando = false;
+    this._pintar();          // repinta a partir do catálogo em memória
   },
 
   /** Exclui o atendimento aberto, após confirmação. */
