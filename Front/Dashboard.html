@@ -352,21 +352,29 @@ Pages.dashboard = {
     // mostrado — e SEM apagar dados já exibidos na tela.
     tentativa = tentativa || 1;
 
+    // DESENHA NA HORA COM O QUE JÁ FOI VISTO, se houver.
+    // A resposta nova continua sendo buscada logo abaixo; a diferença é que
+    // a pessoa não fica olhando para um esqueleto cinza esperando dados que
+    // ela já viu há um minuto. Ver App.memoriaDasTelas.
+    var guardado = App.lerDaMemoria('dashboard');
+    if (guardado && tentativa === 1) {
+      self._pintarDashboard(guardado);
+      Components.indicadorDeAtualizacao(true);
+    }
+
     google.script.run
       .withSuccessHandler(function(data) {
         // Resposta sem a estrutura esperada = falha (não "0 registros"):
         // aciona o mesmo fallback em vez de exibir uma tela vazia.
+        Components.indicadorDeAtualizacao(false);
         if (!data || !Array.isArray(data.atendimentos)) {
           console.error('[Dashboard] Resposta inválida do servidor:', data);
           self._falhaCarregamento(tentativa, { message: 'Resposta inválida do servidor.' });
           return;
         }
-        self.state.atendimentos = data.atendimentos;
-        self.state.pagina = 1;
-        self.filtrarLocal();
-        self.renderizarKPIs(data.cards, data.porSituacao);
-        self.renderizarCanais(data.porCanal);
-        self.renderizarTabela();
+        // Guarda para a próxima abertura desenhar na hora.
+        App.guardarNaMemoria('dashboard', data);
+        self._pintarDashboard(data);
         // Só confirma quando houve RECUPERAÇÃO após uma falha real (2ª
         // tentativa bem-sucedida). No fluxo normal (1ª tentativa) nada é
         // exibido — carregamento silencioso.
@@ -384,9 +392,29 @@ Pages.dashboard = {
         }
       })
       .withFailureHandler(function(erro) {
+        Components.indicadorDeAtualizacao(false);
         self._falhaCarregamento(tentativa, erro);
       })
       .getDashboardData(tentativa > 1 ? { forceRefresh: true } : null);
+  },
+
+  /**
+   * Desenha o Dashboard inteiro a partir de uma resposta do servidor.
+   *
+   * Existe para o mesmo desenho servir aos dois momentos: o imediato, com o
+   * que estava guardado em memória, e o definitivo, quando a resposta nova
+   * chega. Duplicar essas linhas faria as duas versões da tela divergirem
+   * com o tempo.
+   *
+   * @param {Object} dados Resposta de getDashboardData.
+   */
+  _pintarDashboard: function(dados) {
+    this.state.atendimentos = dados.atendimentos || [];
+    this.state.pagina = 1;
+    this.filtrarLocal();
+    this.renderizarKPIs(dados.cards, dados.porSituacao);
+    this.renderizarCanais(dados.porCanal);
+    this.renderizarTabela();
   },
 
   /**
@@ -1297,6 +1325,7 @@ Pages.dashboard = {
         Components.hideLoading();
         Components.toast('Atendimento atualizado. ✓', 'success');
         // Recarrega a lista SEM sair da tela: o usuário continua onde estava.
+        App.esquecerMemoria('dashboard');
         self.carregarDados();
       })
       .withFailureHandler(function(err) {
@@ -1386,7 +1415,8 @@ Pages.dashboard = {
         Components.hideLoading();
         if (result && result.success) {
           Components.toast('Status atualizado com sucesso!', 'success');
-          self.carregarDados();
+          App.esquecerMemoria('dashboard');
+        self.carregarDados();
         } else {
           Components.toast('Não foi possível atualizar o status.', 'error');
         }
@@ -1523,6 +1553,7 @@ Pages.dashboard = {
       .withSuccessHandler(function() {
         Components.hideLoading();
         Components.toast('Status atualizado. ✓', 'success');
+        App.esquecerMemoria('dashboard');
         self.carregarDados();
       })
       .withFailureHandler(function(err) {
@@ -1540,6 +1571,7 @@ Pages.dashboard = {
       Components.hideLoading();
       if (result && result.success) {
         Components.toast('Atendimento excluído com sucesso.', 'success');
+        App.esquecerMemoria('dashboard');
         self.carregarDados();
       } else {
         Components.toast((result && result.message) || 'Erro ao excluir atendimento.', 'error');

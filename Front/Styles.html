@@ -1360,6 +1360,57 @@ body[data-theme="dark"] .header-title {
 }
 
 
+
+/* ── FAIXA DE ATUALIZAÇÃO EM SEGUNDO PLANO ──────────────────────────────
+   Aparece quando a tela JÁ TEM conteúdo e está buscando dados novos.
+   Fica sobre o canto inferior, sem cobrir nada e sem travar a página: a
+   pessoa continua lendo o que está na tela enquanto a atualização chega.
+   Um overlay aqui faria o sistema parecer lento sem necessidade. */
+.indicador-atualizacao {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;              /* abaixo de modais e toasts */
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  font-weight: 500;
+  animation: indicadorEntra .18s ease-out;
+}
+
+@keyframes indicadorEntra {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* O giro é o que diferencia "buscando" de "parado": sem movimento, a
+   faixa parece um aviso estático e não comunica espera. */
+.indicador-giro {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary-blue);
+  border-radius: 50%;
+  animation: indicadorGira .7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes indicadorGira { to { transform: rotate(360deg); } }
+
+/* Quem prefere menos movimento continua vendo a faixa, sem a animação. */
+@media (prefers-reduced-motion: reduce) {
+  .indicador-atualizacao { animation: none; }
+  .indicador-giro { animation-duration: 2.4s; }
+}
+
 /* ── PGO 5.0: NOVO ATENDIMENTO COMPACTO ──────────────────────────────────
    Alvo: 1366x768 (o desktop corporativo real) com o formulário inteiro
    visível, sem rolagem. O ganho vem de tirar espaço MORTO — respiro

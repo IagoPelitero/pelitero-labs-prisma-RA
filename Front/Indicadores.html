@@ -39,7 +39,8 @@ Pages.indicadores = {
     canal: 'porCanal',
     produto: 'porProduto',
     categoria: 'porCategoria',
-    status: 'porStatus'
+    status: 'porStatus',
+    aguardando: 'porAguardando'
   },
 
   state: {
@@ -310,7 +311,23 @@ Pages.indicadores = {
     var self = this;
     tentativa = tentativa || 1;
 
+    // Desenha na hora com o que já foi visto e busca a versão nova em
+    // segundo plano — ver App.memoriaDasTelas. Sem isto, reabrir a tela
+    // significava esperar de novo por números que já estavam na tela.
+    var guardado = App.lerDaMemoria('produtividade');
+    if (guardado && tentativa === 1 && App.schemaBanco === 'PGO5') {
+      self.state.agregado = guardado;
+      self.state.dados = [];
+      self.renderCards();
+      self.renderCharts();
+    }
+    // A faixa avisa que há uma busca em andamento — inclusive na primeira
+    // abertura, quando ainda não há nada na tela.
+    Components.indicadorDeAtualizacao(true,
+      guardado ? 'Atualizando indicadores...' : 'Carregando indicadores...');
+
     var falhou = function(err) {
+      Components.indicadorDeAtualizacao(false);
       var msg = (err && err.message) || 'erro desconhecido';
       console.error('[Indicadores] Falha ao carregar (tentativa ' + tentativa + '):', msg);
       if (tentativa === 1) {
@@ -334,10 +351,12 @@ Pages.indicadores = {
     if (App.schemaBanco === 'PGO5') {
       google.script.run
         .withSuccessHandler(function(resumo) {
+          Components.indicadorDeAtualizacao(false);
           if (!resumo || typeof resumo !== 'object') {
             falhou({ message: 'Resposta inválida do servidor.' });
             return;
           }
+          App.guardarNaMemoria('produtividade', resumo);
           self.state.agregado = resumo;
           self.state.dados = [];          // no 5.0 a tela não guarda linhas
           self.renderCards();
@@ -353,6 +372,7 @@ Pages.indicadores = {
 
     google.script.run
       .withSuccessHandler(function(dados) {
+        Components.indicadorDeAtualizacao(false);
         // Resposta inesperada (não-array) é FALHA, não "sem registros".
         if (!Array.isArray(dados)) {
           falhou({ message: 'Resposta inválida do servidor.' });
@@ -493,9 +513,21 @@ Pages.indicadores = {
       };
     }
 
+    // Banco 4.x: conta linha por linha.
+    var self = this;
     var grupos = {};
     this.state.dados.forEach(function(item) {
-      var chave = String(item[campo] || '—');
+      var valor;
+      if (campo === 'aguardando') {
+        // No 4.x o campo se chama "situacaoPendencia", e só faz sentido em
+        // atendimento PENDENTE — a mesma regra do 5.0.
+        if (!self._ehPendente(item)) return;
+        valor = item.situacaoPendencia;
+        if (!String(valor || '').trim()) return;   // pendente sem motivo fica de fora
+      } else {
+        valor = item[campo];
+      }
+      var chave = String(valor || '—');
       grupos[chave] = (grupos[chave] || 0) + 1;
     });
     var labels = Object.keys(grupos).sort(function(a, b) { return grupos[b] - grupos[a]; });
@@ -950,22 +982,32 @@ Pages.indicadores = {
       }
     });
 
-    // ── Aguardando Retorno: Área x Cliente (rosca) ──
-    // Legenda com quantidade e percentual sempre visíveis.
-    var aguardando = { 'Área': 0, 'Cliente': 0 };
-    self.state.dados.forEach(function(item) {
-      if (!self._ehPendente(item)) return;
-      var s = String(item.situacaoPendencia || '');
-      if (aguardando[s] !== undefined) aguardando[s]++;
-    });
-    var valoresAguardando = [aguardando['Área'], aguardando['Cliente']];
-    var totalAguardando = valoresAguardando[0] + valoresAguardando[1];
+    // ── Aguardando Retorno: gráfico de PIZZA ──
+    //
+    // As opções saem do CATÁLOGO, não de uma lista fixa: o administrador
+    // pode criar outros motivos além de "Área" e "Cliente", e eles precisam
+    // aparecer aqui sozinhos. A versão anterior contava apenas esses dois
+    // nomes escritos no código — qualquer motivo novo ficava invisível.
+    //
+    // No PGO 5.0 a contagem já vem somada do servidor (porAguardando), que
+    // considera SÓ os pendentes. É por isso que o gráfico estava vazio: a
+    // tela contava linha por linha, e no 5.0 ela não recebe mais as linhas.
+    var porAguardando = self._agruparPor('aguardando');
+    var totalAguardando = porAguardando.valores.reduce(function(soma, v) {
+      return soma + v;
+    }, 0);
+
     self._criarChart('ind-chart-aguardando', {
-      type: 'doughnut',
+      type: 'pie',
       plugins: [self._pluginValoresPizza],
       data: {
-        labels: ['Área', 'Cliente'],
-        datasets: [{ data: valoresAguardando, backgroundColor: [self._cores[4], self._cores[1]] }]
+        labels: porAguardando.labels,
+        datasets: [{
+          data: porAguardando.valores,
+          backgroundColor: porAguardando.labels.map(function(_, i) {
+            return self._cores[i % self._cores.length];
+          })
+        }]
       },
       options: {
         responsive: true,

@@ -341,6 +341,61 @@ var App = {
   /** Descarta o catálogo em memória (usado após alterar Configurações). */
   invalidarFormularioPGO5: function() { this.formularioPGO5 = null; },
 
+  /* ──────────────────────────────────────────────────────────────
+     MEMÓRIA DAS TELAS — o que faz o sistema PARECER (e ser) rápido
+     ──────────────────────────────────────────────────────────────
+     Toda tela que mostra dados precisa ir ao servidor. No Apps Script
+     cada ida custa algumas centenas de milissegundos, mesmo quando o
+     servidor responde rápido: o custo é da viagem, não do cálculo.
+
+     Antes, trocar de tela e voltar pagava esse preço de novo, sempre,
+     e o usuário olhava para um esqueleto cinza esperando algo que ele
+     JÁ TINHA VISTO um minuto antes.
+
+     Agora o resultado de cada tela fica guardado aqui. Ao reabrir, a
+     tela desenha na hora com o que está na memória e busca a versão
+     nova em segundo plano, com a faixa "Atualizando dados..." avisando.
+     Quando a resposta chega, a tela é redesenhada.
+
+     Não é cache de verdade — não tem prazo de validade nem tenta
+     adivinhar se o dado mudou. É só a última resposta, mostrada
+     enquanto a próxima não chega.
+     ────────────────────────────────────────────────────────────── */
+  memoriaDasTelas: {},
+
+  /**
+   * Guarda o último resultado de uma tela.
+   * @param {string} tela Identificador (ex.: 'dashboard').
+   * @param {*} dados Resposta do servidor.
+   */
+  guardarNaMemoria: function(tela, dados) {
+    this.memoriaDasTelas[tela] = dados;
+  },
+
+  /**
+   * Devolve o último resultado guardado, ou null.
+   * @param {string} tela Identificador da tela.
+   * @returns {*} Dados guardados ou null.
+   */
+  lerDaMemoria: function(tela) {
+    var guardado = this.memoriaDasTelas[tela];
+    return guardado === undefined ? null : guardado;
+  },
+
+  /**
+   * Esquece o que está guardado.
+   *
+   * Chamado depois de gravar, excluir ou alterar qualquer coisa: mostrar
+   * a memória antiga depois de uma gravação exibiria à pessoa justamente
+   * o estado que ela acabou de mudar.
+   *
+   * @param {string} [tela] Tela a esquecer; sem parâmetro, esquece todas.
+   */
+  esquecerMemoria: function(tela) {
+    if (tela) delete this.memoriaDasTelas[tela];
+    else this.memoriaDasTelas = {};
+  },
+
   /**
    * Diz se o resumo de acesso do PGO 5.0 não pôde ser resolvido.
    *

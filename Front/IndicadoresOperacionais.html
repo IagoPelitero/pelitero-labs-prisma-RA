@@ -146,6 +146,15 @@ Pages.indicadoresOperacionais = {
     var btn = document.getElementById('indop-atualizar');
     if (btn && forceRefresh) { btn.disabled = true; btn.textContent = '🔄 Atualizando...'; }
 
+    // O botão "Aplicar" (filtro por período) não mexe no botão acima, e
+    // sem esta faixa a tela ficava parada depois do clique: nada indicava
+    // que a leitura da planilha externa estava em andamento — e essa
+    // leitura é justamente a mais demorada do sistema.
+    var botaoAplicar = document.getElementById('indop-filtrar');
+    if (botaoAplicar) { botaoAplicar.disabled = true; }
+    Components.indicadorDeAtualizacao(true,
+      forceRefresh ? 'Relendo a planilha...' : 'Aplicando filtros...');
+
     var opcoes = {
       inicio: self.state.periodo.inicio || '',
       fim: self.state.periodo.fim || ''
@@ -155,7 +164,9 @@ Pages.indicadoresOperacionais = {
     google.script.run
       .withSuccessHandler(function(dados) {
         self.state.carregando = false;
+        Components.indicadorDeAtualizacao(false);
         if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar Dados'; }
+        if (botaoAplicar) botaoAplicar.disabled = false;
         self.state.dados = dados || null;
         self._renderConteudo(dados);
         if (forceRefresh && dados && dados.habilitado) {
@@ -164,7 +175,9 @@ Pages.indicadoresOperacionais = {
       })
       .withFailureHandler(function(err) {
         self.state.carregando = false;
+        Components.indicadorDeAtualizacao(false);
         if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar Dados'; }
+        if (botaoAplicar) botaoAplicar.disabled = false;
         self._renderErro((err && err.message) || 'Erro desconhecido.');
       })
       .getIndicadoresOperacionais(opcoes);

@@ -288,6 +288,20 @@ function obterProdutividadeEquipePGO5(filtros) {
     porProduto: agruparProdutividadePor_(atendimentos, 'Produto'),
     porCategoria: agruparProdutividadePor_(atendimentos, 'Categoria'),
     porStatus: agruparProdutividadePor_(atendimentos, 'Status'),
+    // "Aguardando Retorno de" só existe em atendimentos PENDENTES — é a
+    // mesma regra do formulário. Contar os concluídos aqui encheria o
+    // gráfico de casos que já não esperam nada de ninguém.
+    //
+    // Pendente SEM motivo preenchido também fica de fora: ele não está
+    // aguardando ninguém, e como fatia entraria no gráfico competindo com
+    // os motivos reais, distorcendo a leitura de "quem estamos esperando".
+    porAguardando: agruparProdutividadePor_(
+      atendimentos.filter(function(a) {
+        const ehPendente =
+          normalizeText_(a.StatusNomeTecnico || a.statusNomeTecnico || '') === 'pendente';
+        const temMotivo = String(a.MotivoPendencia || '').trim() !== '';
+        return ehPendente && temMotivo;
+      }), 'MotivoPendencia'),
     evolucaoDiaria: montarEvolucaoDiaria_(atendimentos),
     atualizadoEm: toIso_(new Date())
   };

@@ -247,6 +247,50 @@ const Components = {
     if (el) el.style.display = 'none';
   },
 
+  /**
+   * Faixa discreta de "buscando dados no servidor".
+   *
+   * DIFERENÇA PARA O showLoading
+   *   showLoading  → overlay que TRAVA a tela. Usar quando o usuário não
+   *                  pode fazer mais nada até a resposta chegar (salvar,
+   *                  excluir, importar).
+   *   este         → faixa no topo da tela, que NÃO trava nada. Usar quando
+   *                  já existe conteúdo visível e ele está sendo atualizado.
+   *
+   * Por que a distinção importa: travar a tela para uma atualização de
+   * fundo faz o sistema parecer lento mesmo quando não está, e impede a
+   * pessoa de ler o que já apareceu.
+   *
+   * @param {boolean} ligado true mostra a faixa, false esconde.
+   * @param {string} [texto] Mensagem exibida (padrão: "Atualizando dados...").
+   */
+  indicadorDeAtualizacao: function(ligado, texto) {
+    var id = 'indicador-atualizacao';
+    var atual = document.getElementById(id);
+
+    if (!ligado) {
+      if (atual) atual.remove();
+      return;
+    }
+    if (atual) {
+      var span = atual.querySelector('.indicador-texto');
+      if (span) span.textContent = texto || 'Atualizando dados...';
+      return;
+    }
+
+    var faixa = document.createElement('div');
+    faixa.id = id;
+    faixa.className = 'indicador-atualizacao';
+    faixa.setAttribute('role', 'status');       // leitores de tela anunciam
+    faixa.setAttribute('aria-live', 'polite');
+    faixa.innerHTML = '<span class="indicador-giro"></span>' +
+      '<span class="indicador-texto">' +
+      App.escapeHtml(texto || 'Atualizando dados...') + '</span>';
+
+    var area = document.querySelector('.content-area') || document.body;
+    area.appendChild(faixa);
+  },
+
   /* ──────────────────────────────────────────────
      Status Badge
   ────────────────────────────────────────────── */
