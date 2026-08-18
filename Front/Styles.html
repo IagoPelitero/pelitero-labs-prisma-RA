@@ -555,8 +555,8 @@ input, select, textarea, button {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
@@ -627,11 +627,14 @@ input, select, textarea, button {
 }
 
 /* ── 6. KPI Cards ── */
+/* Mesma faixa de cards da .grid-4 — ver o comentário lá. auto-FIT em vez
+   de auto-fill: com fill as colunas vazias continuam ocupando espaço e a
+   linha não fecha quando há menos cards que colunas. */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 18px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
 }
 
 /* CARDS DE NÚMERO — MENORES.
@@ -642,10 +645,10 @@ input, select, textarea, button {
 .kpi-card {
   background: var(--card-bg);
   border-radius: var(--radius);
-  padding: 13px 15px;
+  padding: 10px 13px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   box-shadow: var(--shadow);
   border: 1px solid var(--border-light);
   border-left: 4px solid var(--primary-blue);
@@ -686,7 +689,7 @@ input, select, textarea, button {
 }
 
 .kpi-icon .material-icons {
-  font-size: 21px;
+  font-size: 18px;
   color: #fff;
 }
 
@@ -696,31 +699,41 @@ input, select, textarea, button {
 }
 
 .kpi-value {
-  font-size: 23px;
+  font-size: 20px;
   font-weight: 800;
-  line-height: 1.15;
+  line-height: 1.1;
   color: var(--text-primary);
   letter-spacing: -0.5px;
 }
 
 .kpi-label {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-secondary);
   font-weight: 500;
-  margin-top: 2px;
+  margin-top: 1px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
+  line-height: 1.25;
 }
 
 /* Descrição curta opcional exibida sob o rótulo de um KPI (ex.: card
    "Em análise" do Dashboard — explica o significado do status). */
-/* O card com descrição define a altura da linha inteira do grid, então
-   apertá-lo nivela a faixa toda. */
+/* ⚠️ ESTE BLOCO CONTROLA A ALTURA DE TODA A FAIXA DE CARDS.
+   Num grid os itens da linha esticam até a altura do mais alto: um único
+   card com descrição comprida levantava os outros cinco junto, e mexer no
+   padding dos demais não mudava quase nada. Limitando a descrição a duas
+   linhas, a faixa inteira desce.
+   O texto continua acessível: nada é removido do HTML, só o excesso deixa
+   de ocupar altura. */
 .kpi-subtitle {
   font-size: 10.5px;
   color: var(--text-muted);
-  margin-top: 2px;
-  line-height: 1.3;
+  margin-top: 1px;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   text-transform: none;
   letter-spacing: 0;
 }
@@ -842,7 +855,10 @@ input, select, textarea, button {
    não precisa rolar até o fim da janela para alcançá-la. */
 .table-container {
   overflow: auto;
-  max-height: 65vh; /* altura máxima: acima disso, rolagem interna */
+  /* Espaço para os 5 registros da página caberem sem rolagem interna:
+     5 linhas + cabeçalho. Acima disso a rolagem volta, para uma página de
+     25 ou 100 não empurrar o resto da tela para fora. */
+  max-height: 72vh;
   border-radius: var(--radius);
   border: 1px solid var(--border);
 }
@@ -888,7 +904,7 @@ input, select, textarea, button {
 }
 
 .data-table thead th {
-  padding: 14px 18px; /* alinhado ao padding das células (leitura confortável) */
+  padding: 10px 16px; /* alinhado ao padding das células (leitura confortável) */
   text-align: left;
   font-weight: 600;
   color: #fff;
@@ -947,7 +963,11 @@ input, select, textarea, button {
        entre palavras (word-break: normal); overflow-wrap só força
        quebra em sequências sem espaços maiores que a própria célula
        (ex.: URLs), nunca no meio de palavras comuns. */
-  padding: 14px 18px;
+  /* 10px no lugar de 14px: quatro pixels por célula, oito por linha —
+     é o que faltava para os 5 registros da página caberem sem rolagem
+     interna. A leitura continua confortável porque o respiro horizontal
+     foi preservado. */
+  padding: 10px 16px;
   color: var(--text-primary);
   vertical-align: middle;
   line-height: 1.5;
@@ -2345,7 +2365,7 @@ select.form-control {
 /* ── 20. Responsive ── */
 @media (max-width: 1200px) {
   .kpi-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
   .chart-container {
     grid-template-columns: 1fr;
@@ -2845,20 +2865,39 @@ body[data-theme="dark"] .skeleton-loading {
   font-size: 11px;
 }
 
+/* FAIXA DE CARDS DE NÚMERO — SE AJUSTA À QUANTIDADE.
+
+   Eram sempre 4 colunas fixas, mas as telas têm quantidades diferentes de
+   cards: o Dashboard tem 6 e os dois últimos caíam sozinhos numa segunda
+   linha, com metade dela vazia; a Análise de SAC tem 5 e sobrava o mesmo
+   vão. Com auto-fit os cards dividem a largura disponível por igual e a
+   faixa termina alinhada com o conteúdo de baixo, seja qual for o número.
+
+   O piso de 150px é o que impede a divisão de ir longe demais: abaixo
+   disso o rótulo em maiúsculas começa a quebrar em três linhas. */
 .grid-4 {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
 }
 
+/* BOTÕES DE AÇÃO DA TABELA.
+   Eram três ícones cinza soltos sobre o fundo do card: sem contorno, sem
+   fundo e do mesmo tom, exigiam ler o tooltip para distinguir Editar de
+   Excluir. Agora cada um é um chip com corpo próprio — fundo tonal, borda
+   da mesma família e relevo ao passar o mouse. A cor identifica a ação; o
+   corpo dá o alvo de clique e separa os três visualmente. */
 .btn-action {
   width: 30px;
   height: 30px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
   cursor: pointer;
-  margin: 0 2px;
+  margin: 0 3px;
   transition: all var(--transition-fast);
   /* O botão não declarava cor e herdava o preto padrão do navegador. No
      tema Dark, ícone preto sobre card escuro dava 1,43 de contraste — na
@@ -2867,6 +2906,67 @@ body[data-theme="dark"] .skeleton-loading {
 }
 
 .btn-action .material-icons { color: inherit; }
+
+/* CORES DAS AÇÕES DA TABELA.
+   Antes os três botões eram do mesmo cinza: para saber qual era qual era
+   preciso passar o mouse e ler o tooltip, um a um — e Excluir ficava com o
+   mesmo peso visual de Editar. Agora cada ação tem a sua cor, e a
+   destrutiva se separa das outras à primeira vista.
+   As cores vêm dos tokens do tema, então acompanham Azul, Rosa, Brasil e
+   Dark sem precisar de variante por tema. */
+/* Cada ação tem a sua cor no ícone, na borda e num fundo bem diluído. O
+   fundo fica leve de propósito: cinco linhas na tela viram quinze botões, e
+   cores chapadas transformariam a coluna num mosaico. */
+.btn-action--editar {
+  color: var(--primary-blue);
+  border-color: color-mix(in srgb, var(--primary-blue) 35%, transparent);
+  background: color-mix(in srgb, var(--primary-blue) 8%, var(--card-bg));
+}
+.btn-action--status {
+  color: #B26A00;
+  border-color: color-mix(in srgb, #B26A00 35%, transparent);
+  background: color-mix(in srgb, #B26A00 8%, var(--card-bg));
+}
+.btn-action--excluir {
+  color: #C62828;
+  border-color: color-mix(in srgb, #C62828 35%, transparent);
+  background: color-mix(in srgb, #C62828 8%, var(--card-bg));
+}
+
+/* Hover: a cor toma o botão inteiro e ele sobe um pixel — confirma o alvo
+   antes do clique, o que importa especialmente no Excluir. */
+.btn-action--editar:hover {
+  background: var(--primary-blue); color: #fff;
+  border-color: var(--primary-blue);
+  transform: translateY(-1px); box-shadow: var(--shadow);
+}
+.btn-action--status:hover {
+  background: #B26A00; color: #fff; border-color: #B26A00;
+  transform: translateY(-1px); box-shadow: var(--shadow);
+}
+.btn-action--excluir:hover {
+  background: #C62828; color: #fff; border-color: #C62828;
+  transform: translateY(-1px); box-shadow: var(--shadow);
+}
+
+/* No Dark os tons médios escurecem demais contra o card escuro: o ícone e a
+   borda clareiam, e o fundo diluído fica mais presente para o chip não
+   sumir. */
+body[data-theme="dark"] .btn-action--editar {
+  color: #7FB0FF; border-color: color-mix(in srgb, #7FB0FF 40%, transparent);
+  background: color-mix(in srgb, #7FB0FF 12%, var(--card-bg));
+}
+body[data-theme="dark"] .btn-action--status {
+  color: #FFB74D; border-color: color-mix(in srgb, #FFB74D 40%, transparent);
+  background: color-mix(in srgb, #FFB74D 12%, var(--card-bg));
+}
+body[data-theme="dark"] .btn-action--excluir {
+  color: #EF9A9A; border-color: color-mix(in srgb, #EF9A9A 40%, transparent);
+  background: color-mix(in srgb, #EF9A9A 12%, var(--card-bg));
+}
+body[data-theme="dark"] .btn-action--editar:hover  { background: #7FB0FF; color: #10203A; }
+body[data-theme="dark"] .btn-action--status:hover  { background: #FFB74D; color: #2A1C05; }
+body[data-theme="dark"] .btn-action--excluir:hover { background: #EF9A9A; color: #3A1010; }
 
 /* Foco visível: estes botões são só ícone e precisam ser alcançáveis por
    teclado (Editar, Alterar status e Excluir ficam todos aqui). */
@@ -3010,7 +3110,7 @@ body[data-theme="dark"] .skeleton-loading {
 }
 
 @media (max-width: 1200px) {
-  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .header-right { gap: 10px; }
 }
 
@@ -3289,10 +3389,15 @@ body[data-theme="dark"] .skeleton-loading {
    Tudo aqui usa as variáveis de tema, então acompanha Azul, Rosa, Brasil
    e Dark sem regra específica por tema. */
 
+/* LINHAS ENXUTAS PARA OS 5 REGISTROS CABEREM.
+   Cada célula empilha duas ou três informações; com o respiro anterior a
+   linha passava de 110px e o quinto registro ficava fora da área visível,
+   obrigando a rolar dentro da tabela para ver a página inteira. */
 .dash-grupo {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
+  line-height: 1.3;
   min-width: 0;                 /* deixa o texto truncar dentro do flex */
   line-height: 1.35;
 }

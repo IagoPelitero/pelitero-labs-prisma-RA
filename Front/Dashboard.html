@@ -33,7 +33,13 @@ Pages.dashboard = {
     termoBusca: '',   // pesquisa rápida (qualquer informação visível)
     filtros: {},      // filtros individuais combináveis (data, produto, etc.)
     pagina: 1,
-    porPagina: 25
+    // CINCO POR PÁGINA.
+    // Com 25, a tabela empurrava a paginação para fora da tela em
+    // notebook: para trocar de página era preciso rolar até o fim, voltar
+    // ao topo e rolar de novo. Com 5, a lista inteira e os controles cabem
+    // na primeira dobra de 1366x768, e quem precisa de mais aumenta pelo
+    // seletor "por página" — que continua oferecendo 10, 25, 50 e 100.
+    porPagina: 5
   },
 
   // Mapeamento filtro → id do input na tela. As chaves de select/data são
@@ -1032,19 +1038,22 @@ Pages.dashboard = {
       actions.push({
         icon: 'edit',
         title: 'Editar',
+        tom: 'editar',
         // Edição em modal: o usuário permanece no Dashboard.
         onClick: function(row) { self.abrirEdicao(row.raw); }
       });
       actions.push({
-        icon: 'change_circle',
+        icon: 'published_with_changes',
         title: 'Alterar status',
+        tom: 'status',
         onClick: function(row) { self.alterarStatus(row.raw); }
       });
     }
     if (podeExcluir) {
       actions.push({
-        icon: 'delete',
+        icon: 'delete_outline',
         title: 'Excluir',
+        tom: 'excluir',
         onClick: function(row) {
           Components.confirm('Tem certeza que deseja excluir o atendimento ' + App.escapeHtml(row.raw.numeroRA) + '? Esta ação não poderá ser desfeita.', function() {
             self.excluir(row.id);

@@ -431,7 +431,7 @@ const Components = {
 
      options: {
        pagina:     número da página atual (1-based),
-       porPagina:  registros por página (10 | 25 | 50 | 100),
+       porPagina:  registros por página (5 | 10 | 25 | 50 | 100),
        total:      total de registros após filtros,
        onPageChange:  function(novaPagina) — chamada ao navegar,
        onPageSizeChange: function(novoTamanho) — chamada ao trocar o
@@ -485,7 +485,9 @@ const Components = {
     var inicio = total === 0 ? 0 : (pagina - 1) * porPagina + 1;
     var fim = Math.min(pagina * porPagina, total);
 
-    var tamanhos = [10, 25, 50, 100];
+    // 5 entra na lista porque é o padrão do Dashboard: sem ele, quem
+    // trocasse o tamanho não teria como voltar.
+    var tamanhos = [5, 10, 25, 50, 100];
     var selectHtml = '<label class="pagination-size">Exibir ' +
       '<select onchange="Components._pageBarSize(\'' + barId + '\', this.value)">';
     tamanhos.forEach(function(t) {
@@ -770,7 +772,12 @@ const Components = {
             // Botão só de ícone precisa de aria-label: sem ele, um leitor
             // de tela anuncia apenas "botão" e o usuário não sabe o que faz.
             var rotuloAcao = (action.title || 'Ação').replace(/"/g, '&quot;');
-            actionsHtml += '<button type="button" class="btn-action" title="' + rotuloAcao +
+            // Cor semântica opcional: a tela declara action.tom ('editar',
+            // 'status', 'excluir') e o CSS pinta o ícone. Três ícones cinza
+            // idênticos obrigam a ler o tooltip um a um antes de clicar —
+            // e a ação destrutiva fica visualmente igual às outras duas.
+            var tom = action.tom ? ' btn-action--' + action.tom : '';
+            actionsHtml += '<button type="button" class="btn-action' + tom + '" title="' + rotuloAcao +
               '" aria-label="' + rotuloAcao +
               '" onclick="Components._runTableAction(\'' + tableId + '\',' + a + ',' + r + ',event)">' +
               actionIcon + '</button>';
