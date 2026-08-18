@@ -7,12 +7,26 @@ projeto sem precisar redescobrir nada. Leia-o inteiro antes de tocar em código.
 
 ## 1. O essencial em cinco linhas
 
-- O banco PGO 5.0 **já está em produção**. Não é mais uma migração.
-- Branch oficial de trabalho: **`fix/pgo5-operacao-final`**.
-- **Não alterar** `main` nem `fix/pgo5-tombamento-seguro`.
-- **Não fazer merge. Não fazer deploy.** Commit e push só na branch de trabalho.
+- O banco PGO 5.0 **já está em produção**, e é o sistema **único e final**.
+- **`main` é a branch oficial** desde a versão 5.3. Trabalhe a partir dela.
+- Trabalho novo: **crie uma branch** a partir de `main`, nunca commite direto.
+- **Não fazer deploy** — a publicação no Apps Script é manual, feita pelo PO.
+- Rode a suíte **5 vezes** antes de commitar, e o teste de estresse antes de
+  qualquer entrega.
 - Nada de dado real no Git: sem CPF, cliente, protocolo real, e-mail
   corporativo, Spreadsheet ID, PIN, token, URL privada ou caminho local.
+
+### Branches
+
+| Branch | O que é |
+|---|---|
+| `main` | **Oficial e final.** É o que vai para produção |
+| `resguardo/main-antes-da-5.3` | Ponto de retorno do estado anterior à consolidação |
+| `fix/pgo5-operacao-final` | Branch de trabalho da 5.1 → 5.3, já incorporada ao `main` |
+| `fix/pgo5-tombamento-seguro` | Histórica. Não usar |
+
+Para desfazer a consolidação (só se algo grave aparecer em produção):
+`git reset --hard resguardo/main-antes-da-5.3` — e avise o PO antes.
 
 ---
 
@@ -25,7 +39,8 @@ projeto sem precisar redescobrir nada. Leia-o inteiro antes de tocar em código.
 | `Back/Pgo5Atendimentos.gs` | Motor do formulário, CRUD, regras de data e status |
 | `Back/Pgo5Catalogo.gs` | Catálogo (canais, campos, produtos, status…) e seed |
 | `Back/Pgo5Permissoes.gs` | Permissões, níveis de acesso e escopos |
-| `Back/Pgo5Importacao.gs` | Importar Base Legada (padrão Prisma Performance) |
+| `Back/Pgo5Importacao.gs` | Importar Base Legada (acrescenta histórico à base em uso) |
+| `Back/Pgo5Diagnostico.gs` | `verificarIntegridadeBuildPGO5` — roda dentro do Apps Script |
 | `Front/AtendimentoPGO5.html` | Tela Novo Atendimento / edição |
 | `Front/AcessoPGO5.html` | **Fonte única** de permissões por tela |
 
@@ -92,6 +107,36 @@ silencioso em produção.
 
 ---
 
+## 4b. Como o sistema trata a planilha (perguntas frequentes)
+
+### As abas não existem → ele cria
+
+`inicializarPGO5_()` roda na abertura e cria as cinco abas com o cabeçalho
+correto. Em seguida `pgo5AplicarSeedEstrutural_()` semeia o catálogo inicial
+(3 canais, 27 campos, 3 status, produtos e "aguardando"). Uma planilha em
+branco vira uma instalação utilizável sem nenhuma intervenção.
+
+### As abas já existem → ele lê e reflete, sem recriar
+
+Reabrir o sistema sobre uma base em uso **não apaga, não recria e não
+sobrescreve**: as abas existentes são reconhecidas e os dados seguem intactos.
+O seed também não ressuscita item que o ADM excluiu de propósito — ele guarda
+em Script Property (por planilha) o que já semeou alguma vez.
+
+### Ele lê dados que já estavam lá?
+
+Sim, inclusive linhas escritas direto na planilha, sem passar pelo sistema.
+Basta que estejam nas colunas certas: Dashboard, Relatórios e Produtividade
+passam a exibi-las na leitura seguinte. É por isso que a Importar Base Legada
+apenas ACRESCENTA linhas — não precisa de mais nada para o dado aparecer.
+
+⚠️ **Abas de sistemas anteriores que sobrarem na planilha** (`ReclameAqui`,
+`SACPreventivo`, `Produtos`, `Categorias`…) são **ignoradas**: o PGO não lê,
+não escreve e não apaga nenhuma delas. Removê-las é decisão do PO, manual, e
+só depois de conferir que nada mais as consome.
+
+---
+
 ## 5. Armadilhas já encontradas (não repita)
 
 - **Listas de permissão duplicadas.** A regra de quais permissões abrem cada
@@ -120,18 +165,23 @@ Concluídos e validados: acesso ao Novo Atendimento, data/status/aguardando,
 formulário compacto, teclado + `Ctrl+Enter`, salvamento único, cache do
 catálogo, cards e tabela do Dashboard, e **Importar Base Legada**.
 
-### Ainda em aberto (do plano combinado com o PO)
+Na 5.3 o sistema foi consolidado: saiu o caminho 4.x, saíram os motores de
+conversão de base (8 arquivos, ~5.500 linhas) e entrou o
+`Back/Pgo5Diagnostico.gs`. Existe **uma implementação por responsabilidade**.
 
-- **Remover o Tombamento da interface.** Atenção: `Back/Pgo5Tombamento.gs`
-  mistura o motor de tombamento com a suíte `verificarIntegridadeBuildPGO5`,
-  que hoje cobre correções importantes do seed. **Preservar os testes** ao
-  remover o resto.
-- **Auditoria de arquivos redundantes.** Candidatos conhecidos:
-  `listarAtendimentosPGO5_` (não é chamada por ninguém),
-  `NovoAtendimento.html` × `AtendimentoPGO5.html`,
-  `Configuracoes.html` × `ConfiguracoesPGO5.html`,
-  `Pgo5Migracao.gs` × `Pgo5Tombamento.gs`.
-- **Testes de estresse** com 20 e 50 usuários simultâneos.
+⚠️ **Ao publicar, APAGUE do editor do Apps Script** os arquivos removidos, se
+ainda estiverem lá: `Pgo5Tombamento.gs`, `Pgo5Migracao.gs` e
+`TombamentoPGO5.html`. Deixá-los não quebra nada, mas ressuscita a tela de
+tombamento — que não existe mais no produto.
+
+### Ainda em aberto
+
+- **Separar o código 4.x de `Services.gs` (3.440 linhas) e `Database.gs`
+  (1.663).** Esses arquivos misturam a ponte de dados que o 5.0 usa com
+  caminhos do modelo antigo. Não foi feito por ser refatoração ampla, de
+  risco alto — trate como trabalho próprio, com validação própria, e nunca
+  junto de uma entrega com prazo.
+- `listarAtendimentosPGO5_` não é chamada por ninguém no backend.
 
 ---
 
@@ -146,11 +196,17 @@ ordem alfabética, mas as constantes de topo são avaliadas na carga:
 1. `Config.gs`, `Utils.gs`, `Database.gs`
 2. `Pgo5.gs`, `Pgo5Auditoria.gs`, `Pgo5Permissoes.gs`, `Pgo5Seguranca.gs`
 3. `Pgo5Usuarios.gs`, `Pgo5Catalogo.gs`, `Pgo5Atendimentos.gs`
-4. `Pgo5Importacao.gs`, `Pgo5Analitico.gs`, `Pgo5Migracao.gs`, `Pgo5Tombamento.gs`
+4. `Pgo5Importacao.gs`, `Pgo5Analitico.gs`, `Pgo5Diagnostico.gs`
 5. `Services.gs`, `Code.gs`
 6. Todos os `.html` do `Front/`
 
-**Depois de publicar**, conferir nesta ordem — cada passo prova uma camada:
+São **27 arquivos** ao todo (14 `.gs` e 13 `.html`).
+
+**Depois de publicar**, rode primeiro `verificarIntegridadeBuildPGO5` no
+editor do Apps Script: ela só lê e diz, em segundos, se algum arquivo ficou
+para trás na cópia manual. Nenhum teste rodado fora do Apps Script pega isso.
+
+Depois, na interface — cada passo prova uma camada:
 
 1. o sistema abre e o menu aparece;
 2. Novo Atendimento abre e lista os canais;
@@ -168,9 +224,10 @@ falhando. A tela mostra o motivo técnico — leia a mensagem antes de mexer.
 
 Cole isto, ajustando a última linha:
 
-> Projeto PGO 5.0, repositório `pelitero-labs-prisma-RA`, branch
-> `fix/pgo5-operacao-final`. Leia `CONTINUIDADE-PGO.md` na raiz antes de
+> Projeto PGO 5.0, repositório `pelitero-labs-prisma-RA`, branch `main`
+> (é a oficial e final). Leia `CONTINUIDADE-PGO.md` na raiz antes de
 > qualquer coisa e siga as regras de lá.
-> Não altere `main` nem `fix/pgo5-tombamento-seguro`, não faça merge e não
-> faça deploy. Rode a suíte 5 vezes antes de commitar.
+> Crie uma branch a partir de `main` para o trabalho — não commite direto
+> nela. Não faça deploy: a publicação no Apps Script é manual e é minha.
+> Rode a suíte 5 vezes e o teste de estresse antes de commitar.
 > O que eu preciso agora é: **_(descreva aqui)_**
