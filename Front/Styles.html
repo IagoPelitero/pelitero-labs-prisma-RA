@@ -1405,8 +1405,10 @@ body[data-theme="dark"] .header-title {
 .pgo5-grid .form-group[data-campo="cpf"]          { flex: 0 1 190px; }
 
 /* Texto corrido ocupa a linha inteira — vale para Observações, Resumo e
-   qualquer campo de texto longo que o ADM criar. */
-.pgo5-grid .form-group:has(textarea) { flex: 1 1 100%; }
+   qualquer campo de texto longo que o ADM criar.
+   Por data-tipo, e não por :has(): o seletor :has() é CSS recente e num
+   navegador mais antigo a regra seria ignorada em silêncio. */
+.pgo5-grid .form-group[data-tipo="textarea"] { flex: 1 1 100%; }
 .pgo5-grid .form-group[data-campo="observacoes"] { flex: 1 1 100%; }
 
 .pgo5-grid .form-label {

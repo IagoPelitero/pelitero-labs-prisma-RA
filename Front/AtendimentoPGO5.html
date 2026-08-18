@@ -105,7 +105,12 @@ var FormularioPGO5 = {
       if (campo.nome === 'status') v = (dados && dados.statusInicialId) || '';
     }
 
-    var html = '<div class="form-group" data-campo="' + App.escapeHtml(campo.nome) + '">';
+    // O TIPO vai para o HTML porque o CSS precisa dele: textarea ocupa a
+    // linha inteira. Fazer isso com :has() funcionaria, mas é CSS recente —
+    // num navegador mais antigo o campo simplesmente não se comportaria, e
+    // sem aviso. Um atributo resolve em qualquer navegador.
+    var html = '<div class="form-group" data-campo="' + App.escapeHtml(campo.nome) +
+      '" data-tipo="' + App.escapeHtml(campo.tipo || 'text') + '">';
     html += '<label class="form-label" for="' + id + '">' +
       App.escapeHtml(campo.rotulo) + obrigatorio + '</label>';
     html += this.controleHtml(campo, v, dados, estado, id);
@@ -328,7 +333,21 @@ Pages.novoAtendimentoPGO5 = {
     google.script.run
       .withSuccessHandler(function(registro) {
         if (!registro) {
-          Components.toast('Atendimento não encontrado.', 'error');
+          // RESPOSTA VAZIA TEM TRÊS CAUSAS POSSÍVEIS, e a diferença importa:
+          //   · o registro foi excluído por outra pessoa;
+          //   · está fora do escopo de quem abriu;
+          //   · o servidor não tem a função — acontece quando a publicação
+          //     no Apps Script fica incompleta, ou quando um arquivo .gs
+          //     falhou na carga e levou junto todas as funções dele.
+          //
+          // A terceira é a mais confusa: o sistema abre normalmente e só esta
+          // tela falha, com uma mensagem que aponta para o dado e não para a
+          // instalação. Dizer as três possibilidades poupa horas de procura
+          // no lugar errado.
+          Components.toast('Não foi possível abrir este atendimento. Ele pode ter ' +
+            'sido excluído, estar fora do seu acesso, ou o servidor pode estar ' +
+            'com a publicação incompleta — peça ao Administrador para executar ' +
+            'verificarIntegridadeBuildPGO5.', 'error', 8000);
           App.navigateTo('dashboard');
           return;
         }

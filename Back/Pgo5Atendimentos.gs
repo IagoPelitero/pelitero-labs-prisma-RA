@@ -626,7 +626,7 @@ function aplicarRegraDeAguardandoRetorno_(estrutural, atendimentoAtual, catalogo
  * @returns {string} Mensagem de erro, ou '' quando está tudo certo.
  */
 function pgo5ConferirReferenciaEstrutural_(campo, valor, catalogo) {
-  const tipoDoCampo = PGO5_REFERENCIA_ESTRUTURAL_[campo.nome];
+  const tipoDoCampo = pgo5ReferenciaEstrutural_()[campo.nome];
   if (!tipoDoCampo) return '';
 
   const id = String(valor || '').trim();
@@ -641,14 +641,31 @@ function pgo5ConferirReferenciaEstrutural_(campo, valor, catalogo) {
 /**
  * De qual tipo do catálogo vem o Id de cada campo estrutural.
  * Campos fora deste mapa não referenciam catálogo.
+ *
+ * ⚠️ É FUNÇÃO, E NÃO PODE VIRAR CONSTANTE DE TOPO.
+ * O Apps Script avalia os arquivos .gs em ordem ALFABÉTICA, num escopo
+ * global único. PGO5_TIPOS vive em Pgo5Catalogo.gs, que carrega DEPOIS de
+ * Pgo5Atendimentos.gs — então, no instante em que uma constante de topo
+ * daqui fosse avaliada, PGO5_TIPOS ainda não existiria.
+ *
+ * E o estrago não seria só nesta linha: um ReferenceError na carga derruba o
+ * ARQUIVO INTEIRO. Todas as funções daqui deixam de existir, e o sintoma
+ * aparece longe da causa — a tela de edição passa a dizer "atendimento não
+ * encontrado" porque obterAtendimentoPGO5 simplesmente não está lá.
+ *
+ * Dentro de uma função não há esse risco: quando ela roda, tudo já carregou.
+ *
+ * @returns {Object} Mapa nome-do-campo → tipo do catálogo.
  */
-const PGO5_REFERENCIA_ESTRUTURAL_ = {
-  produto: PGO5_TIPOS.PRODUTO,
-  categoria: PGO5_TIPOS.CATEGORIA,
-  subcategoria: PGO5_TIPOS.SUBCATEGORIA,
-  status: PGO5_TIPOS.STATUS,
-  aguardandoRetorno: PGO5_TIPOS.AGUARDANDO
-};
+function pgo5ReferenciaEstrutural_() {
+  return {
+    produto: PGO5_TIPOS.PRODUTO,
+    categoria: PGO5_TIPOS.CATEGORIA,
+    subcategoria: PGO5_TIPOS.SUBCATEGORIA,
+    status: PGO5_TIPOS.STATUS,
+    aguardandoRetorno: PGO5_TIPOS.AGUARDANDO
+  };
+}
 
 /**
  * Cria um atendimento no PGO 5.0.

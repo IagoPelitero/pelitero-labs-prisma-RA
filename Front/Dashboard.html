@@ -1091,16 +1091,222 @@ Pages.dashboard = {
   },
 
   /**
-   * Abre a edição do atendimento na tela do formulário dinâmico.
+   * Abre a edição do atendimento num MODAL, sem sair do Dashboard.
    *
-   * Cada canal pergunta campos diferentes, montados a partir da
-   * configuração — não cabe num modal de campos fixos. A tela abre já no
-   * canal salvo do registro.
+   * O formulário é montado a partir da configuração do canal do registro —
+   * o mesmo motor da tela de Novo Atendimento (FormularioPGO5), então um
+   * campo criado pelo ADM aparece aqui sozinho, sem alteração de código.
+   *
+   * POR QUE MODAL, E NÃO OUTRA TELA
+   * Quem trabalha na lista costuma corrigir vários registros seguidos. Sair
+   * para outra tela e voltar a cada correção custa a posição na lista, os
+   * filtros aplicados e a página em que a pessoa estava.
    *
    * @param {Object} atendimento Linha da tabela (formato do cliente).
    */
   abrirEdicao: function(atendimento) {
-    App.navigateTo('novoAtendimento', atendimento.id);
+    var self = this;
+    if (!atendimento || !atendimento.id) {
+      Components.toast('Não foi possível identificar o atendimento.', 'error');
+      return;
+    }
+    Components.showLoading('Carregando atendimento...');
+
+    // Duas informações são necessárias: o CATÁLOGO (para montar os campos do
+    // canal) e o REGISTRO (para preenchê-los). O catálogo quase sempre já
+    // está em memória, então na prática só o registro vai ao servidor.
+    App.carregarFormularioPGO5(function(catalogo) {
+      google.script.run
+        .withSuccessHandler(function(registro) {
+          Components.hideLoading();
+          if (!registro) {
+            // Resposta vazia tem três causas, e a diferença importa: o
+            // registro foi excluído, está fora do escopo de quem abriu, ou o
+            // servidor não tem a função — o que acontece quando a publicação
+            // no Apps Script fica incompleta.
+            Components.toast('Não foi possível abrir este atendimento. Ele pode ter ' +
+              'sido excluído, estar fora do seu acesso, ou o servidor pode estar ' +
+              'com a publicação incompleta — peça ao Administrador para executar ' +
+              'verificarIntegridadeBuildPGO5.', 'error', 8000);
+            return;
+          }
+          self._modalEdicaoPGO5(atendimento, registro, catalogo);
+        })
+        .withFailureHandler(function(err) {
+          Components.hideLoading();
+          Components.toast('Erro ao carregar atendimento: ' +
+            ((err && err.message) || ''), 'error');
+        })
+        .obterAtendimentoPGO5(atendimento.id);
+    }, function(err) {
+      Components.hideLoading();
+      Components.toast('Não foi possível carregar o formulário: ' +
+        ((err && err.message) || ''), 'error');
+    });
+  },
+
+  /**
+   * Desenha o modal de edição com os campos do canal do registro.
+   *
+   * @param {Object} linha Linha da tabela (usada no título).
+   * @param {Object} registro Resposta de obterAtendimentoPGO5.
+   * @param {Object} catalogo Resposta de getFormularioPGO5.
+   */
+  _modalEdicaoPGO5: function(linha, registro, catalogo) {
+    var self = this;
+    var campos = ((catalogo.camposPorCanal || {})[registro.canalId]) || [];
+    if (!campos.length) {
+      Components.toast('Este canal não possui formulário configurado.', 'warning');
+      return;
+    }
+
+    var valores = registro.valores || {};
+    var estado = {
+      produtoId: valores.produto || '',
+      categoriaId: valores.categoria || '',
+      temProduto: campos.some(function(c) { return c.nome === 'produto'; }),
+      // Em edição os padrões do sistema NÃO se aplicam: o registro já tem
+      // data e status próprios, e sobrepô-los reescreveria o histórico.
+      emEdicao: true
+    };
+
+    var body = '<form id="pgo5-modal-form" autocomplete="off"><div class="pgo5-grid">';
+    campos.forEach(function(campo) {
+      // O Analista não delega: vê o próprio nome, sem seletor editável.
+      if (campo.nome === 'responsavel' && !catalogo.podeDelegar) {
+        var eu = (catalogo.responsaveis || [])[0];
+        body += '<div class="form-group"><label class="form-label">' +
+          App.escapeHtml(campo.rotulo) + '</label>' +
+          '<input class="form-control" type="text" value="' +
+          App.escapeHtml(eu ? eu.rotulo : '') + '" disabled></div>';
+        return;
+      }
+      body += FormularioPGO5.campoHtml(campo, valores[campo.nome], catalogo, estado);
+    });
+    body += '</div></form>';
+
+    // Campos que saíram da configuração: exibidos como leitura, para o
+    // histórico do atendimento não ficar invisível.
+    if ((registro.historicos || []).length) {
+      body += '<div class="pgo5-historicos"><h3>Campos removidos da configuração</h3><ul>';
+      registro.historicos.forEach(function(h) {
+        body += '<li><strong>' + App.escapeHtml(h.rotulo) + ':</strong> ' +
+          App.escapeHtml(String(h.valor === null || h.valor === undefined ? '' : h.valor)) +
+          '</li>';
+      });
+      body += '</ul></div>';
+    }
+
+    Components.modal({
+      title: 'Editar atendimento — ' + App.escapeHtml(linha.numeroRA || ''),
+      body: body,
+      size: 'large',
+      confirmText: 'Salvar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        self._salvarEdicaoModalPGO5(linha.id, campos, catalogo);
+      }
+    });
+
+    // As MESMAS regras da tela cheia: cascata local e Aguardando só em
+    // Pendente. Sem elas o modal ofereceria combinações que o servidor
+    // depois recusaria.
+    self._ligarRegrasDoModal(campos, catalogo, estado);
+  },
+
+  /**
+   * Liga, dentro do modal, a cascata Produto → Categoria → Subcategoria e a
+   * regra do "Aguardando Retorno de".
+   *
+   * @param {Object[]} campos Campos do canal.
+   * @param {Object} catalogo Catálogo do formulário.
+   * @param {Object} estado Estado da montagem.
+   */
+  _ligarRegrasDoModal: function(campos, catalogo, estado) {
+    var self = this;
+
+    // Só dígitos em CPF e Protocolo (conforto; o servidor revalida).
+    document.querySelectorAll('#pgo5-modal-form .pgo5-so-digitos').forEach(function(campo) {
+      campo.addEventListener('input', function() {
+        var apenas = campo.value.replace(/\D/g, '');
+        if (campo.value !== apenas) campo.value = apenas;
+      });
+    });
+
+    // A cascata roda LOCAL, sobre o catálogo já carregado: trocar o produto
+    // não vai ao servidor.
+    var redesenhar = function() {
+      var elProduto = document.getElementById('pgo5-campo-produto');
+      var elCategoria = document.getElementById('pgo5-campo-categoria');
+      estado.produtoId = elProduto ? elProduto.value : '';
+      estado.categoriaId = elCategoria ? elCategoria.value : '';
+      ['categoria', 'subcategoria'].forEach(function(nome) {
+        var campo = campos.find(function(c) { return c.nome === nome; });
+        if (!campo) return;
+        var grupo = document.querySelector('#pgo5-modal-form .form-group[data-campo="' + nome + '"]');
+        if (!grupo) return;
+        var label = grupo.querySelector('.form-label');
+        grupo.innerHTML = (label ? label.outerHTML : '') +
+          FormularioPGO5.controleHtml(campo, '', catalogo, estado,
+            FormularioPGO5.idDoCampo(campo));
+      });
+      self._ligarRegrasDoModal(campos, catalogo, estado);
+    };
+
+    var selProduto = document.getElementById('pgo5-campo-produto');
+    if (selProduto) selProduto.addEventListener('change', redesenhar);
+    var selCategoria = document.getElementById('pgo5-campo-categoria');
+    if (selCategoria) selCategoria.addEventListener('change', redesenhar);
+
+    // "Aguardando Retorno de" só existe em Pendente — decidido pelo NOME
+    // técnico, porque o rótulo é renomeável.
+    var selStatus = document.getElementById('pgo5-campo-status');
+    var grupoAguardando = document.querySelector('#pgo5-modal-form .form-group[data-campo="aguardandoRetorno"]');
+    var sincronizar = function() {
+      if (!grupoAguardando) return;
+      var escolhido = (catalogo.status || []).find(function(st) {
+        return st.id === (selStatus ? selStatus.value : '');
+      });
+      var ehPendente = !!escolhido && App.semAcento(escolhido.nome) === 'pendente';
+      grupoAguardando.style.display = ehPendente ? '' : 'none';
+      // Some E limpa: voltando a Pendente, o campo reaparece vazio.
+      if (!ehPendente) {
+        var campo = document.getElementById('pgo5-campo-aguardandoRetorno');
+        if (campo) campo.value = '';
+      }
+    };
+    if (selStatus) selStatus.addEventListener('change', sincronizar);
+    sincronizar();
+  },
+
+  /**
+   * Grava a edição feita no modal e recarrega a lista.
+   *
+   * @param {string} id Id do atendimento.
+   * @param {Object[]} campos Campos do canal.
+   * @param {Object} catalogo Catálogo do formulário.
+   */
+  _salvarEdicaoModalPGO5: function(id, campos, catalogo) {
+    var self = this;
+    var valores = FormularioPGO5.coletar(campos);
+    if (!catalogo.podeDelegar) delete valores.responsavel;
+
+    Components.showLoading('Salvando...');
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.hideLoading();
+        Components.toast('Atendimento atualizado. ✓', 'success');
+        // Recarrega a lista SEM sair da tela: o usuário continua onde estava.
+        self.carregarDados();
+      })
+      .withFailureHandler(function(err) {
+        Components.hideLoading();
+        Components.toast(((err && err.message) || 'Não foi possível salvar.'), 'error');
+      })
+      .atualizarAtendimentoPGO5(id, {
+        valores: valores,
+        responsavelId: valores.responsavel || ''
+      });
   },
 
   /**
@@ -1237,7 +1443,8 @@ Pages.dashboard = {
       });
       body += '</select></div>';
 
-      body += '<div class="form-group"><label class="form-label" for="pgo5-quick-aguardando">Aguardando Retorno de</label>';
+      body += '<div class="form-group" id="pgo5-quick-aguardando-grupo">' +
+        '<label class="form-label" for="pgo5-quick-aguardando">Aguardando Retorno de</label>';
       body += '<select id="pgo5-quick-aguardando" class="form-control"><option value="">Selecione</option>';
       var agAtual = aguardando.find(function(a) { return a.rotulo === atendimento.situacaoPendencia; });
       var aguardandoAtual = agAtual ? agAtual.id : '';
@@ -1254,15 +1461,58 @@ Pages.dashboard = {
         cancelText: 'Cancelar',
         onConfirm: function() {
           var statusId = document.getElementById('pgo5-quick-status').value;
-          var aguardandoId = document.getElementById('pgo5-quick-aguardando').value;
+          // Fora de Pendente o campo está escondido: enviar o que ficou nele
+          // gravaria um aguardando que a tela não mostra. O servidor limpa
+          // de qualquer forma (aplicarRegraDeAguardandoRetorno_); aqui a
+          // tela apenas para de mandar o que não vale.
+          var aguardandoId = self._modalEhPendente(statusAtivos)
+            ? document.getElementById('pgo5-quick-aguardando').value
+            : '';
           self._salvarStatusPGO5(atendimento.id, statusId, aguardandoId);
         }
       });
+
+      // MESMA REGRA DO FORMULÁRIO: "Aguardando Retorno de" só existe em
+      // Pendente. Sem isto, o modal continuava oferecendo o campo depois de
+      // trocar para Em análise ou Concluído — e a pessoa preenchia algo que
+      // o servidor ia descartar, sem entender por quê.
+      var seletorStatus = document.getElementById('pgo5-quick-status');
+      var grupoAguardando = document.getElementById('pgo5-quick-aguardando-grupo');
+      var sincronizar = function() {
+        if (!grupoAguardando) return;
+        var ehPendente = self._modalEhPendente(statusAtivos);
+        grupoAguardando.style.display = ehPendente ? '' : 'none';
+        // Some E limpa: voltando a Pendente, o campo reaparece vazio em vez
+        // de ressuscitar a escolha anterior.
+        if (!ehPendente) {
+          var campo = document.getElementById('pgo5-quick-aguardando');
+          if (campo) campo.value = '';
+        }
+      };
+      if (seletorStatus) seletorStatus.addEventListener('change', sincronizar);
+      sincronizar();
     }, function(err) {
       Components.hideLoading();
       Components.toast('Não foi possível carregar as opções: ' +
         ((err && err.message) || ''), 'error');
     });
+  },
+
+  /**
+   * Diz se o status escolhido NO MODAL é o Pendente.
+   *
+   * Compara pelo NOME técnico, nunca pelo rótulo: o administrador pode ter
+   * renomeado "Pendente" para qualquer coisa, e a regra tem de continuar
+   * valendo.
+   *
+   * @param {Object[]} statusAtivos Status do catálogo.
+   * @returns {boolean} true quando o status escolhido é o Pendente.
+   */
+  _modalEhPendente: function(statusAtivos) {
+    var seletor = document.getElementById('pgo5-quick-status');
+    if (!seletor) return false;
+    var escolhido = (statusAtivos || []).find(function(s) { return s.id === seletor.value; });
+    return !!escolhido && App.semAcento(escolhido.nome) === 'pendente';
   },
 
   /** Persiste a troca de status no PGO 5.0 (grava ID, nunca texto). */

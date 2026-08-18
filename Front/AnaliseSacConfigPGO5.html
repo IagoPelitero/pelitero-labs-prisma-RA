@@ -1,0 +1,435 @@
+<script>
+/* ============================================================
+   PRISMA Gestão Operacional — PGO 5.0
+   Arquivo: AnaliseSacConfigPGO5.html
+
+   RESPONSABILIDADE
+   Configurar a planilha externa que alimenta a Análise de SAC:
+   qual arquivo, qual aba, a partir de qual linha, e como as
+   colunas são lidas.
+
+   ⚠️ ESTA PLANILHA É DE FORA DO SISTEMA
+   Ela não é o banco do PGO — é uma fonte de terceiros que muda de
+   layout sem avisar. Por isso o ADM precisa poder apontar outra
+   aba a qualquer momento, e por isso as colunas são localizadas
+   pelo NOME do cabeçalho: mudar a ordem ou acrescentar colunas na
+   origem não quebra a leitura.
+
+   Também por isso NÃO exige PIN. O PIN protege o banco do próprio
+   sistema; trocar a aba de uma planilha externa é operação de
+   rotina de quem analisa, não uma operação de risco sobre os dados
+   do PGO.
+   ============================================================ */
+
+Pages.analiseSacConfigPGO5 = {
+
+  /**
+   * Devolve o elemento onde esta tela deve desenhar.
+   *
+   * Mesmo padrão das outras seções externas de Configurações: dentro do slot
+   * quando existe, senão ocupando o <main>.
+   * @returns {HTMLElement} Elemento alvo.
+   */
+  _alvo: function() {
+    return document.getElementById('pgo5cfg-externo') || document.getElementById('app');
+  },
+
+  /**
+   * Abre a tela.
+   * @param {HTMLElement} [container] Elemento onde desenhar.
+   */
+  render: function(container) {
+    // Conforto: o servidor revalida a permissão a cada chamada.
+    if (!AcessoPGO5.podeNaInterface('configurarAnaliseSac')) {
+      App.navigateTo('dashboard');
+      return;
+    }
+    this._carregar(this._alvo());
+  },
+
+  /**
+   * v4.7 — Painel de configuração do módulo Indicadores Operacionais
+   * (EXCLUSIVO do ADM). Formulário único (não é lista) para definir a
+   * planilha externa de origem e como lê-la. Ao salvar, recarrega o
+   * bootstrap para o rótulo do menu refletir o novo nome imediatamente.
+   * @param {HTMLElement} container - <div id="config-table">.
+   */
+  _carregar: function(container) {
+    var self = this;
+    container.innerHTML = Components.emptyState('query_stats', 'Carregando configuração...');
+
+    google.script.run
+      .withSuccessHandler(function(cfg) {
+        self._indicOpCfg = cfg || {};
+        // Cabeçalhos/status descobertos na origem. Enquanto o ADM não
+        // clicar em "Ler planilha", o mapeamento fica em campos de texto —
+        // assim uma configuração antiga continua editável mesmo que a
+        // planilha externa esteja momentaneamente inacessível.
+        self._indicOpFonte = null;
+        self._renderIndicOpForm(container);
+      })
+      .withFailureHandler(function(error) {
+        container.innerHTML = Components.emptyState('error_outline',
+          'Não foi possível carregar a configuração.', error.message);
+      })
+      .getIndicadoresOperacionaisConfig();
+  },
+
+  /**
+   * Painel "Nomes das telas" (EXCLUSIVO do ADM). Permite trocar o RÓTULO
+   * visível de cada tela. Campo vazio volta ao nome padrão.
+   *
+   * Só apresentação: o identificador técnico da página (data-page) aparece
+   * na tela apenas como informação e NUNCA muda — rotas, funções, abas,
+   * colunas e integrações seguem intactas.
+   * @param {HTMLElement} container - <div id="config-table">.
+   */
+  renderNomesTelasPanel: function(container) {
+    var self = this;
+    container.innerHTML = Components.emptyState('label', 'Carregando nomes...');
+
+    google.script.run
+      .withSuccessHandler(function(telas) {
+        self._nomesTelas = telas || [];
+        var html = '<div class="card-header"><div class="card-title">' +
+          '<span class="material-icons">label</span>Nomes das telas</div></div>';
+        html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">' +
+          'Defina como cada tela aparece no menu e no seu título. É apenas o nome exibido — ' +
+          'as páginas, permissões e dados do sistema não mudam. ' +
+          '<strong>Deixe em branco para voltar ao nome padrão.</strong></p>';
+
+        html += '<div class="config-form-grid">';
+        self._nomesTelas.forEach(function(t) {
+          var valor = t.personalizado ? t.nome : '';
+          html += '<div class="form-group">';
+          html += '<label class="form-label" for="tela-' + t.pagina + '">' + App.escapeHtml(t.padrao) + '</label>';
+          html += '<input class="form-control" id="tela-' + t.pagina + '" type="text" maxlength="40" value="' +
+            App.escapeHtml(valor) + '" placeholder="' + App.escapeHtml(t.padrao) + '">';
+          html += '<small style="color:var(--text-secondary);font-size:11.5px;">Padrão: ' +
+            App.escapeHtml(t.padrao) + '</small>';
+          html += '</div>';
+        });
+        html += '</div>';
+        html += '<div class="form-actions" style="margin-top:16px;">' +
+          '<button type="button" class="btn btn-primary" id="telas-salvar">💾 Salvar nomes</button>' +
+          '<button type="button" class="btn btn-secondary" id="telas-restaurar">↩️ Restaurar padrões</button></div>';
+
+        container.innerHTML = html;
+
+        var btn = document.getElementById('telas-salvar');
+        if (btn) btn.addEventListener('click', function() { self._salvarNomesTelas(); });
+        var btnR = document.getElementById('telas-restaurar');
+        if (btnR) btnR.addEventListener('click', function() {
+          self._nomesTelas.forEach(function(t) {
+            var el = document.getElementById('tela-' + t.pagina);
+            if (el) el.value = '';
+          });
+          self._salvarNomesTelas();
+        });
+      })
+      .withFailureHandler(function(error) {
+        container.innerHTML = Components.emptyState('error_outline',
+          'Não foi possível carregar os nomes das telas.', error.message);
+      })
+      .getNomesTelas();
+  },
+
+  /** Coleta e salva os nomes visíveis; recarrega o menu ao concluir. */
+  _salvarNomesTelas: function() {
+    var self = this;
+    var payload = {};
+    (self._nomesTelas || []).forEach(function(t) {
+      var el = document.getElementById('tela-' + t.pagina);
+      payload[t.pagina] = el ? el.value : '';
+    });
+    Components.showLoading('Salvando nomes...');
+    google.script.run
+      .withSuccessHandler(function() {
+        Components.hideLoading();
+        Components.toast('Nomes das telas atualizados.', 'success');
+        // Recarrega o bootstrap para o menu refletir os novos rótulos.
+        App.reloadBootstrap(function() {
+          var container = document.getElementById('config-table');
+          if (container && self.active === 'nomesTelas') self.renderNomesTelasPanel(container);
+        });
+      })
+      .withFailureHandler(function(error) {
+        Components.hideLoading();
+        Components.toast('Erro ao salvar: ' + error.message, 'error');
+      })
+      .salvarNomesTelas(payload);
+  },
+
+  /**
+   * Normaliza uma lista da configuração para ARRAY.
+   * O formulário tem duas variações: campos de texto separados por ";"
+   * (antes de ler a planilha) e caixas/seletores (depois). A coleta devolve
+   * texto numa e array na outra, então tudo que lê a configuração passa por
+   * aqui — sem isso, alternar entre as variações quebra a tela.
+   * @param {string|string[]} valor - Lista em qualquer um dos formatos.
+   * @returns {string[]} Lista normalizada, sem vazios.
+   */
+  _listaCfgIndicOp: function(valor) {
+    var bruta = Array.isArray(valor)
+      ? valor
+      : String(valor === undefined || valor === null ? '' : valor).split(';');
+    return bruta.map(function(v) { return String(v).trim(); })
+      .filter(function(v) { return v !== ''; });
+  },
+
+  /** Desenha o formulário de configuração da Análise de SAC. */
+  _renderIndicOpForm: function(container) {
+    var self = this;
+    var cfg = self._indicOpCfg || {};
+    var fonte = self._indicOpFonte;
+
+    var html = '<div class="card-header"><div class="card-title">' +
+      '<span class="material-icons">query_stats</span>Análise de SAC</div></div>';
+    html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">' +
+      'Configure a planilha Google Sheets externa que alimenta esta análise. As colunas são ' +
+      'localizadas pelo NOME do cabeçalho — mudanças de ordem ou colunas novas na origem não ' +
+      'quebram a leitura. Você precisa ter acesso à planilha informada.</p>';
+
+    // ── 1. Fonte ──
+    html += '<h4 style="margin:0 0 10px;">1. Fonte de dados</h4>';
+    var basicos = [
+      { k: 'abaNome', label: 'Nome da seção (menu)', tipo: 'text', dica: 'Como o item aparece no menu lateral e no título da tela.' },
+      { k: 'planilhaUrl', label: 'Link da planilha de origem', tipo: 'text', dica: 'URL completa do Google Sheets externo.', wide: true },
+      { k: 'abaOrigem', label: 'Nome da aba de origem', tipo: 'text', dica: 'Aba, dentro da planilha externa, com os dados.' },
+      { k: 'linhaInicial', label: 'Linha do cabeçalho', tipo: 'number', dica: 'Linha onde estão os títulos das colunas (a tabela pode começar em qualquer linha).' }
+    ];
+    html += '<div class="config-form-grid">';
+    basicos.forEach(function(c) {
+      var valor = cfg[c.k] === undefined || cfg[c.k] === null ? '' : String(cfg[c.k]);
+      html += '<div class="form-group' + (c.wide ? ' config-form-wide' : '') + '">';
+      html += '<label class="form-label" for="indop-' + c.k + '">' + c.label + '</label>';
+      html += '<input class="form-control" id="indop-' + c.k + '" type="' + c.tipo + '"' +
+        (c.tipo === 'number' ? ' min="1"' : '') + ' value="' + App.escapeHtml(valor) + '">';
+      html += '<small style="color:var(--text-secondary);font-size:11.5px;">' + c.dica + '</small>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="form-actions" style="margin-top:12px;">' +
+      '<button type="button" class="btn btn-secondary" id="indop-ler">🔎 Ler cabeçalhos da planilha</button>' +
+      '<span id="indop-ler-info" style="font-size:12.5px;color:var(--text-secondary);margin-left:10px;"></span></div>';
+
+    // ── 2. Mapeamento das colunas ──
+    html += '<h4 style="margin:22px 0 10px;">2. Mapeamento das colunas</h4>';
+    if (!fonte) {
+      html += '<p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px;">' +
+        'Clique em <strong>Ler cabeçalhos da planilha</strong> para escolher as colunas em listas. ' +
+        'Enquanto isso, informe os nomes exatos dos cabeçalhos.</p>';
+    }
+    var mapeaveis = [
+      { k: 'colunaData', label: 'Data', obrig: true },
+      { k: 'colunaStatus', label: 'Status', obrig: true },
+      { k: 'colunaAssunto', label: 'Assunto', obrig: false },
+      { k: 'colunaSubassunto', label: 'Subassunto', obrig: false },
+      { k: 'colunaAnalista', label: 'Quem analisou', obrig: false }
+    ];
+    html += '<div class="config-form-grid">';
+    mapeaveis.forEach(function(c) {
+      var valor = cfg[c.k] === undefined || cfg[c.k] === null ? '' : String(cfg[c.k]);
+      html += '<div class="form-group">';
+      html += '<label class="form-label" for="indop-' + c.k + '">' + c.label +
+        (c.obrig ? ' <span style="color:var(--danger,#E53935)">*</span>' : '') + '</label>';
+      if (fonte && fonte.cabecalhos && fonte.cabecalhos.length) {
+        html += '<select class="form-control" id="indop-' + c.k + '">';
+        html += '<option value="">' + (c.obrig ? '— selecione —' : '— não usar —') + '</option>';
+        fonte.cabecalhos.forEach(function(h) {
+          html += '<option value="' + App.escapeHtml(h) + '"' +
+            (String(h).toLowerCase() === valor.toLowerCase() ? ' selected' : '') + '>' +
+            App.escapeHtml(h) + '</option>';
+        });
+        html += '</select>';
+      } else {
+        html += '<input class="form-control" id="indop-' + c.k + '" type="text" value="' +
+          App.escapeHtml(valor) + '">';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+
+    // Colunas categóricas extras liberadas para o seletor "Analisar por".
+    html += '<div class="form-group" style="margin-top:12px;">';
+    html += '<label class="form-label">Outras colunas para "Analisar por"</label>';
+    var extras = self._listaCfgIndicOp(cfg.colunasExtras);
+    if (fonte && fonte.cabecalhos && fonte.cabecalhos.length) {
+      html += '<div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0;">';
+      fonte.cabecalhos.forEach(function(h, i) {
+        var marcado = extras.some(function(e) { return String(e).toLowerCase() === String(h).toLowerCase(); });
+        html += '<label style="display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer;">' +
+          '<input type="checkbox" class="indop-extra" data-col="' + App.escapeHtml(h) + '"' +
+          (marcado ? ' checked' : '') + '> ' + App.escapeHtml(h) + '</label>';
+      });
+      html += '</div>';
+    } else {
+      html += '<input class="form-control" id="indop-colunasExtras" type="text" value="' +
+        App.escapeHtml(extras.join('; ')) + '" placeholder="Ex.: Canal; Fila; Prioridade">';
+    }
+    html += '<small style="color:var(--text-secondary);font-size:11.5px;">' +
+      'Ficam disponíveis no seletor “Analisar por” da tela de análise.</small>';
+    html += '</div>';
+
+    // ── 3. Agrupamento de status ──
+    html += '<h4 style="margin:22px 0 10px;">3. Agrupamento de Status</h4>';
+    html += '<p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px;">' +
+      'Defina a que grupo pertence cada valor de status da planilha. ' +
+      '<strong>Fechado</strong> e <strong>Rejeitado</strong> podem ficar no mesmo grupo. ' +
+      'O que ficar sem grupo é contado como <strong>Não Classificado</strong> — nunca como “Em Aberto”.</p>';
+    html += self._indicOpStatusHtml(cfg, fonte);
+
+    html += '<div class="form-actions" style="margin-top:20px;">' +
+      '<button type="button" class="btn btn-primary" id="indop-salvar">💾 Salvar configuração</button></div>';
+
+    container.innerHTML = html;
+
+    var btnLer = document.getElementById('indop-ler');
+    if (btnLer) btnLer.addEventListener('click', function() { self._lerFonteIndicOp(container); });
+    var btnSalvar = document.getElementById('indop-salvar');
+    if (btnSalvar) btnSalvar.addEventListener('click', function() { self._salvarIndicOp(); });
+  },
+
+  /**
+   * Bloco de agrupamento de status. Com a planilha lida, cada valor
+   * encontrado vira uma linha com um seletor de grupo (o caminho fácil).
+   * Sem leitura, cai para três campos de texto separados por ";" — permite
+   * editar uma configuração existente sem depender da planilha.
+   */
+  _indicOpStatusHtml: function(cfg, fonte) {
+    var grupos = [
+      { k: 'statusEmAberto', label: 'Em Aberto' },
+      { k: 'statusEmAnalise', label: 'Em Análise' },
+      { k: 'statusFechado', label: 'Fechado' }
+    ];
+    var self = this;
+    var atual = {};
+    grupos.forEach(function(g) {
+      self._listaCfgIndicOp(cfg[g.k]).forEach(function(v) { atual[String(v).toLowerCase()] = g.k; });
+    });
+
+    if (fonte && fonte.statusEncontrados && fonte.statusEncontrados.length) {
+      var html = '<div class="indop-scroll"><table class="indop-table" style="min-width:420px;">';
+      html += '<thead><tr><th class="indop-rowhead">Status na planilha</th><th>Grupo</th></tr></thead><tbody>';
+      fonte.statusEncontrados.forEach(function(s, i) {
+        var sel = atual[String(s).toLowerCase()] || '';
+        html += '<tr><td class="indop-rowhead">' + App.escapeHtml(s) + '</td><td>';
+        html += '<select class="form-control indop-status-map" data-status="' + App.escapeHtml(s) + '">';
+        html += '<option value="">Não Classificado</option>';
+        grupos.forEach(function(g) {
+          html += '<option value="' + g.k + '"' + (sel === g.k ? ' selected' : '') + '>' + g.label + '</option>';
+        });
+        html += '</select></td></tr>';
+      });
+      html += '</tbody></table></div>';
+      return html;
+    }
+
+    var htmlTexto = '<div class="config-form-grid">';
+    grupos.forEach(function(g) {
+      htmlTexto += '<div class="form-group">';
+      htmlTexto += '<label class="form-label" for="indop-' + g.k + '">' + g.label + '</label>';
+      htmlTexto += '<input class="form-control" id="indop-' + g.k + '" type="text" value="' +
+        App.escapeHtml(self._listaCfgIndicOp(cfg[g.k]).join('; ')) + '" placeholder="Valores separados por ;">';
+      htmlTexto += '</div>';
+    });
+    htmlTexto += '</div>';
+    return htmlTexto;
+  },
+
+  /** Lê cabeçalhos e status distintos da planilha externa informada. */
+  _lerFonteIndicOp: function(container) {
+    var self = this;
+    var info = document.getElementById('indop-ler-info');
+    // Preserva o que já está digitado antes de redesenhar o formulário.
+    self._indicOpCfg = Object.assign({}, self._indicOpCfg, self._coletarIndicOp());
+    if (info) info.textContent = 'Lendo a planilha...';
+
+    google.script.run
+      .withSuccessHandler(function(fonte) {
+        self._indicOpFonte = fonte || null;
+        self._renderIndicOpForm(container);
+        var msg = document.getElementById('indop-ler-info');
+        if (msg && fonte) {
+          msg.textContent = '✓ ' + (fonte.cabecalhos || []).length + ' colunas e ' +
+            (fonte.statusEncontrados || []).length + ' status encontrados em ' +
+            App.formatNumber(fonte.totalLinhas || 0) + ' linhas.';
+        }
+      })
+      .withFailureHandler(function(error) {
+        if (info) info.textContent = '';
+        Components.toast(String(error.message || '').replace(/^INDICOP:\s*/, ''), 'error');
+      })
+      .getIndicadoresOperacionaisFonte({
+        planilhaUrl: self._indicOpCfg.planilhaUrl,
+        abaOrigem: self._indicOpCfg.abaOrigem,
+        linhaInicial: self._indicOpCfg.linhaInicial,
+        colunaStatus: self._indicOpCfg.colunaStatus
+      });
+  },
+
+  /** Lê o formulário atual (funciona nas duas variações: lista ou texto). */
+  _coletarIndicOp: function() {
+    var val = function(id) {
+      var el = document.getElementById(id);
+      return el ? String(el.value || '') : '';
+    };
+    var payload = {
+      abaNome: val('indop-abaNome'),
+      planilhaUrl: val('indop-planilhaUrl'),
+      abaOrigem: val('indop-abaOrigem'),
+      linhaInicial: val('indop-linhaInicial') || '1',
+      colunaData: val('indop-colunaData'),
+      colunaStatus: val('indop-colunaStatus'),
+      colunaAssunto: val('indop-colunaAssunto'),
+      colunaSubassunto: val('indop-colunaSubassunto'),
+      colunaAnalista: val('indop-colunaAnalista')
+    };
+
+    // Colunas extras: caixas de seleção (após ler a planilha) ou texto.
+    var caixas = document.querySelectorAll('.indop-extra');
+    if (caixas.length) {
+      payload.colunasExtras = Array.prototype.filter.call(caixas, function(c) { return c.checked; })
+        .map(function(c) { return c.getAttribute('data-col'); });
+    } else {
+      payload.colunasExtras = val('indop-colunasExtras');
+    }
+
+    // Agrupamento de status: seletores por valor ou três campos de texto.
+    var seletores = document.querySelectorAll('.indop-status-map');
+    if (seletores.length) {
+      payload.statusEmAberto = [];
+      payload.statusEmAnalise = [];
+      payload.statusFechado = [];
+      Array.prototype.forEach.call(seletores, function(s) {
+        if (s.value && payload[s.value]) payload[s.value].push(s.getAttribute('data-status'));
+      });
+    } else {
+      payload.statusEmAberto = val('indop-statusEmAberto');
+      payload.statusEmAnalise = val('indop-statusEmAnalise');
+      payload.statusFechado = val('indop-statusFechado');
+    }
+    return payload;
+  },
+
+  /** Coleta o formulário e salva a configuração do módulo. */
+  _salvarIndicOp: function() {
+    var self = this;
+    var payload = self._coletarIndicOp();
+    Components.showLoading('Salvando configuração...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        Components.hideLoading();
+        if (res && res.config) self._indicOpCfg = res.config;
+        Components.toast('Configuração salva com sucesso.', 'success');
+        // Atualiza o rótulo do menu (nome da seção pode ter mudado).
+        App.reloadBootstrap();
+      })
+      .withFailureHandler(function(error) {
+        Components.hideLoading();
+        Components.toast('Erro ao salvar: ' + error.message, 'error');
+      })
+      .salvarIndicadoresOperacionaisConfig(payload);
+  },
+};
+</script>
