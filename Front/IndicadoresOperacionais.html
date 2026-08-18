@@ -138,6 +138,22 @@ Pages.indicadoresOperacionais = {
    * Dados") faz o servidor reler a planilha externa ignorando o cache.
    * @param {boolean} forceRefresh - Releitura forçada.
    */
+  /*
+   * ESTA TELA FICA DE FORA DA ATUALIZAÇÃO AUTOMÁTICA, DE PROPÓSITO.
+   *
+   * Ela não lê o banco do sistema: abre uma planilha EXTERNA e percorre a
+   * aba inteira. É a operação mais cara do PGO, e o Apps Script cobra esse
+   * tempo da cota diária compartilhada por todos os usuários — repeti-la a
+   * cada minuto, em cada aba aberta, gastaria a cota do dia inteiro sem
+   * ninguém ter pedido nada.
+   *
+   * Além disso o dado de origem é atualizado por outra equipe, em outro
+   * ritmo: relê-lo a cada minuto não traria novidade na maioria das vezes.
+   *
+   * Quem precisa do dado fresco usa o botão "Atualizar Dados", que existe
+   * justamente para isso. Por não declarar `atualizarEmSegundoPlano`, esta
+   * tela simplesmente não entra no ciclo (ver App._tentarAtualizar).
+   */
   carregar: function(forceRefresh) {
     var self = this;
     if (self.state.carregando) return;

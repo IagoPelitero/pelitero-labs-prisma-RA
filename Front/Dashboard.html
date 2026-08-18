@@ -399,6 +399,45 @@ Pages.dashboard = {
   },
 
   /**
+   * Atualização automática, chamada pelo relógio de 60 segundos.
+   *
+   * Vai ao servidor sem faixa e sem esqueleto: a tela já está preenchida e
+   * a pessoa pode estar lendo. Piscar um aviso a cada minuto viraria ruído.
+   * Se algo mudou, a tabela se atualiza; se não, nada acontece na tela.
+   *
+   * A PÁGINA E OS FILTROS SÃO PRESERVADOS. Quem está na página 3 conferindo
+   * uma lista filtrada continua exatamente ali — devolver a pessoa para a
+   * página 1 a cada minuto tornaria o sistema inutilizável.
+   *
+   * @param {Function} aoTerminar Recebe true (deu certo) ou false (falhou).
+   */
+  atualizarEmSegundoPlano: function(aoTerminar) {
+    var self = this;
+    var paginaAtual = self.state.pagina;
+
+    google.script.run
+      .withSuccessHandler(function(dados) {
+        if (!dados || !Array.isArray(dados.atendimentos)) { aoTerminar(false); return; }
+        App.guardarNaMemoria('dashboard', dados);
+        self.state.atendimentos = dados.atendimentos;
+        self.filtrarLocal();                 // reaplica os filtros em uso
+
+        // Devolve a pessoa para a página onde estava — mas sem passar do
+        // fim: se registros saíram do filtro, a página antiga pode não
+        // existir mais, e a tabela apareceria vazia sem explicação.
+        var totalPaginas = Math.max(1,
+          Math.ceil(self.state.filtrados.length / self.state.porPagina));
+        self.state.pagina = Math.min(paginaAtual, totalPaginas);
+        self.renderizarKPIs(dados.cards, dados.porSituacao);
+        self.renderizarCanais(dados.porCanal);
+        self.renderizarTabela();
+        aoTerminar(true);
+      })
+      .withFailureHandler(function() { aoTerminar(false); })
+      .getDashboardData(null);
+  },
+
+  /**
    * Desenha o Dashboard inteiro a partir de uma resposta do servidor.
    *
    * Existe para o mesmo desenho servir aos dois momentos: o imediato, com o

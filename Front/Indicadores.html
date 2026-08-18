@@ -307,6 +307,32 @@ Pages.indicadores = {
    * registrado no console para diagnóstico.
    * @param {number} tentativa - Nº da tentativa (interno; padrão 1).
    */
+  /**
+   * Atualização automática, chamada pelo relógio de 60 segundos.
+   *
+   * Sem faixa e sem esqueleto: os gráficos já estão na tela e a pessoa pode
+   * estar lendo. Só redesenha quando a resposta chega.
+   *
+   * @param {Function} aoTerminar Recebe true (deu certo) ou false (falhou).
+   */
+  atualizarEmSegundoPlano: function(aoTerminar) {
+    var self = this;
+    if (App.schemaBanco !== 'PGO5') { aoTerminar(true); return; }
+
+    google.script.run
+      .withSuccessHandler(function(resumo) {
+        if (!resumo || typeof resumo !== 'object') { aoTerminar(false); return; }
+        App.guardarNaMemoria('produtividade', resumo);
+        self.state.agregado = resumo;
+        self.state.dados = [];
+        self.renderCards();
+        self.renderCharts();
+        aoTerminar(true);
+      })
+      .withFailureHandler(function() { aoTerminar(false); })
+      .obterProdutividadeEquipePGO5(self.getFiltros());
+  },
+
   atualizar: function(tentativa) {
     var self = this;
     tentativa = tentativa || 1;

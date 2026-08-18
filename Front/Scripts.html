@@ -56,6 +56,9 @@ var App = {
       var initial = window.location.hash ? window.location.hash.replace('#', '') : 'dashboard';
       if (!Pages[initial] && initial !== 'novoAtendimento') initial = 'dashboard';
       App.navigateTo(initial, {}, true);
+      // Só depois que o sistema abriu: ligar antes disso poria uma segunda
+      // chamada na fila enquanto a primeira ainda está carregando.
+      App.iniciarAtualizacaoAutomatica();
     }, function(error) {
       // v4.5: e-mail não cadastrado/ativo na aba Usuários — o sistema não
       // inicia e mostra a mensagem de acesso não autorizado no lugar do
@@ -672,6 +675,91 @@ var App = {
     };
     update();
     setInterval(update, 30000);
+  },
+
+  /* ──────────────────────────────────────────────────────────────
+     ATUALIZAÇÃO AUTOMÁTICA (a cada 60 segundos)
+     ──────────────────────────────────────────────────────────────
+     Mantém a tela em dia sem ninguém precisar clicar em "Atualizar".
+
+     ⚠️ AS QUATRO TRAVAS ABAIXO NÃO SÃO ZELO EXCESSIVO.
+     Cada atualização é uma ida ao servidor, e o Apps Script cobra isso do
+     TEMPO DE EXECUÇÃO DIÁRIO da conta — que é limitado e compartilhado por
+     todos os usuários do sistema. Um relógio que dispara sem critério, em
+     todas as abas abertas de todas as pessoas, gasta essa cota à toa e pode
+     derrubar o sistema no meio do expediente.
+
+       1. ABA ESCONDIDA NÃO ATUALIZA. Ninguém está olhando; a atualização
+          acontece assim que a pessoa voltar para a aba.
+       2. MODAL ABERTO NÃO ATUALIZA. Redesenhar por baixo de um formulário
+          em uso pode apagar o que está sendo digitado.
+       3. UMA ATUALIZAÇÃO POR VEZ. Se a anterior ainda não voltou (servidor
+          lento), o relógio espera em vez de empilhar chamadas.
+       4. FALHOU, PAROU. Depois de duas falhas seguidas o relógio se desliga
+          e deixa o botão "Atualizar" com a pessoa — insistir contra um
+          servidor com problema só piora o problema.
+     ────────────────────────────────────────────────────────────── */
+
+  /** Intervalo entre atualizações, em milissegundos. */
+  INTERVALO_ATUALIZACAO_MS: 60000,
+
+  /** Quantas falhas seguidas desligam o relógio. */
+  FALHAS_ATE_DESLIGAR: 2,
+
+  _relogioLigado: false,
+  _atualizandoAgora: false,
+  _falhasSeguidas: 0,
+
+  /**
+   * Liga o relógio de atualização automática. Chamado uma vez, no início.
+   */
+  iniciarAtualizacaoAutomatica: function() {
+    if (this._relogioLigado) return;      // evita relógios duplicados
+    this._relogioLigado = true;
+    var self = this;
+
+    setInterval(function() { self._tentarAtualizar(); }, this.INTERVALO_ATUALIZACAO_MS);
+
+    // Voltou para a aba depois de um tempo fora: atualiza na hora, em vez
+    // de esperar o próximo minuto cheio.
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) self._tentarAtualizar();
+    });
+  },
+
+  /**
+   * Atualiza a tela atual, se for seguro fazer isso agora.
+   *
+   * As telas que sabem se atualizar declaram o método `atualizarEmSegundoPlano`.
+   * Quem não declara simplesmente não entra no ciclo — é assim que
+   * Configurações, Novo Atendimento e as telas de cadastro ficam de fora sem
+   * precisar de uma lista de exceções aqui.
+   */
+  _tentarAtualizar: function() {
+    if (!this._relogioLigado) return;
+    if (document.hidden) return;                       // trava 1
+    if (document.querySelector('.modal-overlay, .modal-backdrop, #modal-container > *')) return;  // trava 2
+    if (this._atualizandoAgora) return;                // trava 3
+
+    var tela = Pages[this.currentPage];
+    if (!tela || typeof tela.atualizarEmSegundoPlano !== 'function') return;
+
+    var self = this;
+    this._atualizandoAgora = true;
+    tela.atualizarEmSegundoPlano(function(deuCerto) {
+      self._atualizandoAgora = false;
+      if (deuCerto) {
+        self._falhasSeguidas = 0;
+        return;
+      }
+      self._falhasSeguidas++;
+      if (self._falhasSeguidas >= self.FALHAS_ATE_DESLIGAR) {   // trava 4
+        self._relogioLigado = false;
+        Components.toast('A atualização automática foi desligada porque o servidor ' +
+          'não respondeu. Use o botão Atualizar quando quiser tentar de novo.',
+          'warning', 8000);
+      }
+    });
   },
 
   // Preenche um <select> com uma lista de valores. "blankLabel" é o texto
