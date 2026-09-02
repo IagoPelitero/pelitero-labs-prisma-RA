@@ -271,8 +271,46 @@ Pages.analiseSacConfigPGO5 = {
       'Ficam disponíveis no seletor “Analisar por” da tela de análise.</small>';
     html += '</div>';
 
-    // ── 3. Agrupamento de status ──
-    html += '<h4 style="margin:22px 0 10px;">3. Agrupamento de Status</h4>';
+    // ── 3. Detalhamento de "Em Análise" ──
+    // Reaproveita os MESMOS cabeçalhos já descobertos pelo botão "Ler
+    // cabeçalhos da planilha": nenhuma leitura nova da origem acontece aqui.
+    html += '<h4 style="margin:22px 0 10px;">3. Detalhamento de Em Análise</h4>';
+    html += '<p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px;">' +
+      'Duas colunas da planilha que a tela de análise vai listar, linha a linha, ' +
+      'para os registros do grupo <strong>Em Análise</strong> (ex.: Data + Número do Caso). ' +
+      'Deixe as duas em branco para não exibir a listagem.</p>';
+    var detalhaveis = [
+      { k: 'colunaDetalheEmAnalise1', label: 'Primeira coluna' },
+      { k: 'colunaDetalheEmAnalise2', label: 'Segunda coluna' }
+    ];
+    html += '<div class="config-form-grid">';
+    detalhaveis.forEach(function(c) {
+      var valor = cfg[c.k] === undefined || cfg[c.k] === null ? '' : String(cfg[c.k]);
+      html += '<div class="form-group">';
+      html += '<label class="form-label" for="indop-' + c.k + '">' + c.label + '</label>';
+      // Mesmo padrão dos demais mapeamentos: lista quando os cabeçalhos já
+      // foram lidos, campo de texto enquanto não foram.
+      if (fonte && fonte.cabecalhos && fonte.cabecalhos.length) {
+        html += '<select class="form-control" id="indop-' + c.k + '">';
+        html += '<option value="">— não usar —</option>';
+        fonte.cabecalhos.forEach(function(h) {
+          html += '<option value="' + App.escapeHtml(h) + '"' +
+            (String(h).toLowerCase() === valor.toLowerCase() ? ' selected' : '') + '>' +
+            App.escapeHtml(h) + '</option>';
+        });
+        html += '</select>';
+      } else {
+        html += '<input class="form-control" id="indop-' + c.k + '" type="text" value="' +
+          App.escapeHtml(valor) + '">';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<small style="color:var(--text-secondary);font-size:11.5px;">' +
+      'As duas juntas ou nenhuma, e precisam ser diferentes entre si.</small>';
+
+    // ── 4. Agrupamento de status ──
+    html += '<h4 style="margin:22px 0 10px;">4. Agrupamento de Status</h4>';
     html += '<p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px;">' +
       'Defina a que grupo pertence cada valor de status da planilha. ' +
       '<strong>Fechado</strong> e <strong>Rejeitado</strong> podem ficar no mesmo grupo. ' +
@@ -383,7 +421,9 @@ Pages.analiseSacConfigPGO5 = {
       colunaStatus: val('indop-colunaStatus'),
       colunaAssunto: val('indop-colunaAssunto'),
       colunaSubassunto: val('indop-colunaSubassunto'),
-      colunaAnalista: val('indop-colunaAnalista')
+      colunaAnalista: val('indop-colunaAnalista'),
+      colunaDetalheEmAnalise1: val('indop-colunaDetalheEmAnalise1'),
+      colunaDetalheEmAnalise2: val('indop-colunaDetalheEmAnalise2')
     };
 
     // Colunas extras: caixas de seleção (após ler a planilha) ou texto.

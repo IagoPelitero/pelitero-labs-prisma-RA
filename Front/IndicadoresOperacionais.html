@@ -231,6 +231,7 @@ Pages.indicadoresOperacionais = {
       this._alertaColunasAusentesHtml(dados) +
       this._alertaNaoClassificadoHtml(dados) +
       this._graficosHtml(dados) +
+      this._detalhamentoEmAnaliseHtml(dados) +
       this._tabelaHtml(dados);
 
     this._ligarSeletorAnalise(dados);
@@ -502,6 +503,58 @@ Pages.indicadoresOperacionais = {
     this._criarChart('indop-c-generico',
       this._configRanking(lista, Pages.indicadores._cores[6] || '#607D8B',
         Number(dados.totalCasos) || 0, 10));
+  },
+
+  /**
+   * Listagem, linha a linha, dos registros classificados como "Em Análise".
+   *
+   * Só existe quando o ADM configurou AS DUAS colunas de detalhamento; sem
+   * elas o painel fica exatamente como era. O que chega do servidor são
+   * apenas os valores dessas duas colunas — a linha da planilha de origem
+   * nunca vem inteira para o navegador.
+   *
+   * @param {Object} dados - Resposta de getIndicadoresOperacionais.
+   * @returns {string} HTML da seção, ou '' quando não há detalhamento.
+   */
+  _detalhamentoEmAnaliseHtml: function(dados) {
+    var colunas = dados.detalhamentoEmAnaliseColunas || [];
+    if (colunas.length !== 2) return '';
+
+    var linhas = dados.detalhamentoEmAnalise || [];
+    var total = Number(dados.detalhamentoEmAnaliseTotal || linhas.length);
+
+    var html = '<div class="card" style="margin-top:16px;">';
+    html += '<div class="card-header"><div class="card-title">';
+    html += '<span class="material-icons">manage_search</span>';
+    html += 'Detalhamento — Em Análise';
+    html += '</div></div>';
+
+    if (!linhas.length) {
+      html += Components.emptyState('search_off',
+        'Nenhum registro Em Análise encontrado no período selecionado.');
+      return html + '</div>';
+    }
+
+    html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>';
+    html += '<th>' + App.escapeHtml(colunas[0]) + '</th>';
+    html += '<th>' + App.escapeHtml(colunas[1]) + '</th>';
+    html += '</tr></thead><tbody>';
+    linhas.forEach(function(linha) {
+      html += '<tr><td>' + App.escapeHtml(linha.coluna1 || '-') + '</td>' +
+        '<td>' + App.escapeHtml(linha.coluna2 || '-') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // O servidor corta a lista para não inflar o payload, mas conta o total
+    // real: o rodapé diz quantos ficaram de fora em vez de apresentar a
+    // lista parcial como se fosse tudo.
+    if (dados.detalhamentoEmAnaliseLimitado) {
+      html += '<p style="font-size:12px;color:var(--text-secondary);margin-top:10px;">' +
+        'Exibindo os primeiros ' + App.formatNumber(linhas.length) + ' de ' +
+        App.formatNumber(total) + ' registros Em Análise.</p>';
+    }
+    html += '</div>';
+    return html;
   },
 
   /**

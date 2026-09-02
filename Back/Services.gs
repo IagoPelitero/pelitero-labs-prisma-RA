@@ -1714,6 +1714,12 @@ function indicOpConfigPadrao_() {
     colunaAssunto: '',
     colunaSubassunto: '',
     colunaAnalista: '',
+    // DETALHAMENTO DE "EM ANÁLISE" — duas colunas da origem que o ADM
+    // escolhe para listar, uma a uma, as linhas classificadas nesse grupo
+    // (ex.: Data + Número do Caso). Vazias = a listagem não aparece e o
+    // painel segue exatamente como estava.
+    colunaDetalheEmAnalise1: '',
+    colunaDetalheEmAnalise2: '',
     // Outras colunas categóricas que o ADM libera para o seletor
     // "Analisar por" — evita ter um gráfico codificado para cada coluna.
     colunasExtras: [],
@@ -1774,6 +1780,11 @@ function lerIndicOpConfig_() {
     colunaAssunto: String(salvo.colunaAssunto || '').trim(),
     colunaSubassunto: String(salvo.colunaSubassunto || '').trim(),
     colunaAnalista: String(salvo.colunaAnalista || '').trim(),
+    // Ausentes nas configurações já gravadas → viram vazio, e o
+    // detalhamento simplesmente não aparece. Configuração antiga continua
+    // valendo sem nenhuma migração.
+    colunaDetalheEmAnalise1: String(salvo.colunaDetalheEmAnalise1 || '').trim(),
+    colunaDetalheEmAnalise2: String(salvo.colunaDetalheEmAnalise2 || '').trim(),
     colunasExtras: listaConfigOp_(salvo.colunasExtras),
     statusEmAberto: listaConfigOp_(salvo.statusEmAberto),
     statusEmAnalise: listaConfigOp_(salvo.statusEmAnalise),
@@ -1838,6 +1849,8 @@ function salvarIndicadoresOperacionaisConfig(dados) {
     colunaAssunto: sanitizeInput(entrada.colunaAssunto),
     colunaSubassunto: sanitizeInput(entrada.colunaSubassunto),
     colunaAnalista: sanitizeInput(entrada.colunaAnalista),
+    colunaDetalheEmAnalise1: sanitizeInput(entrada.colunaDetalheEmAnalise1),
+    colunaDetalheEmAnalise2: sanitizeInput(entrada.colunaDetalheEmAnalise2),
     colunasExtras: limparLista(entrada.colunasExtras),
     statusEmAberto: limparLista(entrada.statusEmAberto),
     statusEmAnalise: limparLista(entrada.statusEmAnalise),
@@ -1845,6 +1858,18 @@ function salvarIndicadoresOperacionaisConfig(dados) {
   };
   if (cfg.planilhaUrl && !/docs\.google\.com\/spreadsheets/i.test(cfg.planilhaUrl)) {
     throw new Error('A URL informada não parece ser de uma planilha Google Sheets.');
+  }
+  // O detalhamento tem DUAS colunas ou NENHUMA: com só uma configurada, a
+  // tabela sairia com uma coluna em branco e o ADM não teria como saber se
+  // esqueceu de preencher ou se a coluna sumiu da origem.
+  const temDetalhe1 = !!cfg.colunaDetalheEmAnalise1;
+  const temDetalhe2 = !!cfg.colunaDetalheEmAnalise2;
+  if (temDetalhe1 !== temDetalhe2) {
+    throw new Error('Para o detalhamento de Em Análise, selecione as duas colunas.');
+  }
+  if (temDetalhe1 && normalizeText_(cfg.colunaDetalheEmAnalise1) ===
+      normalizeText_(cfg.colunaDetalheEmAnalise2)) {
+    throw new Error('Escolha duas colunas diferentes para o detalhamento de Em Análise.');
   }
   // Um mesmo status em dois grupos tornaria a contagem ambígua.
   const grupos = [
@@ -2110,6 +2135,9 @@ function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
   const assinatura = [
     cfg.planilhaUrl, cfg.abaOrigem, cfg.linhaInicial, cfg.colunaData, cfg.colunaStatus,
     cfg.colunaAssunto, cfg.colunaSubassunto, cfg.colunaAnalista,
+    // Sem isto, trocar as colunas do detalhamento serviria a listagem antiga
+    // do cache — a configuração muda e a tela não acompanha.
+    cfg.colunaDetalheEmAnalise1, cfg.colunaDetalheEmAnalise2,
     (cfg.colunasExtras || []).join('|'),
     (cfg.statusEmAberto || []).join('|'), (cfg.statusEmAnalise || []).join('|'),
     (cfg.statusFechado || []).join('|'),
@@ -2132,6 +2160,13 @@ function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
   const cabecalhoBruto = valores[linhaCabecalho] || [];
   const idxData = indiceColunaOp_(cabecalhoBruto, cfg.colunaData);
   const idxStatus = indiceColunaOp_(cabecalhoBruto, cfg.colunaStatus);
+  // Detalhamento de "Em Análise": localizado pelo NOME do cabeçalho, como
+  // todas as outras colunas. Posição fixa quebraria no dia em que alguém
+  // inserisse uma coluna na origem.
+  const idxDetalhe1 = cfg.colunaDetalheEmAnalise1
+    ? indiceColunaOp_(cabecalhoBruto, cfg.colunaDetalheEmAnalise1) : -1;
+  const idxDetalhe2 = cfg.colunaDetalheEmAnalise2
+    ? indiceColunaOp_(cabecalhoBruto, cfg.colunaDetalheEmAnalise2) : -1;
   if (idxData === -1 || idxStatus === -1) {
     throw new Error('INDICOP: não encontrei as colunas "' + cfg.colunaData + '" e/ou "' +
       cfg.colunaStatus + '" na linha ' + cfg.linhaInicial + ' da planilha de origem.');
@@ -2161,9 +2196,42 @@ function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
   registrarDimensao('Status', cfg.colunaStatus, true);
   (cfg.colunasExtras || []).forEach(function(nome) { registrarDimensao(nome, nome, false); });
 
+  // As colunas do detalhamento não são dimensões (não viram gráfico), mas
+  // entram no MESMO aviso: configurada e inexistente na origem, o ADM
+  // precisa saber pelo nome — antes a listagem sumia calada.
+  if (cfg.colunaDetalheEmAnalise1 && idxDetalhe1 === -1 &&
+      colunasAusentes.indexOf(cfg.colunaDetalheEmAnalise1) === -1) {
+    colunasAusentes.push(cfg.colunaDetalheEmAnalise1);
+  }
+  if (cfg.colunaDetalheEmAnalise2 && idxDetalhe2 === -1 &&
+      colunasAusentes.indexOf(cfg.colunaDetalheEmAnalise2) === -1) {
+    colunasAusentes.push(cfg.colunaDetalheEmAnalise2);
+  }
+
   const mapa = mapaStatusOp_(cfg);
   const inicio = String(periodo.inicio || '');
   const fim = String(periodo.fim || '');
+
+  // ── Detalhamento de "Em Análise" ──
+  // O LIMITE existe só para não mandar um payload enorme ao navegador; o
+  // TOTAL continua sendo contado linha a linha, então o rodapé da tabela
+  // sabe dizer "exibindo N de M" em vez de mentir o total.
+  const detalhamentoEmAnalise = [];
+  let totalDetalhamentoEmAnalise = 0;
+  const LIMITE_DETALHE_EM_ANALISE = 500;
+  const valorDetalheEmAnalise_ = function(linha, idx, dataAtual) {
+    if (idx === -1) return '';
+    // A coluna Data da origem tem células mescladas: usar o valor da célula
+    // devolveria vazio nas linhas de baixo. Aqui vale a MESMA data corrente
+    // que o resto da consolidação usou para classificar a linha.
+    if (idx === idxData) return dataAtual ? dataAtual.label : '';
+    const bruto = linha[idx];
+    if (bruto === undefined || bruto === null || bruto === '') return '(não informado)';
+    if (bruto instanceof Date && !isNaN(bruto.getTime())) {
+      return Utilities.formatDate(bruto, 'America/Sao_Paulo', 'dd/MM/yyyy');
+    }
+    return String(bruto).trim() || '(não informado)';
+  };
 
   const porData = {};
   const labelPorChave = {};
@@ -2205,6 +2273,19 @@ function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
     // No banco 4.x nada muda: lá o "Não Classificado" continua sendo
     // exibido como aviso para o ADM completar o mapeamento.
     if (grupo === 'naoClassificado' && descartarNaoClassificadoNaAnalise_()) continue;
+
+    // Detalhamento: quem decide é o GRUPO já classificado, nunca o texto do
+    // status. O ADM renomeia "Em Análise" na origem quando quiser, e a
+    // listagem tem de continuar valendo — é a mesma regra dos KPIs.
+    if (grupo === 'emAnalise' && idxDetalhe1 !== -1 && idxDetalhe2 !== -1) {
+      totalDetalhamentoEmAnalise++;
+      if (detalhamentoEmAnalise.length < LIMITE_DETALHE_EM_ANALISE) {
+        detalhamentoEmAnalise.push({
+          coluna1: valorDetalheEmAnalise_(linha, idxDetalhe1, data),
+          coluna2: valorDetalheEmAnalise_(linha, idxDetalhe2, data)
+        });
+      }
+    }
 
     porData[data.chave].casos++;
     porData[data.chave][grupo]++;
@@ -2257,6 +2338,13 @@ function consolidarIndicadoresOp_(cfg, forceRefresh, periodo) {
     categorias: categorias,
     colunasAnalise: dimensoes.map(function(d) { return { chave: d.chave, rotulo: d.rotulo }; }),
     colunasAusentes: colunasAusentes,
+    // Só as DUAS colunas configuradas viajam para o navegador — nunca a
+    // linha inteira da planilha de origem.
+    detalhamentoEmAnalise: detalhamentoEmAnalise,
+    detalhamentoEmAnaliseColunas: (cfg.colunaDetalheEmAnalise1 && cfg.colunaDetalheEmAnalise2)
+      ? [cfg.colunaDetalheEmAnalise1, cfg.colunaDetalheEmAnalise2] : [],
+    detalhamentoEmAnaliseTotal: totalDetalhamentoEmAnalise,
+    detalhamentoEmAnaliseLimitado: totalDetalhamentoEmAnalise > LIMITE_DETALHE_EM_ANALISE,
     periodo: { inicio: inicio, fim: fim },
     atualizadoEm: toIso_(new Date())
   };
@@ -2271,7 +2359,13 @@ function resultadoVazioOp_(cfg) {
     datas: [], indicadores: emptyIndicadoresOp_(),
     totais: { casos: 0, emAberto: 0, emAnalise: 0, fechado: 0, naoClassificado: 0 },
     totalCasos: 0, volumePorDia: [], distribuicaoStatus: [], statusNaoMapeados: [],
-    categorias: {}, colunasAnalise: [], colunasAusentes: [], periodo: { inicio: '', fim: '' },
+    categorias: {}, colunasAnalise: [], colunasAusentes: [],
+    detalhamentoEmAnalise: [],
+    detalhamentoEmAnaliseColunas: (cfg.colunaDetalheEmAnalise1 && cfg.colunaDetalheEmAnalise2)
+      ? [cfg.colunaDetalheEmAnalise1, cfg.colunaDetalheEmAnalise2] : [],
+    detalhamentoEmAnaliseTotal: 0,
+    detalhamentoEmAnaliseLimitado: false,
+    periodo: { inicio: '', fim: '' },
     atualizadoEm: toIso_(new Date())
   };
 }
@@ -2408,6 +2502,10 @@ function getIndicadoresOperacionais(options) {
     categorias: consolidado.categorias,
     colunasAnalise: consolidado.colunasAnalise,
     colunasAusentes: consolidado.colunasAusentes || [],
+    detalhamentoEmAnalise: consolidado.detalhamentoEmAnalise || [],
+    detalhamentoEmAnaliseColunas: consolidado.detalhamentoEmAnaliseColunas || [],
+    detalhamentoEmAnaliseTotal: consolidado.detalhamentoEmAnaliseTotal || 0,
+    detalhamentoEmAnaliseLimitado: !!consolidado.detalhamentoEmAnaliseLimitado,
     mapeamento: {
       assunto: cfg.colunaAssunto,
       subassunto: cfg.colunaSubassunto,
