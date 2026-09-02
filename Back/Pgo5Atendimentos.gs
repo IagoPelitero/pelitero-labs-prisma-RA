@@ -176,7 +176,7 @@ function pgo5DataComoTextoCurto_(valor) {
   const texto = String(valor).trim();
   // Valores gravados como ISO completo ('2025-03-10T03:00:00.000Z') carregam
   // a hora junto; só a parte do dia interessa para comparar e reexibir.
-  const casa = texto.match(/^(d{4}-d{2}-d{2})/);
+  const casa = texto.match(/^(\d{4}-\d{2}-\d{2})/);
   return casa ? casa[1] : texto;
 }
 
@@ -912,6 +912,34 @@ function excluirAtendimentoPGO5(id) {
 }
 
 /**
+ * Converte valores do Google Sheets para formatos aceitos pelo google.script.run.
+ * Datas não podem ser enviadas diretamente ao navegador.
+ */
+function pgo5ValorSeguroParaFront_(valor, tipoCampo) {
+  if (!(valor instanceof Date)) return valor;
+
+  const tipo = String(tipoCampo || '').toLowerCase();
+
+  if (tipo === 'date') {
+    return Utilities.formatDate(valor, PGO5_FUSO_OFICIAL_, 'yyyy-MM-dd');
+  }
+
+  if (tipo === 'datetime') {
+    return Utilities.formatDate(
+      valor,
+      PGO5_FUSO_OFICIAL_,
+      "yyyy-MM-dd'T'HH:mm"
+    );
+  }
+
+  if (tipo === 'time') {
+    return Utilities.formatDate(valor, PGO5_FUSO_OFICIAL_, 'HH:mm');
+  }
+
+  return toIso_(valor);
+}
+
+/**
  * Carrega um atendimento para EDIÇÃO: campos estruturais + valores dinâmicos.
  * @param {string} id - Id do atendimento.
  * @returns {Object} { atendimento, valores, canalId }.
@@ -936,23 +964,27 @@ function obterAtendimentoPGO5(id) {
     if (String(v.AtendimentoId || '').trim().toUpperCase() !== atendimentoId.toUpperCase()) return;
     const campo = porId[String(v.CampoId || '').toUpperCase()];
     if (campo) {
-      valores[campo.nome] = v.Valor;
+      valores[campo.nome] = pgo5ValorSeguroParaFront_(v.Valor, campo.tipo);
     } else {
       historicos.push({
         rotulo: String(v.RotuloSnapshot || 'Campo removido'),
         tipo: String(v.TipoSnapshot || 'text'),
-        valor: v.Valor
+        valor: pgo5ValorSeguroParaFront_(v.Valor, v.TipoSnapshot)
       });
     }
   });
 
   // Campos estruturais entram no mesmo mapa, pela chave do campo.
   Object.keys(PGO5_CAMPOS_ESTRUTURAIS).forEach(function(nome) {
-    const coluna = PGO5_CAMPOS_ESTRUTURAIS[nome];
-    if (registro[coluna] !== undefined && registro[coluna] !== '') {
-      valores[nome] = registro[coluna];
-    }
-  });
+  const coluna = PGO5_CAMPOS_ESTRUTURAIS[nome];
+  const bruto = registro[coluna];
+
+  if (bruto !== undefined && bruto !== '') {
+    valores[nome] = nome === PGO5_CAMPO_DATA_ABERTURA_
+      ? pgo5DataComoTextoCurto_(bruto)
+      : pgo5ValorSeguroParaFront_(bruto, '');
+  }
+});
 
   return {
     id: atendimentoId,
@@ -961,9 +993,8 @@ function obterAtendimentoPGO5(id) {
     historicos: historicos,
     criadoPorId: String(registro.CriadoPorId || ''),
     responsavelId: String(registro.ResponsavelId || ''),
-    dataCriacao: registro.DataCriacao,
-    dataAtualizacao: registro.DataAtualizacao
-  };
+    dataCriacao: pgo5ValorSeguroParaFront_(registro.DataCriacao, ''),
+dataAtualizacao: pgo5ValorSeguroParaFront_(registro.DataAtualizacao, '')  };
 }
 
 /**
