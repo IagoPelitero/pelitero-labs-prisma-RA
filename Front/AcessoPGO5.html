@@ -246,11 +246,12 @@ Pages.usuariosPGO5 = {
       html += Components.emptyState('group', 'Nenhum usuário cadastrado.');
     } else {
       html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>' +
-        '<th>Nome</th><th>E-mail</th><th>Cargo</th><th>Nível de acesso</th>' +
+       '<th>Matrícula</th><th>Nome</th><th>E-mail</th><th>Cargo</th><th>Nível de acesso</th>' +
         '<th>Supervisor</th><th>Equipe</th><th>Situação</th>' +
         '<th class="pgo5cfg-acoes-col">Ações</th></tr></thead><tbody>';
       dados.usuarios.forEach(function(usuario) {
         html += '<tr>';
+        html += '<td>' + App.escapeHtml(usuario.matricula || '-') + '</td>';
         html += '<td><strong>' + App.escapeHtml(usuario.nome) + '</strong></td>';
         html += '<td>' + App.escapeHtml(usuario.email) + '</td>';
         html += '<td>' + App.escapeHtml(usuario.cargo) + '</td>';
@@ -300,6 +301,14 @@ Pages.usuariosPGO5 = {
     var u = usuario || {};
     var edicao = !!usuario;
 
+     var body = '<div class="form-group">' +
+  '<label class="form-label" for="pgo5usr-matricula">Matrícula</label>' +
+  '<input class="form-control" id="pgo5usr-matricula" type="text" inputmode="numeric" ' +
+  'value="' + App.escapeHtml(u.matricula || '') + '">' +
+  '</div>';
+
+body += '<div class="form-group"><label class="form-label" for="pgo5usr-nome">Nome <span class="required">*</span></label>' +
+  '<input class="form-control" id="pgo5usr-nome" type="text" value="' + App.escapeHtml(u.nome || '') + '"></div>';
     var body = '<div class="form-group"><label class="form-label" for="pgo5usr-nome">Nome <span class="required">*</span></label>' +
       '<input class="form-control" id="pgo5usr-nome" type="text" value="' + App.escapeHtml(u.nome || '') + '"></div>';
     body += '<div class="form-group"><label class="form-label" for="pgo5usr-email">E-mail da conta Google <span class="required">*</span></label>' +
