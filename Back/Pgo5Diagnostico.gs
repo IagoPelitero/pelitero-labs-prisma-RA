@@ -327,7 +327,61 @@ function verificarIntegridadeBuildPGO5() {
   pgo5ExigirFuncao_(r, 'painel da Análise de SAC disponível', 'getIndicadoresOperacionais',
     typeof getIndicadoresOperacionais === 'undefined' ? null : getIndicadoresOperacionais);
 
-  // ── 9. O que precisa ter SAÍDO do projeto ──
+  // ── 9. Identificadores gravados na planilha ──
+  //
+  // Confere o que ESTÁ na planilha, não o que o código faria: um Id
+  // corrompido antes desta versão continua corrompido, e nenhuma proteção
+  // futura o conserta. Colisão é o caso grave — duas linhas com o mesmo
+  // valor fazem a atualização gravar por cima do registro errado.
+  r.linhas.push('');
+  r.linhas.push('IDENTIFICADORES NA PLANILHA');
+  if (pgo5ExigirFuncao_(r, 'leitura das abas disponível', 'pgo5Ler',
+      typeof pgo5Ler === 'undefined' ? null : pgo5Ler)) {
+    pgo5TodasAsAbas_().forEach(function(nomeAba) {
+      let registros = [];
+      try { registros = pgo5Ler(nomeAba); }
+      catch (e) { pgo5Afirmar_(r, 'aba ' + nomeAba + ' legível', false, e.message); return; }
+      if (registros.length === 0) return;   // aba vazia não tem o que conferir
+
+      const deformados = [];
+      const contagem = {};
+      registros.forEach(function(reg) {
+        const bruto = reg.Id;
+        const texto = String(bruto === null || bruto === undefined ? '' : bruto).trim();
+        if (!/^[0-9A-Fa-f]{8}$/.test(texto)) deformados.push(texto || '(vazio)');
+        contagem[texto] = (contagem[texto] || 0) + 1;
+      });
+      const repetidos = Object.keys(contagem).filter(function(k) { return contagem[k] > 1; });
+
+      pgo5Afirmar_(r, nomeAba + ': todo Id tem 8 caracteres hexadecimais',
+        deformados.length === 0,
+        deformados.length + ' de ' + registros.length + ' fora do formato (ex.: ' +
+        deformados.slice(0, 5).join(', ') + ') — a coluna Id foi lida como número ' +
+        'pela planilha; formate-a como Texto e recadastre esses registros');
+      pgo5Afirmar_(r, nomeAba + ': nenhum Id repetido',
+        repetidos.length === 0,
+        repetidos.length + ' valor(es) em mais de uma linha (ex.: ' +
+        repetidos.slice(0, 5).join(', ') + ') — atualizar um deles grava sobre o outro');
+    });
+  }
+  pgo5ExigirFuncao_(r, 'regra de coluna identificadora disponível', 'pgo5ColunaEhIdentificador_',
+    typeof pgo5ColunaEhIdentificador_ === 'undefined' ? null : pgo5ColunaEhIdentificador_);
+  if (typeof pgo5ColunaEhIdentificador_ === 'function') {
+    pgo5Afirmar_(r, 'a coluna Id é reconhecida como identificador',
+      pgo5ColunaEhIdentificador_('Id') === true);
+    pgo5Afirmar_(r, 'colunas terminadas em Id também são',
+      pgo5ColunaEhIdentificador_('CanalId') && pgo5ColunaEhIdentificador_('AtendimentoId'));
+    pgo5Afirmar_(r, 'CPF, Protocolo e Matrícula também são',
+      pgo5ColunaEhIdentificador_('CPF') && pgo5ColunaEhIdentificador_('Protocolo') &&
+      pgo5ColunaEhIdentificador_('Matrícula'));
+    pgo5Afirmar_(r, 'uma coluna comum não é marcada como texto',
+      pgo5ColunaEhIdentificador_('DataAbertura') === false);
+  }
+  pgo5ExigirFuncao_(r, 'proteção de texto na gravação disponível',
+    'pgo5MarcarIdentificadoresComoTexto_',
+    typeof pgo5MarcarIdentificadoresComoTexto_ === 'undefined' ? null : pgo5MarcarIdentificadoresComoTexto_);
+
+  // ── 10. O que precisa ter SAÍDO do projeto ──
   //
   // Publicação é cópia manual: apagar um arquivo do repositório não o apaga
   // do editor. Um wrapper esquecido volta a disputar com a implementação

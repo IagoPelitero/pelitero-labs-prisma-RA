@@ -478,8 +478,47 @@ function inicializarPGO5Dev() {
   if (relatorio.sucesso) {
     relatorio.seed = pgo5AplicarSeedEstrutural_();
     relatorio.seedAcesso = aplicarSeedPermissoesPGO5_();
+    relatorio.administrador = pgo5CriarPrimeiroAdministrador_(ativo);
   }
   return relatorio;
+}
+
+/**
+ * Cadastra quem está executando como o PRIMEIRO administrador da base.
+ *
+ * ⚠️ SEM ISTO A INSTALAÇÃO NASCE INACESSÍVEL.
+ * O acesso ao PGO é pelo e-mail autenticado do Google, conferido contra a aba
+ * Usuários. Uma base recém-criada tem essa aba VAZIA: ninguém entra, e como
+ * não se entra também não se cadastra ninguém. A saída documentada era
+ * digitar a primeira linha à mão na planilha — e digitar Id à mão é
+ * exatamente onde o Sheets transforma "00000001" em 1.
+ *
+ * Só roda a partir de inicializarPGO5Dev, que já garantiu planilha vazia e
+ * execução pelo dono do projeto no editor.
+ *
+ * @param {string} email E-mail de quem executou a inicialização.
+ * @returns {Object} { criado, nivel } — sem expor o e-mail no relatório.
+ */
+function pgo5CriarPrimeiroAdministrador_(email) {
+  const endereco = String(email || '').trim();
+  if (!endereco) return { criado: false, motivo: 'e-mail do executor indisponível' };
+
+  if (pgo5PossuiUsuarios_()) return { criado: false, motivo: 'a aba Usuários já tem alguém' };
+
+  const nivel = pgo5Ler(PGO5.SHEET_NAMES.CONFIGURACOES).find(function(linha) {
+    return String(linha.Tipo || '').toUpperCase() === 'NIVEL_ACESSO' &&
+      String(linha.Chave || '').toUpperCase() === 'ADMINISTRADOR';
+  });
+  if (!nivel) return { criado: false, motivo: 'o nível Administrador não foi semeado' };
+
+  pgo5Inserir(PGO5.SHEET_NAMES.USUARIOS, {
+    Nome: endereco.split('@')[0],
+    Email: endereco,
+    NivelAcessoId: String(nivel.Id || ''),
+    Ativo: true,
+    DataCadastro: toIso_(new Date())
+  });
+  return { criado: true, nivel: 'Administrador' };
 }
 
 /**
@@ -719,7 +758,11 @@ function pgo5Inserir(nomeAba, dados) {
     registro.Id = id;
 
     const linha = colunas.map(function(col) { return registro[col]; });
-    aba.getRange(aba.getLastRow() + 1, 1, 1, colunas.length).setValues([linha]);
+    const numeroDaLinha = aba.getLastRow() + 1;
+    // A ORDEM IMPORTA: formatar como texto DEPOIS de gravar não desfaz a
+    // conversão — o "00000010" já teria virado o número 10 na célula.
+    pgo5MarcarIdentificadoresComoTexto_(aba, numeroDaLinha, colunas);
+    aba.getRange(numeroDaLinha, 1, 1, colunas.length).setValues([linha]);
     return registro;
   });
 }
@@ -760,6 +803,10 @@ function pgo5AtualizarPorId(nomeAba, id, dados) {
       if (entrada[col] !== undefined) registro[col] = entrada[col];
     });
 
+    // A atualização reescreve a linha inteira, então ela também precisa da
+    // garantia de texto — inclusive para linhas antigas, criadas antes desta
+    // proteção existir.
+    pgo5MarcarIdentificadoresComoTexto_(aba, linhaAlvo, colunas);
     aba.getRange(linhaAlvo, 1, 1, colunas.length)
       .setValues([colunas.map(function(col) { return registro[col]; })]);
     return registro;
@@ -822,10 +869,79 @@ function pgo5LinhaPorId_(aba, id) {
  * automático, o Google Sheets lê a string como número, mostra 123 e os
  * zeros à esquerda somem — o identificador deixa de servir para consulta.
  */
-// Matrícula entra aqui pelo mesmo motivo de CPF e Protocolo: é digitada,
-// aceita "000123" e não é número. Sem o formato de texto, a planilha
-// engoliria os zeros à esquerda na gravação.
+// Colunas digitadas que são IDENTIFICADORES, não números: aceitam "000123",
+// e "0" é um valor válido. Os Ids do sistema não entram nesta lista porque
+// são reconhecidos pela REGRA abaixo (Id e qualquer coluna terminada em Id).
 const PGO5_COLUNAS_DE_IDENTIFICADOR = ['CPF', 'Protocolo', 'Matrícula'];
+
+/**
+ * Diz se uma coluna guarda IDENTIFICADOR — conteúdo que precisa chegar à
+ * planilha como TEXTO, custe o que custar.
+ *
+ * ⚠️ POR QUE ISTO EXISTE (bug que corrompeu a base)
+ * O Google Sheets converte para número qualquer texto "que pareça número"
+ * gravado numa célula de formato Geral. Os Ids do PGO são 8 caracteres
+ * hexadecimais, e dois padrões caíam nessa armadilha:
+ *
+ *   "00000010"  → o número 10          (zeros à esquerda perdidos)
+ *   "000000E1"  → 0 × 10¹ = o número 0 (NOTAÇÃO CIENTÍFICA)
+ *
+ * Nos primeiros 200 mil Ids, 31 mil viravam decimal e 9 mil viravam notação
+ * científica — com 4.328 COLISÕES, em que Ids diferentes acabavam com o
+ * mesmo valor na célula. O estrago era silencioso e em cascata:
+ *
+ *   1. pgo5ObterPorId não achava mais o registro (o Id devolvido na criação
+ *      não batia com o que ficou na planilha);
+ *   2. pgo5AtualizarPorId, ao encontrar duas linhas com o mesmo valor,
+ *      gravava por cima da PRIMEIRA — dado de um registro sobrescrevendo
+ *      o de outro;
+ *   3. o gerador de sequência não reconhecia o Id deformado, o piso da aba
+ *      caía e a sequência voltava a EMITIR IDS JÁ EM USO.
+ *
+ * A regra é por NOME de coluna, e não uma lista fixa, para uma coluna nova
+ * terminada em "Id" nascer protegida sem ninguém lembrar de cadastrá-la.
+ *
+ * @param {string} nomeColuna Nome da coluna no cabeçalho.
+ * @returns {boolean} true quando a coluna deve ser gravada como texto.
+ */
+function pgo5ColunaEhIdentificador_(nomeColuna) {
+  const nome = String(nomeColuna || '');
+  if (nome === 'Id' || /Id$/.test(nome)) return true;
+  return PGO5_COLUNAS_DE_IDENTIFICADOR.indexOf(nome) !== -1;
+}
+
+/**
+ * Marca como TEXTO as células de identificador de UMA linha, antes de gravar.
+ *
+ * Formatar só na criação da aba não basta: a formatação cobria um intervalo
+ * calculado a partir do tamanho da aba naquele momento, e toda linha
+ * acrescentada depois nascia em formato Geral. Como a proteção precisa valer
+ * na linha que está sendo escrita AGORA, ela acontece aqui — imediatamente
+ * antes do setValues.
+ *
+ * @param {Sheet} aba Aba de destino.
+ * @param {number} linha Número da linha (1-indexed).
+ * @param {string[]} colunas Cabeçalhos na ordem oficial.
+ * @returns {void}
+ */
+function pgo5MarcarIdentificadoresComoTexto_(aba, linha, colunas) {
+  try {
+    const formatos = colunas.map(function(col) {
+      return pgo5ColunaEhIdentificador_(col) ? '@' : null;
+    });
+    if (formatos.indexOf('@') === -1) return;
+
+    const intervalo = aba.getRange(linha, 1, 1, colunas.length);
+    if (typeof intervalo.setNumberFormats !== 'function') return;
+    // Colunas que não são identificador ficam com o formato automático do
+    // Sheets: datas e números continuam se comportando como sempre.
+    intervalo.setNumberFormats([formatos.map(function(f) {
+      return f === '@' ? '@' : '0.###############';
+    })]);
+  } catch (erro) {
+    Logger.log('[PGO5] Formato de texto não aplicado na linha ' + linha + ': ' + erro.message);
+  }
+}
 
 /**
  * Formata como TEXTO as colunas de identificador da aba.
@@ -843,10 +959,11 @@ const PGO5_COLUNAS_DE_IDENTIFICADOR = ['CPF', 'Protocolo', 'Matrícula'];
  */
 function aplicarFormatoTextoEmIdentificadores_(aba, colunas) {
   try {
+    // A aba inteira, e não um intervalo do tamanho de agora: quem cola uma
+    // linha à mão na planilha também precisa cair no formato certo.
     const totalLinhas = aba.getMaxRows ? aba.getMaxRows() : 1000;
-    PGO5_COLUNAS_DE_IDENTIFICADOR.forEach(function(nomeColuna) {
-      const posicao = colunas.indexOf(nomeColuna);
-      if (posicao === -1) return;
+    colunas.forEach(function(nomeColuna, posicao) {
+      if (!pgo5ColunaEhIdentificador_(nomeColuna)) return;
       const intervalo = aba.getRange(2, posicao + 1, Math.max(1, totalLinhas - 1), 1);
       if (typeof intervalo.setNumberFormat === 'function') intervalo.setNumberFormat('@');
     });

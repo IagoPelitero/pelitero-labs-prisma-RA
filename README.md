@@ -76,7 +76,10 @@ pelo nome do cargo ou pelo texto exibido na tela.
 3. Publique como **Web App** (executar como você; acesso conforme a política da empresa).
 4. No editor, execute **`inicializarPGO5Dev()`** uma única vez. É a única ação do
    sistema que cria aba, e ela **recusa** rodar se a planilha já tiver dados.
-5. Cadastre-se na aba `Usuários` com nível Administrador e defina o PIN.
+   Ela cria as cinco abas, semeia o catálogo e **cadastra você como o primeiro
+   Administrador** — sem isso a instalação nasceria inacessível, porque o acesso
+   é conferido contra a aba `Usuários`.
+5. Abra o sistema e defina o PIN em Configurações › Segurança.
 
 > **Instalação sobre uma planilha que já está em uso não existe.** Abrir o sistema
 > apenas VALIDA a estrutura encontrada: se ela não bate com o contrato, a operação
@@ -122,6 +125,7 @@ Estas não são preferências de estilo — são o que mantém o dado íntegro.
 | Permissão vem do **nível**, nunca do cargo | O nome do cargo é livre e muda |
 | Status decide pelo **nome técnico**, não pelo rótulo | O rótulo é renomeável a qualquer momento |
 | CPF e Protocolo são **texto**, aceitam `0` e `00123` | São identificadores digitados, não números |
+| Toda coluna de identificador é gravada com formato **texto** | O Sheets lê `00000010` como 10 e `000000E1` como 0 — Ids diferentes acabavam com o mesmo valor |
 | Data de abertura em **America/Sao_Paulo**, decidida pelo servidor | O Apps Script roda em UTC e viraria o dia às 21 h |
 | Data de abertura aceita o passado, **recusa o futuro** | Descreve algo que já aconteceu |
 | Editar **nunca** reescreve a data de um registro antigo | Histórico não muda sozinho |
@@ -161,11 +165,34 @@ Estas não são preferências de estilo — são o que mantém o dado íntegro.
 | **5.1** | ago/2026 | Estabilização do acesso: fonte única de permissões por tela, guarda de rota, e falha de acesso que se anuncia em vez de esvaziar o menu |
 | **5.2** | ago/2026 | Operação rápida: data e status automáticos, `Ctrl+Enter`, foco no Protocolo, formulário compacto e catálogo em memória |
 | **5.3** | ago/2026 | Importar Base Legada, diagnóstico de build, consolidação dos arquivos e remoção do caminho 4.x |
-| **5.4** | set/2026 | **Versão atual.** Estrutura da planilha imutável, Matrícula e detalhamento de Em Análise nativos, canais padrão revisados |
+| **5.4** | set/2026 | Estrutura da planilha imutável, Matrícula e detalhamento de Em Análise nativos, canais padrão revisados |
+| **5.5** | set/2026 | **Versão atual.** Identificadores gravados como texto (o Sheets corrompia Ids), e a instalação nova já nasce com um Administrador |
 
 > A **versão do produto** (5.4) e a **versão do esquema** das abas são coisas
 > diferentes e mudam em ritmos diferentes: o esquema é o contrato das cinco abas
 > e das suas colunas, e continua onde estava — a 5.4 não alterou nenhuma coluna.
+
+### O que a 5.5 corrigiu
+
+**O Google Sheets estava corrompendo os identificadores.** Texto que "parece
+número" gravado numa célula de formato Geral é convertido: `00000010` virava o
+número 10 e `000000E1` virava 0 — **notação científica**. Nos primeiros 200 mil
+Ids, 31 mil viravam decimal, 9 mil viravam científico, e havia 4.328 colisões
+em que Ids diferentes terminavam com o mesmo valor na célula.
+
+O efeito era em cascata e silencioso: a busca por Id não encontrava mais o
+registro; a atualização, diante de duas linhas com o mesmo valor, gravava por
+cima da primeira — dado de um registro sobrescrevendo o de outro; e o gerador
+de sequência, sem reconhecer o Id deformado, baixava o piso da aba e voltava a
+emitir Ids já em uso.
+
+Agora toda coluna de identificador — `Id`, qualquer coluna terminada em `Id`,
+CPF, Protocolo e Matrícula — é marcada como texto na linha, imediatamente
+antes da gravação. O diagnóstico ganhou uma seção que **aponta os Ids já
+corrompidos** numa base existente, incluindo repetições.
+
+A instalação nova passou a cadastrar quem a executa como primeiro
+Administrador: sem isso a base nascia inacessível.
 
 ### O que a 5.4 mudou
 

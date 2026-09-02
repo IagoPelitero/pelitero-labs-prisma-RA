@@ -99,6 +99,10 @@ silencioso em produção.
 3. **CPF e Protocolo são identificadores de TEXTO.** Aceitam `0`, `00`,
    `00123`; preservam zeros à esquerda; recusam qualquer caractere que não seja
    dígito; **não** têm dígito verificador no PGO 5.0.
+3b. **Toda coluna de identificador é gravada com formato de TEXTO (`@`)**, e
+   isso é aplicado na linha, imediatamente antes do `setValues`. Vale para
+   `Id`, para qualquer coluna terminada em `Id`, e para CPF, Protocolo e
+   Matrícula — ver `pgo5ColunaEhIdentificador_`. Ver a armadilha na seção 5.
 4. **Data de abertura**: obrigatória, padrão hoje em `America/Sao_Paulo`
    (decidido pelo **servidor** — o Apps Script roda em UTC e São Paulo está 3h
    atrás), aceita passado, recusa futuro. **Edição preserva a data gravada.**
@@ -145,7 +149,14 @@ Só de propósito, e só sobre planilha vazia: `inicializarPGO5Dev()`, executada
 no editor do Apps Script pelo dono do projeto. Ela **recusa** rodar se
 qualquer uma das cinco abas já tiver dados. Depois de criar as abas, o seed
 (`pgo5AplicarSeedEstrutural_()`) semeia o catálogo inicial — 2 canais
-(SAC Preventivo e Chat do RA), campos, status e "aguardando".
+(SAC Preventivo e Chat do RA), campos, status e "aguardando" — e cadastra
+**quem executou como o primeiro Administrador**.
+
+Esse último passo não é conveniência: o acesso é pelo e-mail autenticado
+conferido contra a aba Usuários, e uma base recém-criada tem essa aba vazia.
+Sem ninguém dentro, ninguém entra; e sem entrar, ninguém cadastra. A saída
+anterior era digitar a primeira linha à mão — justamente onde o Sheets
+transforma `00000001` no número 1.
 
 Não existe variante "para base em uso". A que existia reajustava o esquema de
 Atendimentos e reclassificava campos já gravados; foi removida.
@@ -185,6 +196,21 @@ só depois de conferir que nada mais as consome.
 - **Stub de teste que finge.** O sandbox já teve `computeDigest: () => [1]` e um
   `formatDate` fixo. Testes sobre eles passavam sem testar nada. Hoje usam
   SHA-256 e `Intl` reais, e o relógio pode ser congelado (`congelarRelogio`).
+- **O Sheets converte identificador em número, e isso corrompeu a base.**
+  Texto "que parece número" gravado numa célula de formato Geral vira número:
+  `00000010` → `10` (zeros perdidos) e `000000E1` → `0` (**notação
+  científica**). Nos primeiros 200 mil Ids, 31 mil viravam decimal, 9 mil
+  viravam científico e havia **4.328 colisões**. O estrago era em cascata:
+  `pgo5ObterPorId` não achava o registro; `pgo5AtualizarPorId` gravava por
+  cima da primeira linha com o valor repetido — dado de um registro em cima
+  de outro; e o gerador de sequência, sem reconhecer o Id deformado, baixava
+  o piso da aba e voltava a **emitir Ids já em uso**.
+  A proteção é formatar a linha como texto ANTES de gravar. Formatar depois
+  não desfaz nada, e formatar só na criação da aba não cobre linha nova.
+- **Simulador que não coage é simulador que mente.** A planilha falsa das
+  suítes gravava string como string, então nenhum teste via o problema acima.
+  Hoje ela converte igual ao Sheets e respeita o formato `@` — foi o que fez
+  as 13 falhas aparecerem de uma vez.
 - **Guarda `typeof` não protege `const` de outro arquivo.** `typeof X !== 'undefined'`
   salva de nome inexistente, mas um `const` de outro `.gs` ainda não avaliado lança
   "Cannot access X before initialization" e derruba a carga do projeto inteiro. Não
