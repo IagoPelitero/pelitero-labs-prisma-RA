@@ -253,6 +253,7 @@ function listarUsuariosPGO5() {
       const supervisor = supervisorId ? obterUsuarioPorId_(supervisorId, mapa) : null;
       return {
         id: String(usuario.Id || ''),
+        matricula: String(usuario['Matrícula'] || ''),
         nome: String(usuario.Nome || ''),
         email: String(usuario.Email || ''),
         cargoId: String(usuario.CargoId || ''),
@@ -430,6 +431,7 @@ function salvarUsuarioPGO5(dados, id) {
   const registroId = String(id || '').trim();
 
   const limpos = {
+    matricula: sanitizeInput(entrada.matricula || ''),
     nome: sanitizeInput(entrada.nome),
     email: sanitizeInput(entrada.email),
     cargoId: String(entrada.cargoId || '').trim(),
@@ -471,6 +473,7 @@ function salvarUsuarioPGO5(dados, id) {
 
   return withScriptLock_(function() {
     const linha = {
+      Matricula : limpos.matricula,
       Nome: limpos.nome,
       Email: limpos.email,
       CargoId: limpos.cargoId,
