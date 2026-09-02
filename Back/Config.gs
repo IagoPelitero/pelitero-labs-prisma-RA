@@ -22,7 +22,7 @@
  *   3) Listas fixas  → STATUS_LIST e SITUACOES_PENDENCIA são regras de
  *                      negócio fixas da célula de Reclame Aqui. Os CANAIS
  *                      (v4.2) passaram a ser administráveis pela tela de
- *                      Configurações (aba "Canais" — DEFAULT_CANAIS).
+ *                      Configurações (aba "Canais").
  *   4) DEFAULT_*     → produtos e categorias iniciais, inseridos apenas na
  *                      primeira criação da planilha. Depois disso, edite
  *                      pela tela de Configurações do sistema.
@@ -33,11 +33,10 @@
 // CONFIGURAÇÕES GERAIS DO SISTEMA
 // ============================================================================
 const CONFIG = {
-  // v4.6: Subcategorias (nova aba + coluna Subcategoria nos atendimentos +
-  // campo no formulário). O bump de versão dispara a migração automática de
-  // esquema (ensureSheetSchema_/migrateLegacyData_), que PRESERVA todos os
-  // dados existentes: valores são remapeados pelo NOME do cabeçalho e a
-  // coluna nova nasce vazia nos registros antigos.
+  // ⚠️ SUBIR ESTA VERSÃO NÃO MEXE MAIS NA PLANILHA.
+  // Ela chegou a disparar migração automática de esquema na abertura do
+  // sistema; esse caminho foi removido. Hoje a estrutura existente é apenas
+  // VALIDADA, e o sistema para com mensagem clara se ela não servir.
   //
   // ATENÇÃO (v4.6.1): esta versão também compõe a CHAVE DE CACHE
   // (getCacheKey em Database.gs → "PRISMA_RA_<versão>_<Aba>"). Isso é
@@ -66,10 +65,9 @@ const CONFIG = {
   },
 
   SHEET_NAMES: {
-    // Abas de atendimento separadas por canal. A aba legada "Atendimentos"
-    // é migrada automaticamente para estas abas (migrateLegacyData_).
-    // v4.2: o canal "Chat Privado" foi descontinuado — os atendimentos da
-    // antiga aba ChatPrivadoRA são migrados para ReclameAqui.
+    // Abas de atendimento do modelo 4.x, separadas por canal. Mantidas
+    // apenas para LEITURA de instalações antigas: nenhuma rotina do produto
+    // cria, renomeia ou move dados entre elas.
     RECLAME_AQUI: 'ReclameAqui',
     SAC_PREVENTIVO: 'SACPreventivo',
     // v4.2: canais administráveis pela tela de Configurações (ADM).
@@ -88,7 +86,8 @@ const CONFIG = {
     // sobreviverem à releitura da planilha externa.
     INDICADORES_SLA: 'IndicadoresSLA'
   },
-  // Nome da aba legada (pré-v4), usada apenas pela migração.
+  // Nome da aba de atendimentos pré-v4. Só é consultado na leitura de
+  // instalações antigas — não existe mais rotina que a mova ou a renomeie.
   LEGACY_ATENDIMENTOS_SHEET: 'Atendimentos',
   CACHE_TTL: 300,        // Tempo de cache em segundos (5 minutos)
   PAGE_SIZE: 50,         // Registros por página na listagem
@@ -281,7 +280,7 @@ const SITUACOES_PENDENCIA = [
 /**
  * Canais de entrada PADRÃO do atendimento (v4.2).
  * A lista efetiva de canais agora é administrável pela tela de
- * Configurações (aba "Canais" do Google Sheets — ver DEFAULT_CANAIS).
+ * Configurações (aba "Canais" do Google Sheets).
  * Esta constante permanece apenas como fallback de segurança, usado
  * quando a aba Canais estiver vazia ou indisponível.
  */
@@ -297,81 +296,4 @@ const CANAIS_LIST = [
 const CANAL_SHEETS = [
   { canal: 'Reclame Aqui',   sheetKey: 'RECLAME_AQUI' },
   { canal: 'SAC Preventivo', sheetKey: 'SAC_PREVENTIVO' }
-];
-// v4.2: canais criados pelo ADM que não possuem aba própria são gravados
-// na aba ReclameAqui (fallback de sheetNameForCanalConfig_ em Database.gs);
-// a coluna "Canal" de cada atendimento preserva o canal real selecionado.
-
-// ============================================================================
-// DADOS PADRÃO PARA INICIALIZAÇÃO (apenas primeira criação da planilha)
-// ============================================================================
-
-/**
- * Produtos atendidos pela célula de exemplo: Cartão de Crédito e
- * Conta Digital. v4.3 — política de não sobrescrita: estas listas são
- * gravadas APENAS quando a aba está vazia (primeira criação). O sistema
- * nunca substitui o que já foi escrito ou editado manualmente na
- * planilha; o catálogo é administrável pela tela de Configurações.
- */
-const DEFAULT_PRODUTOS = [
-  { Id: 'PD001', Nome: 'Cartão de Crédito', Descricao: 'Atendimentos do produto cartão de crédito', Ativo: true, Ordem: 1 },
-  { Id: 'PD002', Nome: 'Conta Digital',     Descricao: 'Atendimentos do produto conta digital',     Ativo: true, Ordem: 2 }
-];
-
-/**
- * Canais padrão (v4.2), inseridos apenas na primeira criação da aba
- * "Canais". Depois disso, o ADM pode adicionar, editar e excluir canais
- * pela tela de Configurações, sem alteração de código — o formulário de
- * Novo Atendimento, o Dashboard, os Indicadores e os filtros refletem
- * automaticamente as mudanças.
- */
-const DEFAULT_CANAIS = [
-  { Id: 'CN001', Nome: 'Reclame Aqui',   Ativo: true, Ordem: 1 },
-  { Id: 'CN002', Nome: 'SAC Preventivo', Ativo: true, Ordem: 2 }
-];
-
-/**
- * Campos padrão do formulário "Novo Atendimento" (aba ConfigCampos).
- * O ADM administra estes registros pela tela de Configurações: pode ocultar,
- * tornar opcional/obrigatório, reordenar e criar campos novos — sem alterar
- * código. Campos com Base=true mapeiam colunas fixas da planilha; campos
- * com Base=false são gravados na coluna CamposExtras (JSON).
- * "Bloqueado" impede ocultar/desobrigar o campo (o Canal define em qual aba
- * o atendimento é gravado, por isso é sempre obrigatório).
- */
-const DEFAULT_CONFIG_CAMPOS = [
-  { Id: 'FC001', Campo: 'dataAbertura', Rotulo: 'Data',            Tipo: 'date',     Exibir: true,  Obrigatorio: true,  Ordem: 1,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC002', Campo: 'numeroRA',     Rotulo: 'Protocolo',       Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 2,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC003', Campo: 'cliente',      Rotulo: 'Nome do cliente', Tipo: 'text',     Exibir: true,  Obrigatorio: true,  Ordem: 3,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC004', Campo: 'cpf',          Rotulo: 'CPF',             Tipo: 'cpf',      Exibir: true,  Obrigatorio: true,  Ordem: 4,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC005', Campo: 'produto',      Rotulo: 'Produto',         Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 5,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC006', Campo: 'categoria',    Rotulo: 'Categoria',       Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 6,  Base: true,  Bloqueado: false, Opcoes: '' },
-  // v4.6: Subcategoria — terceiro nível da classificação, carregado em
-  // cascata a partir da Categoria selecionada. Opcional por padrão.
-  { Id: 'FC010', Campo: 'subcategoria', Rotulo: 'Subcategoria',    Tipo: 'select',   Exibir: true,  Obrigatorio: false, Ordem: 7,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC007', Campo: 'canal',        Rotulo: 'Canal',           Tipo: 'select',   Exibir: true,  Obrigatorio: true,  Ordem: 8,  Base: true,  Bloqueado: true,  Opcoes: '' },
-  { Id: 'FC008', Campo: 'observacoes',  Rotulo: 'Observações',     Tipo: 'textarea', Exibir: true,  Obrigatorio: false, Ordem: 9,  Base: true,  Bloqueado: false, Opcoes: '' },
-  { Id: 'FC009', Campo: 'agencia',      Rotulo: 'Agência',         Tipo: 'text',     Exibir: false, Obrigatorio: false, Ordem: 10, Base: false, Bloqueado: false, Opcoes: '' }
-];
-
-/**
- * Categorias vinculadas aos dois produtos, através do campo "ProdutoId".
- */
-const DEFAULT_CATEGORIAS = [
-  // Cartão de Crédito
-  { Id: 'CT001', ProdutoId: 'PD001', Nome: 'Contestação de compra',    Descricao: 'Contestações de compras no cartão',                Ativo: true, Ordem: 1 },
-  { Id: 'CT002', ProdutoId: 'PD001', Nome: 'Cobrança indevida',        Descricao: 'Cobranças ou tarifas indevidas no cartão',         Ativo: true, Ordem: 2 },
-  { Id: 'CT003', ProdutoId: 'PD001', Nome: 'Anuidade',                 Descricao: 'Questões de anuidade e benefícios',                Ativo: true, Ordem: 3 },
-  { Id: 'CT004', ProdutoId: 'PD001', Nome: 'Limite de crédito',        Descricao: 'Revisão, aumento ou redução de limite',            Ativo: true, Ordem: 4 },
-  { Id: 'CT005', ProdutoId: 'PD001', Nome: 'Bloqueio/Desbloqueio',     Descricao: 'Problemas com bloqueio ou desbloqueio do cartão',  Ativo: true, Ordem: 5 },
-  { Id: 'CT006', ProdutoId: 'PD001', Nome: 'Fatura',                   Descricao: 'Divergências, fechamento e parcelamento de fatura', Ativo: true, Ordem: 6 },
-  // Conta Digital
-  { Id: 'CT007', ProdutoId: 'PD002', Nome: 'Assuntos gerais da conta', Descricao: 'Assuntos gerais da conta digital',                 Ativo: true, Ordem: 7 },
-  { Id: 'CT008', ProdutoId: 'PD002', Nome: 'Abertura/Encerramento',    Descricao: 'Problemas na abertura ou encerramento da conta',   Ativo: true, Ordem: 8 },
-  { Id: 'CT009', ProdutoId: 'PD002', Nome: 'Transferência/Pix',        Descricao: 'Problemas com transferências, TED ou Pix',         Ativo: true, Ordem: 9 },
-  { Id: 'CT010', ProdutoId: 'PD002', Nome: 'Cobrança indevida',        Descricao: 'Tarifas ou cobranças indevidas na conta digital',  Ativo: true, Ordem: 10 },
-  { Id: 'CT011', ProdutoId: 'PD002', Nome: 'Acesso ao aplicativo',     Descricao: 'Problemas de acesso, senha ou dispositivo',        Ativo: true, Ordem: 11 },
-  { Id: 'CT012', ProdutoId: 'PD002', Nome: 'Cartão de débito',         Descricao: 'Emissão, entrega e uso do cartão de débito',       Ativo: true, Ordem: 12 },
-  { Id: 'CT013', ProdutoId: 'PD002', Nome: 'Portabilidade de salário', Descricao: 'Solicitações de portabilidade de salário',         Ativo: true, Ordem: 13 },
-  { Id: 'CT014', ProdutoId: 'PD002', Nome: 'Rendimento/Investimentos', Descricao: 'Rendimento da conta e produtos de investimento',   Ativo: true, Ordem: 14 }
 ];

@@ -9,8 +9,8 @@ Desenvolvido por **Pelitero Labs**.
 
 ## O que o sistema faz
 
-O PGO registra e acompanha atendimentos que chegam por vários canais (Reclame Aqui,
-SAC, Ouvidoria e outros que o administrador criar), controlando quem vê o quê, quem
+O PGO registra e acompanha atendimentos que chegam por vários canais (SAC Preventivo,
+Chat do RA e outros que o administrador criar), controlando quem vê o quê, quem
 pode alterar o quê, e entregando os números da operação prontos para leitura.
 
 | Tela | Para que serve |
@@ -20,7 +20,7 @@ pode alterar o quê, e entregando os números da operação prontos para leitura
 | **Relatórios** | Consulta com filtros combináveis e exportação |
 | **Produtividade Equipe** | Quanto a equipe produziu, por pessoa e por período |
 | **Análise de SAC** | Indicadores consolidados a partir de planilha externa |
-| **Configurações** | Catálogo, usuários, níveis de acesso, segurança e importação |
+| **Configurações** | Catálogo, usuários, níveis de acesso, segurança e fonte da Análise de SAC |
 
 ---
 
@@ -68,19 +68,20 @@ pelo nome do cargo ou pelo texto exibido na tela.
 
 ## Instalação
 
-1. Crie uma planilha no Google Sheets e um projeto do Apps Script vinculado a ela.
-2. Copie os arquivos nesta ordem (as constantes de topo são avaliadas na carga):
-
-   1. `Config.gs`, `Utils.gs`, `Database.gs`
-   2. `Pgo5.gs`, `Pgo5Auditoria.gs`, `Pgo5Permissoes.gs`, `Pgo5Seguranca.gs`
-   3. `Pgo5Usuarios.gs`, `Pgo5Catalogo.gs`, `Pgo5Atendimentos.gs`
-   4. `Pgo5Importacao.gs`, `Pgo5Analitico.gs`, `Pgo5Diagnostico.gs`
-   5. `Services.gs`, `Code.gs`
-   6. Todos os `.html` da pasta `Front/`
-
+1. Crie uma planilha **nova e vazia** no Google Sheets e um projeto do Apps Script
+   vinculado a ela.
+2. Copie os **26 arquivos**: os 14 `.gs` da pasta `Back/` e os 12 `.html` da pasta
+   `Front/`. Nenhum arquivo tem código de topo que dependa de outro, então a ordem
+   da cópia não importa — o Apps Script os avalia em ordem alfabética.
 3. Publique como **Web App** (executar como você; acesso conforme a política da empresa).
-4. Abra o sistema uma vez: as cinco abas e o catálogo inicial são criados sozinhos.
+4. No editor, execute **`inicializarPGO5Dev()`** uma única vez. É a única ação do
+   sistema que cria aba, e ela **recusa** rodar se a planilha já tiver dados.
 5. Cadastre-se na aba `Usuários` com nível Administrador e defina o PIN.
+
+> **Instalação sobre uma planilha que já está em uso não existe.** Abrir o sistema
+> apenas VALIDA a estrutura encontrada: se ela não bate com o contrato, a operação
+> é interrompida com uma mensagem dizendo o que está fora — nada é criado,
+> renomeado, apagado ou reordenado automaticamente.
 
 ### Conferência pós-publicação
 
@@ -95,18 +96,20 @@ registro no Dashboard.
 
 ---
 
-## Importar Base Legada
+## Análise de SAC
 
-Traz o histórico de um sistema anterior para dentro da base em uso, sem recriar nada:
+Consolida indicadores a partir de uma planilha externa, aberta **somente para
+leitura** — o PGO nunca escreve nela e não usa `IMPORTRANGE`.
 
-- a planilha de origem é aberta **somente para leitura**;
-- cada linha é conferida antes de entrar — o que não passa é pulado e informado por
-  motivo, nada entra pela metade;
-- cada registro importado leva uma etiqueta, então **reimportar não duplica**;
-- produtos, categorias e status que só existiam no sistema antigo são criados aqui,
-  preservando a hierarquia, para o histórico não aparecer como "Sem dados".
+O administrador aponta a fonte, mapeia as colunas e agrupa os status em
+Em Aberto / Em Análise / Fechado. Pode também escolher **duas colunas** para
+detalhar os casos do grupo **Em Análise** (por exemplo Data + Número do Caso):
+o card "Em Análise" passa a abrir e recolher uma lista com esses casos, linha a
+linha, respeitando o período do filtro. Sem as duas colunas configuradas, o card
+continua mostrando o indicador e não abre lista nenhuma.
 
-Requer permissão de configuração do sistema **e** PIN.
+A classificação do detalhamento é a mesma regra dos indicadores — o grupo técnico,
+nunca o texto do status —, então renomear "Em Análise" na origem não quebra a lista.
 
 ---
 
@@ -125,6 +128,9 @@ Estas não são preferências de estilo — são o que mantém o dado íntegro.
 | "Aguardando Retorno" só existe em **Pendente** | Sair do status limpa o campo; voltar reabre vazio |
 | Exclusão no catálogo é **física e sem cascata** | Quem referencia passa a exibir "Sem dados" |
 | `(não informado)` ≠ `Sem dados` | Campo vazio e referência quebrada são coisas diferentes |
+| A **estrutura da planilha nunca muda sozinha** | Estrutura incompatível interrompe a operação; ninguém "conserta" automaticamente |
+| Matrícula é **texto** e usa a chave exata `Matrícula` | `000123` é uma matrícula, não o número 123 |
+| Um recurso, **uma implementação** | Duas telas para a mesma coisa divergem e confundem quem opera |
 
 ---
 
@@ -154,17 +160,32 @@ Estas não são preferências de estilo — são o que mantém o dado íntegro.
 | **5.0** | ago/2026 | **Reescrita do modelo de dados.** Cinco abas relacionais, formulário dinâmico por canal, cargos e níveis de acesso com escopo, PIN e auditoria, relatórios e produtividade com escopo próprio |
 | **5.1** | ago/2026 | Estabilização do acesso: fonte única de permissões por tela, guarda de rota, e falha de acesso que se anuncia em vez de esvaziar o menu |
 | **5.2** | ago/2026 | Operação rápida: data e status automáticos, `Ctrl+Enter`, foco no Protocolo, formulário compacto e catálogo em memória |
-| **5.3** | ago/2026 | **Versão atual.** Importar Base Legada, diagnóstico de build, consolidação dos arquivos e remoção do caminho 4.x |
+| **5.3** | ago/2026 | Importar Base Legada, diagnóstico de build, consolidação dos arquivos e remoção do caminho 4.x |
+| **5.4** | set/2026 | **Versão atual.** Estrutura da planilha imutável, Matrícula e detalhamento de Em Análise nativos, canais padrão revisados |
 
-### O que a 5.3 consolidou
+> A **versão do produto** (5.4) e a **versão do esquema** das abas são coisas
+> diferentes e mudam em ritmos diferentes: o esquema é o contrato das cinco abas
+> e das suas colunas, e continua onde estava — a 5.4 não alterou nenhuma coluna.
 
-A 5.0 conviveu por um tempo com o modelo antigo, para a virada acontecer sem
-interrupção. Concluída a transição, o caminho 4.x saiu: as telas duplicadas foram
-unificadas nas versões definitivas e o motor de conversão de base deu lugar à
-**Importar Base Legada**, que acrescenta histórico à base em uso em vez de recriá-la.
+### O que a 5.4 mudou
 
-O sistema passou a ter uma implementação por responsabilidade — **8 arquivos a menos e
-cerca de 5.500 linhas removidas**, sem perda de funcionalidade.
+**A estrutura da planilha virou território imutável.** Saíram do produto o
+inicializador do modelo 4.x (que criava 11 abas antigas e apagava abas ditas
+obsoletas — entre elas `Configurações`, que no PGO 5.0 é oficial), as migrações
+que moviam atendimentos entre abas, a reconstrução de cabeçalho disparada por uma
+gravação comum, o menu "Reinicializar Planilhas" e a criação silenciosa de
+planilha quando nenhuma estava apontada. Abrir o sistema agora só **valida**.
+
+Criar estrutura continua possível, mas apenas como ação explícita no editor,
+sobre uma planilha vazia — e ela recusa rodar se encontrar dados.
+
+**A Importar Base Legada saiu**, junto com o tombamento e as conversões
+retroativas: migração foi cancelada como caminho de produto.
+
+**Matrícula e o detalhamento de "Em Análise" ficaram nativos.** Cada um tinha
+duas implementações concorrentes; agora há uma só. A matrícula é gravada pela
+chave correta (`Matrícula`, com acento — antes ia para uma chave sem acento e
+sumia em silêncio) e o card "Em Análise" abre e recolhe a única lista existente.
 
 ---
 

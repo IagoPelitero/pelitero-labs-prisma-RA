@@ -671,7 +671,7 @@ const Components = {
   // subtitle (opcional): descrição curta exibida sob o rótulo, para
   // explicar o significado do indicador (ex.: card "Em análise").
   // Parâmetros adicionais são retrocompatíveis: chamadas antigas seguem iguais.
-  kpiCard: function(icon, value, label, color, trend, onclickJs, subtitle) {
+  kpiCard: function(icon, value, label, color, trend, onclickJs, subtitle, attrs) {
     color = color || '#0046C0';
 
     var trendHtml = '';
@@ -688,7 +688,11 @@ const Components = {
       ? ' onclick="' + onclickJs + '" title="Clique para filtrar a tabela"'
       : '';
 
-    return '<div class="kpi-card' + (onclickJs ? ' kpi-clickable' : '') + '" style="border-left-color:' + color + '"' + clickAttrs + '>' +
+    // `attrs` deixa a tela declarar id, role, tabindex e aria-* sem precisar de
+    // onclick inline: telas que já ligam eventos com addEventListener usam
+    // este caminho e mantêm o comportamento de teclado sob controle delas.
+    return '<div class="kpi-card' + (onclickJs ? ' kpi-clickable' : '') + '" style="border-left-color:' + color + '"' +
+      clickAttrs + (attrs ? ' ' + attrs : '') + '>' +
       '<div class="kpi-icon" style="background:' + color + '">' +
         '<span class="material-icons">' + (icon || 'analytics') + '</span>' +
       '</div>' +

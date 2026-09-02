@@ -56,6 +56,58 @@ function pgo5Afirmar_(r, nome, passou, detalhe) {
 }
 
 /**
+ * Registra uma asserção que depende de uma função existir.
+ *
+ * ⚠️ FUNÇÃO AUSENTE É FALHA, NÃO É "PULAR".
+ * Os blocos deste arquivo eram embrulhados em `if (typeof X === 'function')`.
+ * Quando o arquivo que define X não era publicado — justamente o que este
+ * diagnóstico existe para detectar — o bloco inteiro sumia do relatório e o
+ * build era declarado ÍNTEGRO sem nunca ter sido verificado. Havia um caso
+ * real: pgo5NovoId não existe em lugar nenhum e o teste de Id nunca rodou.
+ *
+ * @param {Object} r Acumulador.
+ * @param {string} nome O que seria verificado.
+ * @param {string} nomeFuncao Função exigida.
+ * @param {*} referencia A própria função (ou null).
+ * @returns {boolean} true quando existe e o bloco pode seguir.
+ */
+function pgo5ExigirFuncao_(r, nome, nomeFuncao, referencia) {
+  return pgo5Afirmar_(r, nome, typeof referencia === 'function',
+    nomeFuncao + ' não está em escopo — o arquivo .gs que a define não foi publicado');
+}
+
+/**
+ * Registra uma asserção de AUSÊNCIA: algo que precisa ter saído do projeto.
+ *
+ * Numa publicação manual, remover um arquivo do repositório não o remove do
+ * editor do Apps Script. Sem esta checagem, um wrapper ou uma rota removida
+ * continua viva na instalação e volta a competir com a implementação nativa.
+ *
+ * @param {Object} r Acumulador.
+ * @param {string} nome O que não pode existir.
+ * @param {boolean} existe Resultado da checagem.
+ * @returns {boolean} true quando realmente não existe.
+ */
+function pgo5AfirmarAusencia_(r, nome, existe) {
+  return pgo5Afirmar_(r, nome + ' não está mais no projeto', !existe,
+    'ainda está publicado no editor do Apps Script — apague-o de lá');
+}
+
+/**
+ * true quando um arquivo .html existe no projeto do Apps Script.
+ * @param {string} nome Nome do arquivo, sem extensão.
+ * @returns {boolean}
+ */
+function pgo5ArquivoHtmlExiste_(nome) {
+  try {
+    HtmlService.createHtmlOutputFromFile(nome);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
  * (SEGURO — SÓ LÊ) Diagnóstico de integridade do PGO 5.0.
  *
  * @returns {string} Relatório em texto (também gravado no Logger).
@@ -96,15 +148,14 @@ function verificarIntegridadeBuildPGO5() {
     typeof getRelatorioPGO5 === 'undefined' ? null : getRelatorioPGO5);
   presente('listarUsuariosPGO5 (Pgo5Usuarios.gs)',
     typeof listarUsuariosPGO5 === 'undefined' ? null : listarUsuariosPGO5);
-  presente('importarBaseLegadaPGO5 (Pgo5Importacao.gs)',
-    typeof importarBaseLegadaPGO5 === 'undefined' ? null : importarBaseLegadaPGO5);
   presente('getBootstrapData (Services.gs)',
     typeof getBootstrapData === 'undefined' ? null : getBootstrapData);
 
   // ── 2. Esquema ──
   r.linhas.push('');
   r.linhas.push('ESQUEMA ' + (typeof PGO5 === 'undefined' ? '(PGO5 ausente)' : PGO5.SCHEMA_VERSION));
-  if (typeof PGO5 !== 'undefined') {
+  if (pgo5Afirmar_(r, 'contrato PGO5 em escopo', typeof PGO5 !== 'undefined',
+      'Pgo5.gs não foi publicado')) {
     const abas = PGO5.SHEET_NAMES;
     ['ATENDIMENTOS', 'USUARIOS', 'FORMULARIO', 'VALORES_ATENDIMENTO', 'CONFIGURACOES']
       .forEach(function(chave) {
@@ -125,7 +176,8 @@ function verificarIntegridadeBuildPGO5() {
   // sai antes do laço). É uma falha que se disfarça de "problema do usuário".
   r.linhas.push('');
   r.linhas.push('RECORTE POR ESCOPO (custo constante)');
-  if (typeof pgo5AtendimentoEstaNoEscopo_ === 'function') {
+  if (pgo5ExigirFuncao_(r, 'recorte por escopo disponível', 'pgo5AtendimentoEstaNoEscopo_',
+      typeof pgo5AtendimentoEstaNoEscopo_ === 'undefined' ? null : pgo5AtendimentoEstaNoEscopo_)) {
     const ator = { id: '00000001' };
     const deOutro = { ResponsavelId: '000000FF', CriadoPorId: '000000FF' };
     const meu = { ResponsavelId: '00000001', CriadoPorId: '00000001' };
@@ -155,7 +207,8 @@ function verificarIntegridadeBuildPGO5() {
   // todo atendimento exibindo "Sem dados" — sem nenhum erro no log.
   r.linhas.push('');
   r.linhas.push('MEMÓRIA DO SEED (por planilha)');
-  if (typeof pgo5ChaveDaMemoriaDeSeed_ === 'function') {
+  if (pgo5ExigirFuncao_(r, 'memória do seed disponível', 'pgo5ChaveDaMemoriaDeSeed_',
+      typeof pgo5ChaveDaMemoriaDeSeed_ === 'undefined' ? null : pgo5ChaveDaMemoriaDeSeed_)) {
     let idDaBase = '';
     try { idDaBase = String(getSpreadsheet().getId() || ''); } catch (e) { idDaBase = ''; }
     pgo5Afirmar_(r, 'a chave da memória carrega o Id da planilha',
@@ -189,7 +242,8 @@ function verificarIntegridadeBuildPGO5() {
   // ── 5. Data de abertura no fuso da operação ──
   r.linhas.push('');
   r.linhas.push('DATA DE ABERTURA');
-  if (typeof pgo5HojeEmSaoPaulo_ === 'function') {
+  if (pgo5ExigirFuncao_(r, 'data de abertura disponível', 'pgo5HojeEmSaoPaulo_',
+      typeof pgo5HojeEmSaoPaulo_ === 'undefined' ? null : pgo5HojeEmSaoPaulo_)) {
     const hoje = pgo5HojeEmSaoPaulo_();
     pgo5Afirmar_(r, 'hoje sai no formato AAAA-MM-DD', /^\d{4}-\d{2}-\d{2}$/.test(hoje), hoje);
     pgo5Afirmar_(r, 'o fuso oficial é America/Sao_Paulo',
@@ -203,7 +257,8 @@ function verificarIntegridadeBuildPGO5() {
   // ── 6. Identificadores ──
   r.linhas.push('');
   r.linhas.push('IDENTIFICADORES');
-  if (typeof pgo5TextoDeIdentificador_ === 'function') {
+  if (pgo5ExigirFuncao_(r, 'identificadores de texto disponíveis', 'pgo5TextoDeIdentificador_',
+      typeof pgo5TextoDeIdentificador_ === 'undefined' ? null : pgo5TextoDeIdentificador_)) {
     // "0" é um identificador VÁLIDO; String(0 || '') o apagaria.
     pgo5Afirmar_(r, 'o identificador "0" sobrevive',
       pgo5TextoDeIdentificador_(0) === '0', pgo5TextoDeIdentificador_(0));
@@ -211,10 +266,103 @@ function verificarIntegridadeBuildPGO5() {
       pgo5TextoDeIdentificador_('00123') === '00123');
     pgo5Afirmar_(r, 'ausente continua vazio', pgo5TextoDeIdentificador_(null) === '');
   }
-  if (typeof pgo5NovoId === 'function') {
-    const id = pgo5NovoId(PGO5.SHEET_NAMES.ATENDIMENTOS);
+  // ⚠️ AQUI NÃO SE PEDE UM ID NOVO.
+  // A versão anterior chamava pgo5NovoId(...), que AVANÇA a sequência gravada
+  // em Script Properties: um diagnóstico anunciado como "só lê" queimava um
+  // identificador a cada execução. formatarIdHex_ é pura — mesma regra,
+  // nenhuma gravação.
+  if (pgo5ExigirFuncao_(r, 'formatação do Id disponível', 'formatarIdHex_',
+      typeof formatarIdHex_ === 'undefined' ? null : formatarIdHex_)) {
     pgo5Afirmar_(r, 'o Id tem 8 caracteres hexadecimais maiúsculos',
-      /^[0-9A-F]{8}$/.test(String(id)), String(id));
+      /^[0-9A-F]{8}$/.test(formatarIdHex_(26)), formatarIdHex_(26));
+    pgo5Afirmar_(r, 'o Id preserva os zeros à esquerda',
+      formatarIdHex_(1) === '00000001', formatarIdHex_(1));
+  }
+
+  // ── 7. Matrícula é nativa em Usuários ──
+  r.linhas.push('');
+  r.linhas.push('MATRÍCULA (nativa)');
+  if (typeof COLUMNS_PGO5 !== 'undefined' && COLUMNS_PGO5.USUARIOS) {
+    pgo5Afirmar_(r, 'a coluna "Matrícula" está no contrato de Usuários',
+      COLUMNS_PGO5.USUARIOS.indexOf('Matrícula') !== -1,
+      'sem ela o CRUD descarta a matrícula na gravação');
+  } else {
+    pgo5Afirmar_(r, 'contrato de Usuários em escopo', false, 'COLUMNS_PGO5 não foi publicado');
+  }
+  pgo5Afirmar_(r, 'Matrícula é tratada como identificador de texto',
+    typeof PGO5_COLUNAS_DE_IDENTIFICADOR !== 'undefined' &&
+    PGO5_COLUNAS_DE_IDENTIFICADOR.indexOf('Matrícula') !== -1,
+    'sem isso "000123" vira o número 123 na planilha');
+  if (pgo5ExigirFuncao_(r, 'normalização de matrícula disponível', 'pgo5NormalizarMatricula_',
+      typeof pgo5NormalizarMatricula_ === 'undefined' ? null : pgo5NormalizarMatricula_)) {
+    pgo5Afirmar_(r, 'a matrícula preserva zeros à esquerda',
+      pgo5NormalizarMatricula_('000123') === '000123');
+    pgo5Afirmar_(r, 'a matrícula é aparada nas pontas',
+      pgo5NormalizarMatricula_('  4210  ') === '4210');
+    pgo5Afirmar_(r, 'matrícula vazia continua permitida',
+      pgo5NormalizarMatricula_('') === '' && pgo5NormalizarMatricula_(null) === '');
+    let recusou = false;
+    try { pgo5NormalizarMatricula_(new Array(60).join('9')); } catch (e) { recusou = true; }
+    pgo5Afirmar_(r, 'matrícula acima de 50 caracteres é recusada', recusou);
+  }
+  pgo5ExigirFuncao_(r, 'gravação nativa de usuário disponível', 'salvarUsuarioPGO5',
+    typeof salvarUsuarioPGO5 === 'undefined' ? null : salvarUsuarioPGO5);
+  pgo5ExigirFuncao_(r, 'leitura nativa de usuários disponível', 'listarUsuariosPGO5',
+    typeof listarUsuariosPGO5 === 'undefined' ? null : listarUsuariosPGO5);
+
+  // ── 8. Detalhamento de "Em Análise" é nativo e único ──
+  r.linhas.push('');
+  r.linhas.push('DETALHAMENTO DE EM ANÁLISE (nativo)');
+  if (pgo5ExigirFuncao_(r, 'configuração da Análise de SAC disponível', 'lerIndicOpConfig_',
+      typeof lerIndicOpConfig_ === 'undefined' ? null : lerIndicOpConfig_)) {
+    const cfgSac = lerIndicOpConfig_();
+    pgo5Afirmar_(r, 'a configuração declara as duas colunas do detalhamento',
+      cfgSac.colunaDetalheEmAnalise1 !== undefined &&
+      cfgSac.colunaDetalheEmAnalise2 !== undefined,
+      'a versão publicada de Services.gs é anterior ao detalhamento nativo');
+    pgo5Afirmar_(r, 'as duas colunas estão configuradas juntas ou nenhuma',
+      (!!cfgSac.colunaDetalheEmAnalise1) === (!!cfgSac.colunaDetalheEmAnalise2),
+      'só uma coluna configurada — a tabela sairia com uma coluna vazia');
+  }
+  pgo5ExigirFuncao_(r, 'painel da Análise de SAC disponível', 'getIndicadoresOperacionais',
+    typeof getIndicadoresOperacionais === 'undefined' ? null : getIndicadoresOperacionais);
+
+  // ── 9. O que precisa ter SAÍDO do projeto ──
+  //
+  // Publicação é cópia manual: apagar um arquivo do repositório não o apaga
+  // do editor. Um wrapper esquecido volta a disputar com a implementação
+  // nativa, e uma rota de migração esquecida volta a ser alcançável.
+  r.linhas.push('');
+  r.linhas.push('CAMINHOS QUE PRECISAM ESTAR AUSENTES');
+  [
+    ['o wrapper salvarUsuarioPGO5ComMatricula', typeof salvarUsuarioPGO5ComMatricula !== 'undefined'],
+    ['o wrapper listarUsuariosPGO5ComMatricula', typeof listarUsuariosPGO5ComMatricula !== 'undefined'],
+    ['o endpoint getColunasDetalhamentoAnaliseSac', typeof getColunasDetalhamentoAnaliseSac !== 'undefined'],
+    ['o endpoint getDetalhamentoEmAnaliseSac', typeof getDetalhamentoEmAnaliseSac !== 'undefined'],
+    ['a rota importarBaseLegadaPGO5', typeof importarBaseLegadaPGO5 !== 'undefined'],
+    ['a rota listarOrigensLegadasPGO5', typeof listarOrigensLegadasPGO5 !== 'undefined'],
+    ['o inicializador 4.x initializeSheets', typeof initializeSheets !== 'undefined'],
+    ['a migração migrateLegacyData_', typeof migrateLegacyData_ !== 'undefined'],
+    ['a reconstrução de cabeçalho ensureSheetSchema_', typeof ensureSheetSchema_ !== 'undefined'],
+    ['o menu menuReinicializar', typeof menuReinicializar !== 'undefined'],
+    ['a inicialização sobre base em uso inicializarPGO5Admin', typeof inicializarPGO5Admin !== 'undefined'],
+    ['a verificação avulsa verificarMelhoriasPGO5', typeof verificarMelhoriasPGO5 !== 'undefined']
+  ].forEach(function(par) { pgo5AfirmarAusencia_(r, par[0], par[1]); });
+
+  ['MelhoriasPGO5', 'ImportacaoPGO5'].forEach(function(arquivo) {
+    pgo5AfirmarAusencia_(r, 'o arquivo ' + arquivo + '.html', pgo5ArquivoHtmlExiste_(arquivo));
+  });
+
+  // O Index não pode continuar incluindo um arquivo que saiu do produto:
+  // o include falha em tempo de renderização e a tela inteira não abre.
+  try {
+    const indice = HtmlService.createHtmlOutputFromFile('Index').getContent();
+    pgo5Afirmar_(r, 'o Index não inclui MelhoriasPGO5',
+      indice.indexOf("include('MelhoriasPGO5')") === -1);
+    pgo5Afirmar_(r, 'o Index não inclui ImportacaoPGO5',
+      indice.indexOf("include('ImportacaoPGO5')") === -1);
+  } catch (e) {
+    pgo5Afirmar_(r, 'o Index.html foi publicado', false, e.message);
   }
 
   // ── Fecho ──

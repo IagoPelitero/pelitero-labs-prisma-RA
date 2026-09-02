@@ -85,11 +85,13 @@ function getSpreadsheet() {
       return SPREADSHEET_REF_;
     }
 
-    // Permite que o projeto também funcione como Apps Script independente.
-    const created = SpreadsheetApp.create('Prisma RA - Banco de Dados');
-    properties.setProperty(PROPERTY_KEYS.SPREADSHEET_ID, created.getId());
-    SPREADSHEET_REF_ = created;
-    return SPREADSHEET_REF_;
+    // Sem planilha apontada o sistema PARA. Antes ele criava uma planilha
+    // nova aqui e gravava o id nas propriedades — silenciosamente, no meio de
+    // uma requisição qualquer. Quem visse o sistema "vazio" estaria olhando
+    // uma base recém-criada, não a de produção.
+    throw new Error('ESTRUTURA: nenhuma planilha está apontada para este projeto e ' +
+      'não há planilha ativa. Aponte a base com configurarPlanilha(\'<id>\') no editor ' +
+      'do Apps Script. Nenhuma planilha foi criada.');
   } catch (e) {
     Logger.log('Erro ao abrir planilha: ' + e.message);
     throw new Error('Não foi possível acessar a planilha do sistema. Verifique o SPREADSHEET_ID em Config.gs.');
@@ -149,449 +151,43 @@ function withScriptLock_(fn) {
 // ============================================================================
 
 /**
- * Executa a migração de estrutura somente quando a versão do esquema muda.
+ * Confere se a planilha apontada tem uma estrutura que o sistema sabe operar.
+ *
+ * ⚠️ ESTA FUNÇÃO NÃO ESCREVE NADA. NUNCA.
+ * Ela rodava na abertura do sistema e, quando a versão do esquema divergia,
+ * chamava o inicializador do modelo 4.x: criava 11 abas antigas, renomeava
+ * abas por apelido, reconstruía cabeçalhos e apagava abas ditas obsoletas —
+ * uma delas chamada "Configurações", que no PGO 5.0 é uma das cinco abas
+ * oficiais. Bastava a Script Property da versão se perder para a planilha de
+ * produção ser reestruturada na primeira visita.
+ *
+ * A regra do produto é a oposta: estrutura existente é validada, jamais
+ * alterada automaticamente. Se o que está lá não serve, o sistema para e
+ * diz o que encontrou, em vez de tentar "consertar".
+ *
+ * Criar estrutura continua existindo, mas só como ação explícita, isolada e
+ * protegida, executada de propósito no editor do Apps Script sobre uma
+ * planilha nova (ver inicializarPGO5Dev em Pgo5.gs).
+ *
+ * @throws {Error} 'ESTRUTURA: ...' quando a planilha não é operável.
  */
 function ensureDatabaseReady() {
-  const properties = PropertiesService.getScriptProperties();
+  // Base PGO 5.0 completa e com os cabeçalhos no contrato: é o caso normal.
+  if (estruturaEhPGO5_()) return;
 
-  // Caminho rápido: esquema já atualizado (99,9% das requisições).
-  // Nenhuma trava é adquirida aqui — leitura de propriedade é barata.
-  if (properties.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) === CONFIG.SCHEMA_VERSION) return;
-
-  // BANCO PGO 5.0: a estrutura nova é criada por inicializarPGO5(), nunca
-  // automaticamente. Sem esta guarda, abrir o sistema sobre uma base 5.0
-  // dispararia initializeSheets() e recriaria as 11 abas do modelo 4.x ao
-  // lado das 5 novas — exatamente o que a fundação não pode fazer.
-  if (estruturaEhPGO5_()) {
-    Logger.log('[PGO5] Base 5.0 detectada — inicialização do esquema 4.x ignorada.');
-    return;
-  }
-
-  // PROTEÇÃO CONTRA MIGRAÇÃO CONCORRENTE:
-  // sem trava, dois usuários abrindo o sistema ao mesmo tempo logo após
-  // uma atualização executariam initializeSheets() em paralelo sobre as
-  // MESMAS abas — o cenário de maior risco de perda de dados. Agora a
-  // migração é serializada: o segundo espera o primeiro terminar.
-  withScriptLock_(function() {
-    // Dupla verificação: enquanto esperávamos a trava, outra execução
-    // pode ter concluído a migração. Nesse caso não há nada a fazer.
-    const props = PropertiesService.getScriptProperties();
-    if (props.getProperty(PROPERTY_KEYS.SCHEMA_VERSION) === CONFIG.SCHEMA_VERSION) return;
-
-    initializeSheets();
-    // A versão só é marcada APÓS a migração concluir sem erro. Se
-    // initializeSheets lançar, a propriedade permanece antiga e a
-    // migração será tentada de novo na próxima requisição.
-    props.setProperty(PROPERTY_KEYS.SCHEMA_VERSION, CONFIG.SCHEMA_VERSION);
-  });
+  // Qualquer outra coisa: o sistema não opera e não mexe. A mensagem precisa
+  // dizer o que fazer, porque quem lê está com o sistema parado.
+  const estrutura = (typeof detectarEstruturaBanco_ === 'function')
+    ? detectarEstruturaBanco_(true) : 'DESCONHECIDO';
+  throw new Error('ESTRUTURA: esta planilha não tem as cinco abas do PGO ' +
+    (typeof PGO5 !== 'undefined' ? PGO5.SCHEMA_VERSION : '5.0') +
+    ' com os cabeçalhos esperados (estrutura detectada: ' + estrutura + '). ' +
+    'O sistema não altera a planilha por conta própria: nenhuma aba foi criada, ' +
+    'renomeada ou apagada. Se esta é uma instalação NOVA, execute ' +
+    'inicializarPGO5Dev() no editor do Apps Script sobre uma planilha vazia. ' +
+    'Se esta é a base de produção, confira se alguma aba foi renomeada ou se o ' +
+    'cabeçalho da primeira linha foi alterado — e restaure-o antes de reabrir.');
 }
-
-/**
- * Inicializa todas as planilhas do sistema.
- * Cria abas que não existem, define cabeçalhos e insere dados padrão.
- * Deve ser chamada na primeira execução ou quando uma aba estiver faltando.
- */
-function initializeSheets() {
-  try {
-    const ss = getSpreadsheet();
-    Logger.log('Iniciando inicialização das planilhas...');
-
-    // Limpa o cache ANTES de migrar: se uma execução anterior deixou dados
-    // em cache com o esquema antigo, as leituras feitas durante a migração
-    // (getAll) usariam a ordem de colunas anterior. Como o cache também é
-    // limpo ao final, esta chamada é apenas uma proteção — não altera o
-    // resultado da migração, que lê as abas diretamente da planilha.
-    invalidateAllCache();
-
-
-    // Mapeamento de planilha -> colunas -> dados padrão
-    const sheetsConfig = [
-      { name: CONFIG.SHEET_NAMES.RECLAME_AQUI,   columns: COLUMNS.ATENDIMENTOS,  defaults: [] },
-      { name: CONFIG.SHEET_NAMES.SAC_PREVENTIVO, columns: COLUMNS.ATENDIMENTOS,  defaults: [] },
-      // v4.2: canais administráveis pela tela de Configurações (ADM).
-      { name: CONFIG.SHEET_NAMES.CANAIS,         columns: COLUMNS.CANAIS,        defaults: DEFAULT_CANAIS },
-      { name: CONFIG.SHEET_NAMES.CONFIG_CAMPOS,  columns: COLUMNS.CONFIG_CAMPOS, defaults: DEFAULT_CONFIG_CAMPOS },
-      { name: CONFIG.SHEET_NAMES.TIMELINE,       columns: COLUMNS.TIMELINE,      defaults: [] },
-      { name: CONFIG.SHEET_NAMES.HISTORICO,      columns: COLUMNS.HISTORICO,     defaults: [] },
-      { name: CONFIG.SHEET_NAMES.USUARIOS,       columns: COLUMNS.USUARIOS,      defaults: [] },
-      { name: CONFIG.SHEET_NAMES.PRODUTOS,       columns: COLUMNS.PRODUTOS,      defaults: DEFAULT_PRODUTOS },
-      { name: CONFIG.SHEET_NAMES.CATEGORIAS,     columns: COLUMNS.CATEGORIAS,    defaults: DEFAULT_CATEGORIAS },
-      // v4.6: subcategorias (Produto → Categoria → Subcategoria). Sem dados
-      // padrão: o cadastro é feito manualmente pela tela de Configurações.
-      { name: CONFIG.SHEET_NAMES.SUBCATEGORIAS,  columns: COLUMNS.SUBCATEGORIAS, defaults: [] },
-      // v4.7: valores manuais "Fora da SLA" do módulo Indicadores
-      // Operacionais. Nasce vazia; é preenchida conforme o usuário informa.
-      { name: CONFIG.SHEET_NAMES.INDICADORES_SLA, columns: COLUMNS.INDICADORES_SLA, defaults: [] }
-    ];
-    
-    sheetsConfig.forEach(function(cfg) {
-      let sheet = ss.getSheetByName(cfg.name);
-      if (!sheet) {
-        const legacyNames = {
-          'Histórico': ['Historico'],
-          'Usuários': ['Usuarios']
-        };
-        const aliases = legacyNames[cfg.name] || [];
-        for (let aliasIndex = 0; aliasIndex < aliases.length; aliasIndex++) {
-          const legacySheet = ss.getSheetByName(aliases[aliasIndex]);
-          if (legacySheet) {
-            legacySheet.setName(cfg.name);
-            sheet = legacySheet;
-            Logger.log('Aba migrada: ' + aliases[aliasIndex] + ' -> ' + cfg.name);
-            break;
-          }
-        }
-      }
-      
-      if (!sheet) {
-        sheet = ss.insertSheet(cfg.name);
-        Logger.log('Aba criada: ' + cfg.name);
-      }
-
-      ensureSheetSchema_(sheet, cfg.columns);
-
-      // Dados padrão são incluídos somente quando a aba ainda não possui registros.
-      if (sheet.getLastRow() <= 1 && cfg.defaults && cfg.defaults.length > 0) {
-        const rows = cfg.defaults.map(function(item) {
-          return toRowArray(item, cfg.columns);
-        });
-        sheet.getRange(2, 1, rows.length, cfg.columns.length).setValues(rows);
-        Logger.log('Dados padrão inseridos em ' + cfg.name + ': ' + rows.length + ' registros');
-      }
-    });
-
-    migrateLegacyData_(ss);
-    bootstrapSupervisor_();
-    removeDefaultBlankSheet_(ss);
-    invalidateAllCache();
-    PropertiesService.getScriptProperties().setProperty(PROPERTY_KEYS.SCHEMA_VERSION, CONFIG.SCHEMA_VERSION);
-    
-    Logger.log('Inicialização das planilhas concluída com sucesso.');
-  } catch (e) {
-    Logger.log('Erro na inicialização das planilhas: ' + e.message);
-    throw new Error('Erro ao inicializar planilhas: ' + e.message);
-  }
-}
-
-/**
- * Migração v4: remove abas descontinuadas, ressemeia o catálogo, move os
- * atendimentos da aba legada "Atendimentos" para as abas por canal
- * (uma por canal), normaliza o fluxo de status
- * (Pendente / Em análise / Concluído + "Aguardando Retorno de") e garante
- * que exista um usuário ADM.
- */
-function migrateLegacyData_(ss) {
-  // 1) Remove abas que deixaram de existir no fluxo simplificado.
-  // v4.2: 'Canais' foi REMOVIDA desta lista — a aba voltou a existir como
-  // cadastro administrável dos canais de entrada (não pode ser apagada).
-  const obsoleteSheets = [
-    'Status', 'StatusConfig', 'Prioridades', 'TiposAtendimento',
-    'SLAs', 'MotivosPendencia', 'Dashboard', 'Relatórios', 'Relatorios',
-    'Configurações', 'Configuracoes'
-  ];
-  obsoleteSheets.forEach(function(name) {
-    const sheet = ss.getSheetByName(name);
-    if (sheet && ss.getSheets().length > 1) {
-      ss.deleteSheet(sheet);
-      Logger.log('Aba descontinuada removida: ' + name);
-    }
-  });
-
-  // 2) POLÍTICA DE NÃO SOBRESCRITA (v4.3): o antigo "reseed" do catálogo
-  //    (que limpava as abas Produtos/Categorias e regravava os padrões a
-  //    cada versão) foi REMOVIDO. O sistema nunca sobrescreve dados já
-  //    existentes na planilha: os dados padrão (DEFAULT_*) são inseridos
-  //    por initializeSheets SOMENTE quando a aba está vazia. O que o
-  //    usuário escreveu ou editou manualmente no Google Sheets é sempre
-  //    preservado.
-
-  // 3) Move os atendimentos legados para as abas por canal e normaliza status.
-  migrateAtendimentosPorCanal_(ss);
-
-  // 4) v4.2: descontinua o canal "Chat Privado" — move os atendimentos da
-  //    aba ChatPrivadoRA para ReclameAqui e remove a aba antiga.
-  migrateChatPrivadoParaReclameAqui_(ss);
-
-  // 5) Garante um usuário ADM (instalações antigas só tinham Supervisor).
-  promoteFirstAdmin_();
-
-  // 6) v4.6: garante o campo "Subcategoria" no formulário (ConfigCampos)
-  //    de instalações existentes, sem tocar nos demais campos.
-  ensureSubcategoriaFormField_();
-}
-
-/**
- * Migração v4.6 — campo Subcategoria no formulário dinâmico.
- * Em instalações existentes a aba ConfigCampos já está populada e a
- * política de não sobrescrita impede regravar os padrões; esta função
- * apenas ACRESCENTA o registro do campo "subcategoria" quando ele ainda
- * não existe (idempotente — nada é alterado nas demais linhas).
- * Instalações novas já o recebem via DEFAULT_CONFIG_CAMPOS.
- * Ordem 6.5: posiciona o campo logo após Categoria (6) e antes do
- * Canal (7) sem renumerar os campos já configurados pelo ADM.
- */
-function ensureSubcategoriaFormField_() {
-  const existentes = getAll(CONFIG.SHEET_NAMES.CONFIG_CAMPOS);
-  if (existentes.length === 0) return; // aba vazia: DEFAULT_CONFIG_CAMPOS cobre
-  const jaExiste = existentes.some(function(item) {
-    return normalizeText_(item.Campo) === 'subcategoria';
-  });
-  if (jaExiste) return;
-
-  insert(CONFIG.SHEET_NAMES.CONFIG_CAMPOS, {
-    Id: generateId('FC'),
-    Campo: 'subcategoria',
-    Rotulo: 'Subcategoria',
-    Tipo: 'select',
-    Exibir: true,
-    Obrigatorio: false,
-    Ordem: 6.5,
-    Base: true,
-    Bloqueado: false,
-    Opcoes: ''
-  });
-  Logger.log('Migração v4.6: campo "subcategoria" adicionado à ConfigCampos.');
-}
-
-/**
- * Migração v4.2 — remoção do canal "Chat Privado".
- * Executada uma única vez (flag em Script Properties):
- *   1) move todas as linhas da aba legada "ChatPrivadoRA" para a aba
- *      "ReclameAqui", trocando o valor da coluna Canal para "Reclame Aqui"
- *      (o Chat Privado sempre fez parte do Reclame Aqui);
- *   2) remove a aba "ChatPrivadoRA" da planilha;
- *   3) normaliza registros já gravados nas abas restantes que ainda
- *      tenham Canal = "Chat Privado".
- * Nenhum atendimento é perdido — apenas o canal registrado é unificado.
- * @param {Spreadsheet} ss - Planilha principal do sistema.
- */
-function migrateChatPrivadoParaReclameAqui_(ss) {
-  const properties = PropertiesService.getScriptProperties();
-  if (properties.getProperty(PROPERTY_KEYS.CHAT_PRIVADO_MIGRATION) === '4.2.0') return;
-
-  // Nome fixo da aba descontinuada (a constante saiu de CONFIG.SHEET_NAMES).
-  const LEGACY_CHAT_SHEET = 'ChatPrivadoRA';
-  const canalIndex = COLUMNS.ATENDIMENTOS.indexOf('Canal');
-
-  // 1) Move as linhas da aba ChatPrivadoRA para ReclameAqui.
-  const legacySheet = ss.getSheetByName(LEGACY_CHAT_SHEET);
-  if (legacySheet && legacySheet.getLastRow() > 1) {
-    const lastCol = legacySheet.getLastColumn();
-    const values = legacySheet.getRange(1, 1, legacySheet.getLastRow(), lastCol).getValues();
-    const headers = values[0].map(function(value) { return String(value); });
-    const rows = [];
-
-    for (let i = 1; i < values.length; i++) {
-      const record = {};
-      headers.forEach(function(header, index) {
-        if (header) record[header] = values[i][index];
-      });
-      if (!record.Id) continue;
-      record.Canal = 'Reclame Aqui'; // canal unificado
-      rows.push(toRowArray(record, COLUMNS.ATENDIMENTOS));
-    }
-
-    if (rows.length > 0) {
-      const target = ss.getSheetByName(CONFIG.SHEET_NAMES.RECLAME_AQUI);
-      if (target) {
-        target.getRange(target.getLastRow() + 1, 1, rows.length, COLUMNS.ATENDIMENTOS.length)
-          .setValues(rows);
-        invalidateCache(CONFIG.SHEET_NAMES.RECLAME_AQUI);
-        Logger.log('Atendimentos do Chat Privado migrados para ReclameAqui: ' + rows.length);
-      }
-    }
-  }
-
-  // 2) Remove a aba descontinuada.
-  if (legacySheet && ss.getSheets().length > 1) {
-    ss.deleteSheet(legacySheet);
-    Logger.log('Aba descontinuada removida: ' + LEGACY_CHAT_SHEET);
-  }
-
-  // 3) Normaliza registros remanescentes com Canal = "Chat Privado"
-  //    (ex.: planilhas editadas manualmente) nas abas por canal atuais.
-  CANAL_SHEETS.forEach(function(item) {
-    const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES[item.sheetKey]);
-    if (!sheet || sheet.getLastRow() <= 1) return;
-    const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
-    const rows = range.getValues();
-    let changed = false;
-    rows.forEach(function(row) {
-      if (normalizeText_(row[canalIndex]) === 'chat privado') {
-        row[canalIndex] = 'Reclame Aqui';
-        changed = true;
-      }
-    });
-    if (changed) {
-      range.setValues(rows);
-      invalidateCache(sheet.getName());
-    }
-  });
-
-  properties.setProperty(PROPERTY_KEYS.CHAT_PRIVADO_MIGRATION, '4.2.0');
-}
-
-/**
- * Move cada linha da aba legada "Atendimentos" para a aba do seu canal e
- * normaliza status/situação para o fluxo v4:
- *   - Status finais → "Concluído" (sem situação);
- *   - "Em análise do analista" → status "Em análise";
- *   - "Em análise área" → Pendente / Aguardando Retorno de "Área";
- *   - "...retorno do cliente" → Pendente / Aguardando Retorno de "Cliente".
- * Executa uma única vez (flag em Script Properties) e remove a aba legada.
- */
-function migrateAtendimentosPorCanal_(ss) {
-  const properties = PropertiesService.getScriptProperties();
-  const MIGRATION_FLAG = PROPERTY_KEYS.CANAL_MIGRATION;
-  if (properties.getProperty(MIGRATION_FLAG) === '4.0.0') return;
-
-  const legacySheet = ss.getSheetByName(CONFIG.LEGACY_ATENDIMENTOS_SHEET);
-  if (legacySheet && legacySheet.getLastRow() > 1) {
-    const lastCol = legacySheet.getLastColumn();
-    const values = legacySheet.getRange(1, 1, legacySheet.getLastRow(), lastCol).getValues();
-    const headers = values[0].map(function(value) { return String(value); });
-    const buckets = {};
-
-    for (let i = 1; i < values.length; i++) {
-      const record = {};
-      headers.forEach(function(header, index) {
-        if (header) record[header] = values[i][index];
-      });
-      if (!record.Id) continue;
-
-      normalizeStatusV4_(record);
-      const sheetName = sheetNameForCanalConfig_(record.Canal);
-      if (!buckets[sheetName]) buckets[sheetName] = [];
-      buckets[sheetName].push(toRowArray(record, COLUMNS.ATENDIMENTOS));
-    }
-
-    Object.keys(buckets).forEach(function(sheetName) {
-      const target = ss.getSheetByName(sheetName);
-      if (!target || buckets[sheetName].length === 0) return;
-      target.getRange(target.getLastRow() + 1, 1, buckets[sheetName].length, COLUMNS.ATENDIMENTOS.length)
-        .setValues(buckets[sheetName]);
-      invalidateCache(sheetName);
-      Logger.log('Atendimentos migrados para ' + sheetName + ': ' + buckets[sheetName].length);
-    });
-  }
-
-  if (legacySheet && ss.getSheets().length > 1) {
-    ss.deleteSheet(legacySheet);
-    Logger.log('Aba legada removida: ' + CONFIG.LEGACY_ATENDIMENTOS_SHEET);
-  }
-
-  // Normaliza também registros já existentes nas abas por canal
-  // (caso a planilha tenha sido editada manualmente com valores antigos).
-  CANAL_SHEETS.forEach(function(item) {
-    const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES[item.sheetKey]);
-    if (!sheet || sheet.getLastRow() <= 1) return;
-    const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, COLUMNS.ATENDIMENTOS.length);
-    const rows = range.getValues();
-    let changed = false;
-    rows.forEach(function(row) {
-      const record = toObject(row, COLUMNS.ATENDIMENTOS);
-      if (!record.Id) return;
-      if (normalizeStatusV4_(record)) {
-        const updated = toRowArray(record, COLUMNS.ATENDIMENTOS);
-        for (let c = 0; c < updated.length; c++) row[c] = updated[c];
-        changed = true;
-      }
-    });
-    if (changed) {
-      range.setValues(rows);
-      invalidateCache(sheet.getName());
-    }
-  });
-
-  properties.setProperty(MIGRATION_FLAG, '4.0.0');
-}
-
-/**
- * Normaliza Status/MotivoPendencia de um registro para o fluxo v4.
- * Altera o objeto recebido e retorna true quando algo mudou.
- */
-function normalizeStatusV4_(record) {
-  const finalNames = ['concluido', 'resolvido', 'finalizado', 'encerrado', 'cancelado', 'improcedente'];
-  const status = normalizeText_(record.Status);
-  const motivo = normalizeText_(record.MotivoPendencia);
-  let newStatus = record.Status;
-  let newMotivo = record.MotivoPendencia;
-
-  if (finalNames.indexOf(status) !== -1) {
-    newStatus = 'Concluído';
-    newMotivo = '';
-  } else if (status === 'em analise') {
-    newMotivo = '';
-  } else {
-    // Pendente (ou status desconhecido): decide pela situação legada.
-    if (motivo.indexOf('area') !== -1) {
-      newStatus = 'Pendente';
-      newMotivo = 'Área';
-    } else if (motivo.indexOf('cliente') !== -1) {
-      newStatus = 'Pendente';
-      newMotivo = 'Cliente';
-    } else if (motivo.indexOf('analista') !== -1 || !motivo) {
-      newStatus = 'Em análise';
-      newMotivo = '';
-    } else {
-      newStatus = 'Pendente';
-      newMotivo = SITUACOES_PENDENCIA.indexOf(String(record.MotivoPendencia)) !== -1
-        ? String(record.MotivoPendencia)
-        : 'Área';
-    }
-  }
-
-  const changed = String(record.Status) !== String(newStatus) ||
-    String(record.MotivoPendencia || '') !== String(newMotivo || '');
-  record.Status = newStatus;
-  record.MotivoPendencia = newMotivo;
-  return changed;
-}
-
-/**
- * Retorna o nome da aba correspondente a um canal (Config.gs/CANAL_SHEETS).
- * Canais desconhecidos ou vazios caem na aba ReclameAqui.
- */
-function sheetNameForCanalConfig_(canal) {
-  const normalized = normalizeText_(canal);
-  for (let i = 0; i < CANAL_SHEETS.length; i++) {
-    if (normalizeText_(CANAL_SHEETS[i].canal) === normalized) {
-      return CONFIG.SHEET_NAMES[CANAL_SHEETS[i].sheetKey];
-    }
-  }
-  return CONFIG.SHEET_NAMES.RECLAME_AQUI;
-}
-
-/**
- * Garante que exista pelo menos um usuário ativo com perfil ADM.
- * Em instalações antigas, promove o primeiro Supervisor ativo.
- */
-function promoteFirstAdmin_() {
-  const users = getAll(CONFIG.SHEET_NAMES.USUARIOS);
-  const hasAdmin = users.some(function(user) {
-    return isTrue_(user.Ativo) && normalizeText_(user.Perfil) === 'adm';
-  });
-  if (hasAdmin) return;
-
-  const supervisor = users.find(function(user) {
-    return isTrue_(user.Ativo) && ['supervisor', 'gestor', 'administrador', 'admin'].indexOf(normalizeText_(user.Perfil)) !== -1;
-  });
-  if (supervisor) {
-    update(CONFIG.SHEET_NAMES.USUARIOS, supervisor.Id, { Perfil: 'ADM' });
-    // LGPD: registra apenas o Id técnico — nunca o nome ou e-mail.
-    Logger.log('Usuário promovido a ADM (Id): ' + supervisor.Id);
-  }
-}
-
-/*
- * v4.3 — funções reseedCatalog_ e normalizeProdutosAtendimentos_ REMOVIDAS.
- * Elas limpavam as abas Produtos/Categorias (regravando os padrões a cada
- * versão de catálogo) e reescreviam o nome do produto de atendimentos já
- * gravados — ou seja, sobrescreviam dados que o usuário escreveu/editou
- * manualmente no Google Sheets. Pela política de não sobrescrita, os dados
- * padrão são gravados apenas em abas VAZIAS (initializeSheets) e nenhum
- * conteúdo existente é alterado por rotinas automáticas de catálogo.
- */
 
 /**
  * Aplica a formatação padrão do cabeçalho (negrito, fundo azul, congelado).
@@ -605,200 +201,6 @@ function aplicarFormatoCabecalho_(sheet, totalColunas) {
   headerRange.setBackground('#0046C0');
   headerRange.setFontColor('#FFFFFF');
   sheet.setFrozenRows(1);
-}
-
-/**
- * Atualiza o esquema de uma aba preservando os dados pelas chaves do cabeçalho.
- * Isso permite evoluir o sistema sem deslocar dados de instalações anteriores.
- *
- * ============================================================================
- * 🔴 FUNÇÃO DE ALTO RISCO — LEIA ANTES DE ALTERAR
- * ============================================================================
- * CORREÇÃO DE RISCO CRÍTICO (Fase 1 de estabilização):
- * a versão anterior fazia, nesta ordem:
- *     clearContents()  →  escreve cabeçalho  →  regrava as linhas
- * Entre o clearContents() e a regravação a aba ficava VAZIA. Qualquer
- * falha nesse intervalo (timeout de 6 min, erro de rede, exceção) apagava
- * DEFINITIVAMENTE os dados — não havia como recuperar.
- *
- * A rotina agora é NÃO DESTRUTIVA e reversível:
- *   1. Lê tudo em memória e remapeia pelo NOME do cabeçalho;
- *   2. VALIDA a contagem antes de gravar (nenhuma linha pode sumir);
- *   3. Cria uma ABA DE BACKUP com o conteúdo original (rede de segurança
- *      que permanece na planilha para conferência/rollback manual);
- *   4. SOBRESCREVE o intervalo por cima, sem nunca esvaziar a aba antes
- *      (só limpa colunas remanescentes à direita, se o esquema encolheu);
- *   5. VALIDA de novo lendo a aba: contagem tem de bater;
- *   6. Em caso de erro em qualquer ponto, RESTAURA os valores originais
- *      a partir da memória (rollback) e interrompe com erro explícito.
- *
- * A trava de escrita é garantida por withScriptLock_ (reentrante), de modo
- * que duas migrações nunca rodam ao mesmo tempo sobre a mesma aba.
- * ============================================================================
- * @param {Sheet} sheet - Aba a ajustar.
- * @param {string[]} columns - Colunas esperadas (Config.gs).
- * @throws {Error} 'ESQUEMA: ...' quando a migração não pôde ser concluída
- *   com segurança (neste caso os dados originais são preservados).
- */
-function ensureSheetSchema_(sheet, columns) {
-  if (!columns || columns.length === 0) return;
-
-  // Garantir colunas físicas suficientes é uma operação aditiva e segura.
-  if (sheet.getMaxColumns() < columns.length) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), columns.length - sheet.getMaxColumns());
-  }
-
-  const sheetName = sheet.getName();
-  const lastRow = sheet.getLastRow();
-  const lastCol = sheet.getLastColumn();
-
-  // ── CASO 1: aba vazia (sem cabeçalho) — nada a preservar ──
-  if (lastRow === 0 || lastCol === 0) {
-    sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
-    aplicarFormatoCabecalho_(sheet, columns.length);
-    return;
-  }
-
-  const existing = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-  const oldHeaders = existing[0].map(function(value) { return String(value); });
-  const sameSchema = oldHeaders.length === columns.length && oldHeaders.every(function(value, index) {
-    return value === columns[index];
-  });
-
-  // ── CASO 2: esquema já correto — só reforça cabeçalho e formatação ──
-  if (sameSchema) {
-    sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
-    aplicarFormatoCabecalho_(sheet, columns.length);
-    return;
-  }
-
-  // ── CASO 3: esquema diferente, mas SEM linhas de dados ──
-  // Não há o que preservar: apenas troca o cabeçalho.
-  if (existing.length <= 1) {
-    sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
-    if (lastCol > columns.length) {
-      sheet.getRange(1, columns.length + 1, 1, lastCol - columns.length).clearContent();
-    }
-    aplicarFormatoCabecalho_(sheet, columns.length);
-    return;
-  }
-
-  // ── CASO 4: MIGRAÇÃO COM DADOS REAIS — caminho protegido ──
-  withScriptLock_(function() {
-    const totalOriginal = existing.length - 1; // linhas de dados (sem cabeçalho)
-
-    // 4.1 Remapeia cada linha pelo NOME da coluna no cabeçalho antigo.
-    const rows = existing.slice(1).map(function(row) {
-      const record = {};
-      oldHeaders.forEach(function(header, index) {
-        if (header) record[header] = row[index];
-      });
-      return toRowArray(record, columns);
-    });
-
-    // 4.2 VALIDAÇÃO PRÉVIA: nenhuma linha pode ter se perdido no remapeamento.
-    if (rows.length !== totalOriginal) {
-      throw new Error('ESQUEMA: remapeamento de "' + sheetName + '" gerou ' + rows.length +
-        ' linhas para ' + totalOriginal + ' originais. Migração abortada — nada foi alterado.');
-    }
-
-    // 4.3 BACKUP: cópia integral da aba ANTES de qualquer escrita.
-    // Fica na própria planilha como rede de segurança (não é apagada
-    // automaticamente — o administrador confere e remove quando quiser).
-    let nomeBackup = '';
-    try {
-      const ss = sheet.getParent();
-      const carimbo = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
-      nomeBackup = ('_bkp_' + sheetName + '_' + carimbo).substring(0, 99);
-      sheet.copyTo(ss).setName(nomeBackup);
-      Logger.log('[Esquema] Backup criado antes da migração: ' + nomeBackup);
-    } catch (e) {
-      // Sem backup não migramos: preferimos manter o sistema como está.
-      throw new Error('ESQUEMA: não foi possível criar a aba de backup de "' + sheetName +
-        '" (' + e.message + '). Migração abortada — nenhum dado foi alterado.');
-    }
-
-    // 4.4 ESCRITA POR CIMA (a aba NUNCA fica vazia em nenhum instante).
-    try {
-      sheet.getRange(1, 1, 1, columns.length).setValues([columns]);
-      sheet.getRange(2, 1, rows.length, columns.length).setValues(rows);
-
-      // Se o esquema novo tem MENOS colunas, limpa só o excedente à direita
-      // (nunca o intervalo que acabou de receber os dados).
-      if (lastCol > columns.length) {
-        sheet.getRange(1, columns.length + 1, lastRow, lastCol - columns.length).clearContent();
-      }
-
-      // 4.5 VALIDAÇÃO POSTERIOR: relê a aba e confere a contagem.
-      SpreadsheetApp.flush();
-      const conferencia = sheet.getLastRow() - 1;
-      if (conferencia !== totalOriginal) {
-        throw new Error('contagem final (' + conferencia + ') diferente da original (' + totalOriginal + ')');
-      }
-    } catch (e) {
-      // 4.6 ROLLBACK: devolve os valores originais a partir da memória.
-      try {
-        sheet.getRange(1, 1, existing.length, oldHeaders.length).setValues(existing);
-        SpreadsheetApp.flush();
-        Logger.log('[Esquema] ROLLBACK aplicado em "' + sheetName + '" — dados originais restaurados.');
-      } catch (rollbackErro) {
-        Logger.log('[Esquema] FALHA NO ROLLBACK de "' + sheetName + '": ' + rollbackErro.message +
-          ' — utilize a aba de backup "' + nomeBackup + '".');
-      }
-      throw new Error('ESQUEMA: falha ao migrar "' + sheetName + '" (' + e.message +
-        '). Os dados originais foram restaurados; a aba de backup "' + nomeBackup + '" também está disponível.');
-    }
-
-    aplicarFormatoCabecalho_(sheet, columns.length);
-    invalidateCache(sheetName);
-    Logger.log('[Esquema] Migração concluída em "' + sheetName + '": ' + totalOriginal +
-      ' registros preservados. Backup: ' + nomeBackup);
-  });
-}
-
-/**
- * Cadastra o primeiro usuário como ADM para viabilizar a configuração inicial
- * (gestão de usuários e dos campos do formulário são exclusivas do ADM).
- */
-function bootstrapSupervisor_() {
-  const sheet = getSpreadsheet().getSheetByName(CONFIG.SHEET_NAMES.USUARIOS);
-  if (!sheet || sheet.getLastRow() > 1) return;
-
-  let email = '';
-  try {
-    email = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || '';
-  } catch (e) {
-    email = '';
-  }
-
-  const nome = email ? email.split('@')[0] : 'Administrador inicial';
-  const user = {
-    Id: generateId('USR'),
-    Nome: nome,
-    Email: email,
-    Perfil: 'ADM',
-    Equipe: 'RA',
-    Ativo: true,
-    DataCadastro: new Date(),
-    UltimoAcesso: new Date()
-  };
-  sheet.getRange(2, 1, 1, COLUMNS.USUARIOS.length).setValues([toRowArray(user, COLUMNS.USUARIOS)]);
-}
-
-/**
- * Remove apenas a aba vazia criada automaticamente em planilhas independentes.
- */
-function removeDefaultBlankSheet_(ss) {
-  const managedNames = Object.values(CONFIG.SHEET_NAMES);
-  const defaultNames = ['Sheet1', 'Página1', 'Pagina1', 'Planilha1'];
-  ss.getSheets().forEach(function(sheet) {
-    if (managedNames.indexOf(sheet.getName()) === -1 &&
-        defaultNames.indexOf(sheet.getName()) !== -1 &&
-        sheet.getLastRow() === 0 &&
-        ss.getSheets().length > 1) {
-      ss.deleteSheet(sheet);
-    }
-  });
 }
 
 // ============================================================================
@@ -1250,31 +652,6 @@ function getFilteredData(sheetName, filters) {
 // ============================================================================
 
 /**
- * Garante que o cabeçalho físico da aba está alinhado com o esquema do
- * Config ANTES de uma gravação posicional (insert/update escrevem a linha
- * inteira na ordem das colunas configuradas).
- * Se alguém adicionou/reordenou colunas manualmente no Sheets, realinha a
- * aba via ensureSheetSchema_ (que preserva os dados remapeando pelo NOME
- * do cabeçalho) e invalida o cache. Proteção contra regressão: uma
- * mudança estrutural na planilha não corrompe mais as gravações.
- * @param {Sheet} sheet - Aba de destino.
- * @param {string} sheetName - Nome da aba (para invalidar o cache).
- * @param {string[]} columns - Colunas esperadas (Config).
- */
-function ensureAlignedHeaders_(sheet, sheetName, columns) {
-  if (!columns || columns.length === 0) return;
-  const lastCol = sheet.getLastColumn();
-  if (lastCol > 0) {
-    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(v) { return String(v); });
-    const alinhado = columns.every(function(col, index) { return headers[index] === col; });
-    if (alinhado) return;
-  }
-  Logger.log('[SchemaGuard] Cabeçalho de ' + sheetName + ' desalinhado — realinhando antes da gravação.');
-  ensureSheetSchema_(sheet, columns);
-  invalidateCache(sheetName);
-}
-
-/**
  * 🔴 ALTO RISCO — PREPARA UMA ABA PARA GRAVAÇÃO POSICIONAL.
  *
  * PARA QUE SERVE:
@@ -1309,10 +686,11 @@ function prepararAbaParaGravacao_(sheet, sheetName, columns) {
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
 
-  // 2. Aba ainda sem cabeçalho e sem dados: apenas cria o cabeçalho.
+  // 2. Aba sem cabeçalho: o sistema não escreve cabeçalho em aba de produção.
   if (lastRow === 0 || lastCol === 0) {
-    ensureAlignedHeaders_(sheet, sheetName, columns);
-    return;
+    throw new Error('ESTRUTURA: a aba "' + sheetName + '" está sem cabeçalho. ' +
+      'A gravação foi cancelada — o sistema não cria nem reconstrói cabeçalho ' +
+      'automaticamente. Escreva a primeira linha com os nomes de coluna esperados.');
   }
 
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(v) { return String(v); });
@@ -1342,17 +720,21 @@ function prepararAbaParaGravacao_(sheet, sheetName, columns) {
   const alinhado = columns.every(function(col, index) { return headers[index] === col; });
   if (alinhado) return;
 
-  // 5. Desalinhado, porém corrigível: usa a rotina protegida da Fase 1.
-  ensureAlignedHeaders_(sheet, sheetName, columns);
-
-  // 6. VALIDA DE NOVO. Se ainda não estiver alinhado, não grava.
-  const conferencia = sheet.getRange(1, 1, 1, Math.max(columns.length, sheet.getLastColumn()))
-    .getValues()[0].map(function(v) { return String(v); });
-  const alinhadoAgora = columns.every(function(col, index) { return conferencia[index] === col; });
-  if (!alinhadoAgora) {
-    throw new Error('ESTRUTURA: não foi possível alinhar o cabeçalho da aba "' + sheetName +
-      '". A gravação foi cancelada e nenhum dado foi alterado.');
-  }
+  // 5. FAIL CLOSED — desalinhado.
+  // Aqui a rotina reescrevia o cabeçalho e remanejava as colunas da aba,
+  // criando de quebra uma aba de backup. Era uma alteração estrutural
+  // disparada por uma gravação comum. Agora a gravação para e a decisão
+  // volta para quem cuida da planilha.
+  const fora = [];
+  columns.forEach(function(col, index) {
+    if (headers[index] !== col) {
+      fora.push('posição ' + (index + 1) + ': esperado "' + col +
+        '", encontrado "' + (headers[index] === undefined ? '(vazio)' : headers[index]) + '"');
+    }
+  });
+  throw new Error('ESTRUTURA: o cabeçalho da aba "' + sheetName + '" está fora da ordem ' +
+    'esperada. A gravação foi cancelada e nada foi alterado — o sistema não reordena ' +
+    'colunas de uma planilha em uso. Divergência(s): ' + fora.slice(0, 5).join('; ') + '.');
 }
 
 /**

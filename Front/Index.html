@@ -150,11 +150,6 @@
   <!-- Usuários, Cargos e Níveis de Acesso do PGO 5.0. Carregado depois do
        ConfiguracoesPGO5 porque a navegação daquela tela delega para cá. -->
   <?!= include('AcessoPGO5'); ?>
-  <!-- Importar Base Legada: traz o histórico de um sistema anterior para
-       dentro da base atual. Carregado depois do AcessoPGO5 porque reaproveita
-       o mesmo modelo de seção externa de Configurações e o mesmo fluxo de
-       PIN administrativo. -->
-  <?!= include('ImportacaoPGO5'); ?>
   <!-- Configuração da planilha externa da Análise de SAC. É fonte de
        terceiros, que muda de layout sem avisar: o ADM precisa poder apontar
        outra aba sem depender de código. -->
@@ -162,6 +157,5 @@
   <?!= include('Relatorios'); ?>
   <?!= include('Indicadores'); ?>
   <?!= include('IndicadoresOperacionais'); ?>
-  <?!= include('MelhoriasPGO5'); ?>
 </body>
 </html>

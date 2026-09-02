@@ -51,11 +51,6 @@ Pages.configuracoesPGO5 = {
       permissoes: ['gerenciarCargos', 'gerenciarNiveis'] },
     { tipo: 'SEGURANCA', label: 'Segurança', icone: 'lock', externa: 'segurancaPGO5',
       permissoes: ['alterarPermissoes'] },
-    // Importar Base Legada: traz o histórico de um sistema anterior para
-    // dentro da base atual. Fica por último por ser uma operação pontual,
-    // fora da rotina — mas pode ser repetida quantas vezes for preciso.
-    { tipo: 'IMPORTACAO', label: 'Importar Base Legada', icone: 'file_download',
-      externa: 'importacaoPGO5', permissoes: ['configurarSistema'] },
     // Fonte da Análise de SAC. Permissão PRÓPRIA (configurarAnaliseSac) e
     // sem PIN: a planilha é externa ao sistema e trocar de aba é rotina de
     // quem analisa — o PIN protege o banco do PGO, não uma fonte de fora.

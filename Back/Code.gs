@@ -34,7 +34,9 @@
  *   - Adicionar um novo item no menu que aparece dentro da planilha
  *     (função onOpen).
  *   - Criar uma nova opção de manutenção no menu, parecida com
- *     menuReinicializar() ou menuLimparCache().
+ *     menuLimparCache() — que só limpa cache e não toca na planilha.
+ *     ⚠️ Nenhum item de menu pode criar, renomear, apagar ou reestruturar
+ *     aba: o menu fica na planilha de PRODUÇÃO, a um clique de distância.
  *
  * O que evitar mexer sem necessidade (risco de quebrar o app inteiro):
  *   - A lógica de doGet() e include() é praticamente padrão do Google
@@ -131,7 +133,13 @@ function onOpen() {
       .createMenu(CONFIG.APP.NOME_CURTO)
       .addItem('🚀 Abrir Sistema', 'abrirSistema')
       .addSeparator()
-      .addItem('🔄 Reinicializar Planilhas', 'menuReinicializar')
+      // NÃO EXISTE ITEM DE MENU QUE MEXA NA ESTRUTURA DA PLANILHA.
+      // Havia um "Reinicializar Planilhas" a um clique de distância, no menu
+      // da própria planilha de produção, e ele chamava o inicializador do
+      // modelo 4.x: criava 11 abas antigas, renomeava abas por apelido e
+      // APAGAVA abas ditas obsoletas — uma delas chamada "Configurações",
+      // que no PGO 5.0 é uma das cinco abas oficiais. Limpar cache não toca
+      // em estrutura e continua aqui.
       .addItem('🗑️ Limpar Cache', 'menuLimparCache')
       .addToUi();
   } catch (e) {
@@ -166,31 +174,6 @@ function abrirSistema() {
 // ============================================================================
 
 /**
- * Reinicializa as planilhas (chamada pelo menu).
- * Cria abas faltantes e insere dados padrão.
- */
-function menuReinicializar() {
-  try {
-    const ui = SpreadsheetApp.getUi();
-    const response = ui.alert(
-      'Reinicializar Planilhas',
-      'Esta ação irá criar abas faltantes e inserir dados padrão. ' +
-      'Dados existentes NÃO serão apagados.\n\nDeseja continuar?',
-      ui.ButtonSet.YES_NO
-    );
-    
-    if (response === ui.Button.YES) {
-      initializeSheets();
-      invalidateAllCache();
-      ui.alert('Sucesso', 'Planilhas reinicializadas com sucesso!', ui.ButtonSet.OK);
-    }
-  } catch (e) {
-    Logger.log('Erro ao reinicializar: ' + e.message);
-    SpreadsheetApp.getUi().alert('Erro: ' + e.message);
-  }
-}
-
-/**
  * Limpa todo o cache do sistema (chamada pelo menu).
  */
 function menuLimparCache() {
@@ -208,20 +191,21 @@ function menuLimparCache() {
 // ============================================================================
 
 /**
- * Função de setup inicial. Pode ser executada manualmente no editor do Apps Script.
- * Cria todas as planilhas, cabeçalhos e dados padrão.
+ * Conferência de instalação. Pode ser executada no editor do Apps Script.
+ *
+ * ⚠️ NÃO CRIA E NÃO ALTERA NADA. Ela chamava initializeSheets(), então
+ * executá-la sobre a planilha de produção a reestruturava — com um nome que
+ * não avisava nada disso. Hoje ela só lê e diz o que encontrou.
  */
 function setup() {
-  try {
-    Logger.log('=== SETUP INICIAL DO PRISMA ===');
-    initializeSheets();
-    Logger.log('Setup concluído com sucesso!');
-    Logger.log('Para acessar como Web App, publique o projeto:');
-    Logger.log('  Publicar > Implantar como aplicativo da web');
-  } catch (e) {
-    Logger.log('Erro no setup: ' + e.message);
-    throw e;
-  }
+  Logger.log('=== VERIFICAÇÃO DE INSTALAÇÃO DO PRISMA ===');
+  Logger.log('Esta função NÃO altera a planilha. Ela apenas informa o que encontrou.');
+  Logger.log('');
+  Logger.log(executarDiagnostico_());
+  Logger.log('');
+  Logger.log('Planilha NOVA e vazia? Execute inicializarPGO5Dev() no editor.');
+  Logger.log('Planilha JÁ EM USO? Não há nada a executar: o sistema apenas lê a');
+  Logger.log('estrutura existente e recusa operar se ela estiver incompatível.');
 }
 
 /**
@@ -232,12 +216,26 @@ function setup() {
 function configurarPlanilha(spreadsheetId) {
   const id = sanitizeInput(spreadsheetId);
   if (!id) throw new Error('Informe o ID da planilha.');
+
+  // Abrir já valida o acesso: sem permissão, openById lança aqui, antes de
+  // qualquer propriedade ser gravada.
   const spreadsheet = SpreadsheetApp.openById(id);
-  const properties = PropertiesService.getScriptProperties();
-  properties.setProperty(PROPERTY_KEYS.SPREADSHEET_ID, spreadsheet.getId());
-  properties.deleteProperty(PROPERTY_KEYS.SCHEMA_VERSION);
-  initializeSheets();
-  return 'Planilha configurada: ' + spreadsheet.getName();
+  PropertiesService.getScriptProperties()
+    .setProperty(PROPERTY_KEYS.SPREADSHEET_ID, spreadsheet.getId());
+
+  // APONTAR NÃO É INICIALIZAR.
+  // Esta função chamava initializeSheets() logo depois de trocar o destino:
+  // apontar o projeto para a planilha de produção reestruturava a planilha
+  // de produção. Agora ela só aponta e devolve o que encontrou; criar
+  // estrutura é uma ação separada, explícita e só para base nova.
+  const estrutura = detectarEstruturaBanco_(true);
+  const abasPgo5 = pgo5TodasAsAbas_().filter(function(nome) {
+    return !!spreadsheet.getSheetByName(nome);
+  });
+
+  return 'Planilha apontada. Estrutura detectada: ' + estrutura +
+    ' | abas do PGO 5.0 presentes: ' + abasPgo5.length + ' de ' + pgo5TodasAsAbas_().length +
+    '. Nada foi criado nem alterado.';
 }
 
 /**

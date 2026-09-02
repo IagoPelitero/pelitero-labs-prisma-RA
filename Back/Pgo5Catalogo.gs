@@ -16,7 +16,7 @@
  * Tudo o que aparece nos seletores do sistema é uma LINHA desta aba. O que
  * diferencia um registro do outro é a coluna "Tipo":
  *
- *   CANAL         → um canal de atendimento (Reclame Aqui, SAC…)
+ *   CANAL         → um canal de atendimento (SAC Preventivo, Chat do RA…)
  *   CAMPO         → um campo do formulário de um canal (CanalId aponta o canal)
  *   OPCAO         → uma opção de um campo select/radio/multiselect (PaiId = campo)
  *   PRODUTO       → produto
@@ -59,7 +59,7 @@ const PGO5_TIPOS_CAMPO = [
  * ValoresAtendimento.
  *
  * Um campo cujo Nome não esteja aqui é dinâmico e vai para
- * ValoresAtendimento — é o caso do "Resumo" do SAC Reclamação.
+ * ValoresAtendimento — um campo "Resumo" criado pelo ADM, por exemplo.
  */
 const PGO5_CAMPOS_ESTRUTURAIS = {
   dataAbertura: 'DataAbertura',
@@ -314,7 +314,7 @@ function pgo5Rotulo_(mapa, id, vazio) {
  * administrador.
  *
  * ITEM EXCLUÍDO NÃO VOLTA: o seed grava em Script Property a lista de itens
- * que já semeou uma vez. Se o ADM excluir "SAC Reclamação", rodar o seed de
+ * que já semeou uma vez. Se o ADM excluir "Chat do RA", rodar o seed de
  * novo não o ressuscita.
  *
  * ⚠️ ESSA MEMÓRIA É POR PLANILHA, E ISSO É ESSENCIAL
@@ -375,14 +375,6 @@ function pgo5LerMemoriaDeSeed_(props, catalogo) {
 }
 
 /**
- * Definição dos canais e dos campos iniciais de cada um.
- *
- * Reclame Aqui e SAC Preventivo reproduzem o formulário que a operação já
- * usa hoje. SAC Reclamação nasce com o conjunto reduzido aprovado.
- * "Resumo" é dinâmico de propósito: não existe coluna Resumo em Atendimentos.
- * @returns {Object[]} Canais com seus campos.
- */
-/**
  * O FORMULÁRIO PADRÃO DA OPERAÇÃO.
  *
  * É o conjunto que o canal Reclame Aqui usa, e serve de ponto de partida
@@ -413,23 +405,27 @@ function pgo5FormularioPadrao_() {
   ];
 }
 
+/**
+ * Canais que uma instalação NOVA recebe, com os campos iniciais de cada um.
+ *
+ * ⚠️ ISTO É PADRÃO DE INSTALAÇÃO NOVA, NÃO É LISTA DE CANAIS VÁLIDOS.
+ * Só vale onde o catálogo ainda não foi semeado. Numa base em uso o seed não
+ * cria, não renomeia, não desativa e não apaga canal nenhum — inclusive os
+ * que saíram desta lista continuam exatamente como estão, com todos os seus
+ * atendimentos, e o ADM decide o que fazer com eles. Ver
+ * pgo5AplicarSeedEstrutural_, que guarda por planilha o que já semeou uma vez.
+ *
+ * Os canais aprovados são SAC Preventivo e Chat do RA. "Reclame Aqui" e
+ * "SAC Reclamação" saíram dos padrões — não foram removidos de lugar nenhum.
+ *
+ * @returns {Object[]} Canais com seus campos.
+ */
 function pgo5DefinicaoInicial_() {
   const camposOperacionais = pgo5FormularioPadrao_;
 
   return [
-    { nome: 'Reclame Aqui', campos: camposOperacionais() },
     { nome: 'SAC Preventivo', campos: camposOperacionais() },
-    {
-      nome: 'SAC Reclamação',
-      campos: [
-        { nome: 'dataAbertura', rotulo: 'Data', tipo: 'date', obrigatorio: true },
-        { nome: 'protocolo', rotulo: 'Protocolo', tipo: 'protocolo', obrigatorio: true },
-        { nome: 'categoria', rotulo: 'Categoria', tipo: 'select', obrigatorio: false },
-        { nome: 'subcategoria', rotulo: 'Subcategoria', tipo: 'select', obrigatorio: false },
-        // Dinâmico: vai para ValoresAtendimento, não para uma coluna nova.
-        { nome: 'resumo', rotulo: 'Resumo', tipo: 'textarea', obrigatorio: false }
-      ]
-    }
+    { nome: 'Chat do RA', campos: camposOperacionais() }
   ];
 }
 

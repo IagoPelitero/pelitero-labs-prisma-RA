@@ -235,6 +235,7 @@ Pages.indicadoresOperacionais = {
       this._tabelaHtml(dados);
 
     this._ligarSeletorAnalise(dados);
+    this._ligarDetalhamentoEmAnalise();
     this._renderCharts(dados);
   },
 
@@ -261,7 +262,18 @@ Pages.indicadoresOperacionais = {
     var html = '<div class="kpi-grid">';
     html += Components.kpiCard('folder', App.formatNumber(dados.totalCasos || 0), 'Total de casos', cores[0]);
     html += Components.kpiCard('mark_email_unread', App.formatNumber(t.emAberto || 0), 'Em Aberto', cores[3]);
-    html += Components.kpiCard('hourglass_top', App.formatNumber(t.emAnalise || 0), 'Em Análise', cores[1]);
+    // O card "Em Análise" abre e fecha o detalhamento — mas SÓ quando o ADM
+    // configurou as duas colunas. Sem configuração ele continua mostrando o
+    // número (o indicador não depende do detalhamento) e deixa de ser
+    // clicável, em vez de abrir uma tabela vazia que não explica nada.
+    var temDetalhe = (dados.detalhamentoEmAnaliseColunas || []).length === 2;
+    var attrsEmAnalise = temDetalhe
+      ? 'id="indop-card-emanalise" role="button" tabindex="0" ' +
+        'aria-controls="indop-detalhe-corpo" aria-expanded="false" ' +
+        'title="Clique para ver os casos Em Análise"'
+      : '';
+    html += Components.kpiCard('hourglass_top', App.formatNumber(t.emAnalise || 0), 'Em Análise',
+      cores[1], null, null, temDetalhe ? 'Clique para detalhar' : null, attrsEmAnalise);
     html += Components.kpiCard('task_alt', App.formatNumber(t.fechado || 0), 'Fechado + Rejeitado', cores[2]);
     html += Components.kpiCard('timer_off', App.formatNumber(dados.totalForaSLA || 0), 'Fora da SLA', cores[5],
       null, null, 'Informado manualmente');
@@ -523,16 +535,22 @@ Pages.indicadoresOperacionais = {
     var linhas = dados.detalhamentoEmAnalise || [];
     var total = Number(dados.detalhamentoEmAnaliseTotal || linhas.length);
 
-    var html = '<div class="card" style="margin-top:16px;">';
+    var html = '<div class="card" id="indop-detalhe" style="margin-top:16px;">';
     html += '<div class="card-header"><div class="card-title">';
     html += '<span class="material-icons">manage_search</span>';
     html += 'Detalhamento — Em Análise';
-    html += '</div></div>';
+    html += '</div>';
+    // O botão do cabeçalho faz o mesmo que o card: quem chegou rolando a
+    // página consegue recolher a seção sem voltar até o topo.
+    html += '<button type="button" class="btn btn-secondary" id="indop-detalhe-toggle" ' +
+      'aria-controls="indop-detalhe-corpo" aria-expanded="false">Mostrar</button>';
+    html += '</div>';
+    html += '<div id="indop-detalhe-corpo" hidden>';
 
     if (!linhas.length) {
       html += Components.emptyState('search_off',
         'Nenhum registro Em Análise encontrado no período selecionado.');
-      return html + '</div>';
+      return html + '</div></div>';
     }
 
     html += '<div class="pgo5cfg-scroll"><table class="pgo5cfg-tabela"><thead><tr>';
@@ -553,8 +571,49 @@ Pages.indicadoresOperacionais = {
         'Exibindo os primeiros ' + App.formatNumber(linhas.length) + ' de ' +
         App.formatNumber(total) + ' registros Em Análise.</p>';
     }
-    html += '</div>';
+    html += '</div></div>';
     return html;
+  },
+
+  /**
+   * Liga o card "Em Análise" à única seção de detalhamento.
+   *
+   * Sem onclick inline: esta tela já liga tudo por addEventListener, e
+   * misturar os dois estilos deixa metade dos controles fora do padrão de
+   * teclado. O card é anunciado como botão (role + tabindex), responde a
+   * Enter e Espaço, e mantém aria-expanded em dia nos dois gatilhos.
+   */
+  _ligarDetalhamentoEmAnalise: function() {
+    var card = document.getElementById('indop-card-emanalise');
+    var botao = document.getElementById('indop-detalhe-toggle');
+    var corpo = document.getElementById('indop-detalhe-corpo');
+    var secao = document.getElementById('indop-detalhe');
+    if (!corpo || (!card && !botao)) return;
+
+    var alternar = function(rolar) {
+      var abrindo = corpo.hidden;
+      corpo.hidden = !abrindo;
+      if (card) card.setAttribute('aria-expanded', abrindo ? 'true' : 'false');
+      if (botao) {
+        botao.setAttribute('aria-expanded', abrindo ? 'true' : 'false');
+        botao.textContent = abrindo ? 'Recolher' : 'Mostrar';
+      }
+      // Rolar só faz sentido ao ABRIR pelo card, que fica longe da seção.
+      if (abrindo && rolar && secao && secao.scrollIntoView) {
+        secao.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    if (card) {
+      card.classList.add('kpi-clickable');
+      card.addEventListener('click', function() { alternar(true); });
+      card.addEventListener('keydown', function(evento) {
+        if (evento.key !== 'Enter' && evento.key !== ' ' && evento.key !== 'Spacebar') return;
+        evento.preventDefault();   // Espaço não deve rolar a página
+        alternar(true);
+      });
+    }
+    if (botao) botao.addEventListener('click', function() { alternar(false); });
   },
 
   /**

@@ -301,15 +301,18 @@ Pages.usuariosPGO5 = {
     var u = usuario || {};
     var edicao = !!usuario;
 
-     var body = '<div class="form-group">' +
-  '<label class="form-label" for="pgo5usr-matricula">Matrícula</label>' +
-  '<input class="form-control" id="pgo5usr-matricula" type="text" inputmode="numeric" ' +
-  'value="' + App.escapeHtml(u.matricula || '') + '">' +
-  '</div>';
+    // UM ÚNICO `var body`. Havia dois: o primeiro montava Matrícula + Nome e o
+    // segundo o sobrescrevia com apenas o Nome, então o campo Matrícula nunca
+    // chegava à tela — foi isso que levou outra tela a injetá-lo por fora.
+    //
+    // Matrícula é texto: nada de type="number" nem inputmode numérico, que
+    // convidam o navegador a tratar "000123" como número.
+    var body = '<div class="form-group"><label class="form-label" for="pgo5usr-matricula">Matrícula</label>' +
+      '<input class="form-control" id="pgo5usr-matricula" type="text" maxlength="50" ' +
+      'autocomplete="off" value="' + App.escapeHtml(u.matricula || '') + '"></div>';
+    body += '<small class="pgo5cfg-nota">Opcional. É texto: "000123" é diferente de "123".</small>';
 
-body += '<div class="form-group"><label class="form-label" for="pgo5usr-nome">Nome <span class="required">*</span></label>' +
-  '<input class="form-control" id="pgo5usr-nome" type="text" value="' + App.escapeHtml(u.nome || '') + '"></div>';
-    var body = '<div class="form-group"><label class="form-label" for="pgo5usr-nome">Nome <span class="required">*</span></label>' +
+    body += '<div class="form-group"><label class="form-label" for="pgo5usr-nome">Nome <span class="required">*</span></label>' +
       '<input class="form-control" id="pgo5usr-nome" type="text" value="' + App.escapeHtml(u.nome || '') + '"></div>';
     body += '<div class="form-group"><label class="form-label" for="pgo5usr-email">E-mail da conta Google <span class="required">*</span></label>' +
       '<input class="form-control" id="pgo5usr-email" type="email" value="' + App.escapeHtml(u.email || '') + '"></div>';
@@ -339,6 +342,7 @@ body += '<div class="form-group"><label class="form-label" for="pgo5usr-nome">No
       cancelText: 'Cancelar',
       onConfirm: function() {
         var payload = {
+          matricula: (document.getElementById('pgo5usr-matricula') || {}).value || '',
           nome: (document.getElementById('pgo5usr-nome') || {}).value || '',
           email: (document.getElementById('pgo5usr-email') || {}).value || '',
           cargoId: (document.getElementById('pgo5usr-cargo') || {}).value || '',

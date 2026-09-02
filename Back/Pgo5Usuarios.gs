@@ -253,7 +253,7 @@ function listarUsuariosPGO5() {
       const supervisor = supervisorId ? obterUsuarioPorId_(supervisorId, mapa) : null;
       return {
         id: String(usuario.Id || ''),
-        matricula: String(usuario['Matrícula'] || ''),
+        matricula: pgo5TextoDeIdentificador_(usuario['Matrícula']),
         nome: String(usuario.Nome || ''),
         email: String(usuario.Email || ''),
         cargoId: String(usuario.CargoId || ''),
@@ -405,6 +405,27 @@ function validarAlcanceDoAtor_(ator, usuarioId) {
 }
 
 /**
+ * Normaliza a matrícula: TEXTO, com zeros à esquerda preservados.
+ *
+ * Não é número. "000123" é uma matrícula diferente de "123" para o RH, e
+ * converter para número apagaria os zeros silenciosamente. Vazio é
+ * permitido — nem todo cadastro tem matrícula no momento em que é criado.
+ *
+ * @param {*} valor Valor recebido do formulário.
+ * @returns {string} Matrícula sanitizada ('' quando não informada).
+ * @throws {Error} Quando passa de 50 caracteres.
+ */
+function pgo5NormalizarMatricula_(valor) {
+  if (valor === null || valor === undefined) return '';
+  const texto = String(valor).trim();
+  if (texto === '') return '';
+  if (texto.length > 50) {
+    throw new Error('A matrícula deve ter no máximo 50 caracteres.');
+  }
+  return sanitizeInput(texto);
+}
+
+/**
  * (Permissão: gerenciarEquipe ou gerenciarUsuariosTodos)
  * Cria ou edita um usuário.
  *
@@ -431,7 +452,7 @@ function salvarUsuarioPGO5(dados, id) {
   const registroId = String(id || '').trim();
 
   const limpos = {
-    matricula: sanitizeInput(entrada.matricula || ''),
+    matricula: pgo5NormalizarMatricula_(entrada.matricula),
     nome: sanitizeInput(entrada.nome),
     email: sanitizeInput(entrada.email),
     cargoId: String(entrada.cargoId || '').trim(),
@@ -473,7 +494,12 @@ function salvarUsuarioPGO5(dados, id) {
 
   return withScriptLock_(function() {
     const linha = {
-      Matricula : limpos.matricula,
+      // ⚠️ A CHAVE É "Matrícula", COM ACENTO — é o nome da coluna na aba.
+      // Aqui estava "Matricula": a gravação montava uma chave que não existe
+      // no cabeçalho, o CRUD a descartava e a matrícula digitada sumia sem
+      // nenhum erro. Tudo o mais salvava normalmente, então o sintoma era
+      // "o campo não guarda".
+      'Matrícula': limpos.matricula,
       Nome: limpos.nome,
       Email: limpos.email,
       CargoId: limpos.cargoId,

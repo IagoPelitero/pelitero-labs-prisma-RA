@@ -461,13 +461,21 @@ function inicializarPGO5Dev() {
       'dono do projeto, no editor do Apps Script.');
   }
 
-  if (pgo5PossuiUsuarios_()) {
-    throw new Error('PGO5: esta base já possui usuários cadastrados. ' +
-      'Use inicializarPGO5Admin() (exige perfil ADM) em vez da inicialização de desenvolvimento.');
+  // ⚠️ SÓ SOBRE PLANILHA NOVA.
+  // Inicializar é a única ação do sistema que cria aba, e por isso ela não
+  // pode encostar numa planilha que já tenha qualquer coisa dentro. Não
+  // existe mais uma variante "para base em uso": era ela que reajustava o
+  // schema de Atendimentos e reclassificava campos já gravados.
+  const ocupadas = pgo5AbasComConteudo_();
+  if (ocupadas.length > 0) {
+    throw new Error('PGO5: esta planilha já contém dados nas abas ' + ocupadas.join(', ') +
+      '. A inicialização só roda sobre uma planilha NOVA e vazia, e não vai criar, ' +
+      'alterar ou apagar nada aqui. Para operar sobre uma base existente basta abrir o ' +
+      'sistema: ele valida a estrutura e avisa se algo estiver fora do contrato.');
   }
+
   const relatorio = inicializarPGO5_();
   if (relatorio.sucesso) {
-    relatorio.ajusteSchema = ajustarSchemaClienteCpfPGO5_();
     relatorio.seed = pgo5AplicarSeedEstrutural_();
     relatorio.seedAcesso = aplicarSeedPermissoesPGO5_();
   }
@@ -475,21 +483,20 @@ function inicializarPGO5Dev() {
 }
 
 /**
- * (ADM) Reexecuta a inicialização sobre uma base já em uso — por exemplo
- * para recriar uma aba do schema 5.0 removida por engano.
- * Continua sendo não-destrutiva e idempotente.
- * @returns {Object} Relatório da inicialização + do seed estrutural.
+ * Abas do PGO 5.0 que já existem na planilha COM pelo menos uma linha de
+ * dados. É o que separa "planilha nova" de "base em uso" — e a aba criada
+ * só com cabeçalho não conta como uso.
+ *
+ * @returns {string[]} Nomes das abas ocupadas (vazio numa planilha nova).
  */
-function inicializarPGO5Admin() {
-  exigirPermissao_('configurarSistema');
-  const relatorio = inicializarPGO5_();
-  if (relatorio.sucesso) {
-    relatorio.ajusteSchema = ajustarSchemaClienteCpfPGO5_();
-    relatorio.seed = pgo5AplicarSeedEstrutural_();
-    relatorio.seedAcesso = aplicarSeedPermissoesPGO5_();
-    relatorio.conversaoClienteCpf = converterClienteCpfDinamicosPGO5_();
-  }
-  return relatorio;
+function pgo5AbasComConteudo_() {
+  const ss = getSpreadsheet();
+  const ocupadas = [];
+  pgo5TodasAsAbas_().forEach(function(nome) {
+    const aba = ss.getSheetByName(nome);
+    if (aba && aba.getLastRow() > 1) ocupadas.push(nome);
+  });
+  return ocupadas;
 }
 
 /**
@@ -524,13 +531,6 @@ function pgo5PossuiUsuarios_() {
  * reportada, nunca "consertada" às cegas.
  */
 
-/** Cabeçalho de Atendimentos usado nas Etapas 1 e 2 (antes de Cliente/CPF). */
-function pgo5AtendimentosSchemaAntigo_() {
-  return ['Id', 'DataAbertura', 'Protocolo', 'CanalId', 'ProdutoId', 'CategoriaId',
-    'SubcategoriaId', 'StatusId', 'AguardandoRetornoId', 'ResponsavelId', 'Observacoes',
-    'CriadoPorId', 'DataCriacao', 'AtualizadoPorId', 'DataAtualizacao'];
-}
-
 /**
  * (ADM) Acrescenta Cliente e CPF à aba Atendimentos de uma base PGO 5.0 de
  * desenvolvimento criada antes da correção de schema.
@@ -546,53 +546,6 @@ function ajustarSchemaClienteCpfPGO5() {
   return ajustarSchemaClienteCpfPGO5_();
 }
 
-/** Implementação interna (também usada pelos wrappers de inicialização). */
-function ajustarSchemaClienteCpfPGO5_() {
-  const nome = PGO5.SHEET_NAMES.ATENDIMENTOS;
-  const atual = pgo5Colunas_(nome);
-  const antigo = pgo5AtendimentosSchemaAntigo_();
-
-  const aba = getSpreadsheet().getSheetByName(nome);
-  if (!aba) return { estado: 'ESTRUTURA_DESCONHECIDA', linhasPreservadas: 0, erro: 'Aba "' + nome + '" não existe.' };
-
-  if (pgo5ValidarCabecalho_(aba, atual).valido) {
-    return { estado: 'JA_ATUALIZADO', linhasPreservadas: Math.max(0, aba.getLastRow() - 1), erro: '' };
-  }
-  const conferenciaAntiga = pgo5ValidarCabecalho_(aba, antigo);
-  if (!conferenciaAntiga.valido) {
-    return {
-      estado: 'ESTRUTURA_DESCONHECIDA', linhasPreservadas: 0,
-      erro: 'A aba "' + nome + '" não está nem no formato de 15 colunas nem no de 17. ' +
-        'Nada foi alterado. Divergência: ' + conferenciaAntiga.divergencia
-    };
-  }
-
-  return withScriptLock_(function() {
-    const ultimaLinha = aba.getLastRow();
-    const dados = ultimaLinha > 1 ? aba.getRange(2, 1, ultimaLinha - 1, antigo.length).getValues() : [];
-
-    // Remapeia pelo NOME da coluna: as colunas novas nascem vazias e nenhum
-    // valor existente muda de posição.
-    const linhas = dados.map(function(linha) {
-      const registro = {};
-      antigo.forEach(function(col, i) { registro[col] = linha[i]; });
-      return atual.map(function(col) {
-        return registro[col] === undefined ? '' : registro[col];
-      });
-    });
-
-    aba.getRange(1, 1, 1, atual.length).setValues([atual]);
-    if (linhas.length > 0) aba.getRange(2, 1, linhas.length, atual.length).setValues(linhas);
-    aplicarFormatoCabecalho_(aba, atual.length);
-    limparMemoEstrutura_();
-    limparMemoExecucao_(nome);
-
-    Logger.log('[PGO5] Aba Atendimentos ajustada para 17 colunas. ' +
-      linhas.length + ' linha(s) preservada(s).');
-    return { estado: 'CONVERTIDO', linhasPreservadas: linhas.length, erro: '' };
-  });
-}
-
 /**
  * (ADM) Move Cliente/CPF que ficaram em ValoresAtendimento para as colunas
  * estruturais do atendimento, e remove SOMENTE essas linhas dinâmicas.
@@ -605,50 +558,6 @@ function ajustarSchemaClienteCpfPGO5_() {
 function converterClienteCpfDinamicosPGO5() {
   exigirPermissao_('configurarSistema');
   return converterClienteCpfDinamicosPGO5_();
-}
-
-/** Implementação interna da conversão de Cliente/CPF dinâmicos. */
-function converterClienteCpfDinamicosPGO5_() {
-  return withScriptLock_(function() {
-    const catalogo = pgo5CatalogoBruto_();
-
-    // Só campos cujo Nome técnico é reconhecidamente cliente/cpf.
-    const alvo = {};
-    catalogo.CAMPO.forEach(function(c) {
-      const n = String(c.Nome || '').trim();
-      if (n === 'cliente' || n === 'cpf') {
-        alvo[String(c.Id || '').toUpperCase()] = n === 'cliente' ? 'Cliente' : 'CPF';
-      }
-    });
-
-    const relatorio = { atendimentosAtualizados: 0, valoresRemovidos: 0 };
-    if (Object.keys(alvo).length === 0) return relatorio;
-
-    const porAtendimento = {};
-    const aRemover = [];
-    pgo5Ler(PGO5.SHEET_NAMES.VALORES_ATENDIMENTO).forEach(function(v) {
-      const coluna = alvo[String(v.CampoId || '').toUpperCase()];
-      if (!coluna) return;
-      const at = String(v.AtendimentoId || '').trim();
-      if (!at) return;
-      if (!porAtendimento[at]) porAtendimento[at] = {};
-      porAtendimento[at][coluna] = v.Valor;
-      aRemover.push(v.Id);
-    });
-
-    Object.keys(porAtendimento).forEach(function(id) {
-      const ok = pgo5AtualizarPorId(PGO5.SHEET_NAMES.ATENDIMENTOS, id, porAtendimento[id]);
-      if (ok) relatorio.atendimentosAtualizados++;
-    });
-    aRemover.forEach(function(id) {
-      if (pgo5ExcluirPorId(PGO5.SHEET_NAMES.VALORES_ATENDIMENTO, id)) relatorio.valoresRemovidos++;
-    });
-
-    // Nenhum valor é registrado em log: Cliente e CPF são dado pessoal.
-    Logger.log('[PGO5] Conversão Cliente/CPF: ' + relatorio.atendimentosAtualizados +
-      ' atendimento(s) atualizado(s), ' + relatorio.valoresRemovidos + ' linha(s) dinâmica(s) removida(s).');
-    return relatorio;
-  });
 }
 
 // ============================================================================
@@ -913,7 +822,10 @@ function pgo5LinhaPorId_(aba, id) {
  * automático, o Google Sheets lê a string como número, mostra 123 e os
  * zeros à esquerda somem — o identificador deixa de servir para consulta.
  */
-const PGO5_COLUNAS_DE_IDENTIFICADOR = ['CPF', 'Protocolo'];
+// Matrícula entra aqui pelo mesmo motivo de CPF e Protocolo: é digitada,
+// aceita "000123" e não é número. Sem o formato de texto, a planilha
+// engoliria os zeros à esquerda na gravação.
+const PGO5_COLUNAS_DE_IDENTIFICADOR = ['CPF', 'Protocolo', 'Matrícula'];
 
 /**
  * Formata como TEXTO as colunas de identificador da aba.
