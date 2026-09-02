@@ -85,19 +85,20 @@ const COLUMNS_PGO5 = {
     'DataAtualizacao'
   ],
   USUARIOS: [
-    'Id',
-    'Nome',
-    'Email',
-    'CargoId',            // cargo (o que a pessoa faz)
-    'NivelAcessoId',      // nível de acesso (o que a pessoa pode) — separados
-    'SupervisorId',       // hierarquia
-    'Equipe',
-    'Ativo',
-    'DataCadastro',
-    'UltimoAcesso',
-    'CriadoPorId',
-    'DataAtualizacao'
-  ],
+  'Id',
+  'Nome',
+  'Email',
+  'CargoId',
+  'NivelAcessoId',
+  'SupervisorId',
+  'Equipe',
+  'Ativo',
+  'DataCadastro',
+  'UltimoAcesso',
+  'CriadoPorId',
+  'DataAtualizacao',
+  'Matrícula'
+],
   FORMULARIO: [
     'Id',
     'Tipo',               // CANAL | CAMPO | PRODUTO | CATEGORIA | SUBCATEGORIA | STATUS | AGUARDANDO | OPCAO
