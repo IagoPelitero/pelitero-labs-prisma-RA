@@ -15,7 +15,56 @@
  * ============================================================================
  */
 
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+const PASTA_DAS_TELAS = path.join(__dirname, '..', 'Telas');
 const PARECE_NUMERO = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+
+/**
+ * O motor de template do Apps Script, em miniatura.
+ *
+ *   <?= expressao ?>   escreve o valor, escapando o HTML
+ *   <?!= expressao ?>  escreve o valor cru
+ *   <?  codigo     ?>  executa o código
+ *
+ * Existe para os testes conseguirem montar uma tela de verdade e conferir o
+ * que saiu dela — e não só se a função foi chamada.
+ */
+function escaparHtml(valor) {
+  return String(valor === null || valor === undefined ? '' : valor)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function montarTemplate(fonte, variaveis) {
+  let corpo = "var __saida = '';\n";
+  let posicao = 0;
+  const pedacos = /<\?(!?=)?([\s\S]*?)\?>/g;
+  let achado;
+  while ((achado = pedacos.exec(fonte)) !== null) {
+    corpo += '__saida += ' + JSON.stringify(fonte.slice(posicao, achado.index)) + ';\n';
+    if (achado[1] === '=') corpo += '__saida += __escapar(' + achado[2] + ');\n';
+    else if (achado[1] === '!=') corpo += '__saida += (' + achado[2] + ');\n';
+    else corpo += achado[2] + '\n';
+    posicao = pedacos.lastIndex;
+  }
+  corpo += '__saida += ' + JSON.stringify(fonte.slice(posicao)) + ';\nreturn __saida;';
+
+  const nomes = Object.keys(variaveis);
+  const funcao = new Function(...nomes, '__escapar', corpo);
+  return funcao(...nomes.map((n) => variaveis[n]), escaparHtml);
+}
+
+function saidaHtml(html) {
+  const saida = {
+    getContent: () => html,
+    setTitle(titulo) { saida.titulo = titulo; return saida; },
+    addMetaTag() { return saida; }
+  };
+  return saida;
+}
 
 /** A conversão que o Sheets faz ao receber um valor numa célula. */
 function converterComoOPlanilhas(valor, formato) {
@@ -190,12 +239,17 @@ class Planilha {
 function criarAmbienteFalso(email = 'analista@exemplo.com') {
   const planilha = new Planilha();
   const propriedades = new Map();
+  const propriedadesDoUsuario = new Map();
   const registros = [];
+  let emailAtual = email;
 
-  return {
+  const ambiente = {
     planilha,
     propriedades,
+    propriedadesDoUsuario,
     registros,
+    /** Troca quem está "logado", para testar cada perfil de acesso. */
+    definirEmail(novo) { emailAtual = novo; },
     globais: {
       SpreadsheetApp: {
         getActive: () => planilha,
@@ -206,7 +260,33 @@ function criarAmbienteFalso(email = 'analista@exemplo.com') {
           getProperty: (k) => (propriedades.has(k) ? propriedades.get(k) : null),
           setProperty: (k, v) => { propriedades.set(k, String(v)); },
           deleteProperty: (k) => { propriedades.delete(k); }
+        }),
+        getUserProperties: () => ({
+          getProperty: (k) =>
+            (propriedadesDoUsuario.has(k) ? propriedadesDoUsuario.get(k) : null),
+          setProperty: (k, v) => { propriedadesDoUsuario.set(k, String(v)); },
+          deleteProperty: (k) => { propriedadesDoUsuario.delete(k); }
         })
+      },
+      HtmlService: {
+        createTemplateFromFile(nome) {
+          const fonte = fs.readFileSync(
+            path.join(PASTA_DAS_TELAS, nome + '.html'), 'utf8');
+          const template = {
+            evaluate() {
+              const variaveis = {};
+              Object.keys(template).forEach((chave) => {
+                if (chave !== 'evaluate') variaveis[chave] = template[chave];
+              });
+              return saidaHtml(montarTemplate(fonte, variaveis));
+            }
+          };
+          return template;
+        },
+        createHtmlOutputFromFile(nome) {
+          return saidaHtml(
+            fs.readFileSync(path.join(PASTA_DAS_TELAS, nome + '.html'), 'utf8'));
+        }
       },
       LockService: {
         getScriptLock: () => ({
@@ -215,14 +295,35 @@ function criarAmbienteFalso(email = 'analista@exemplo.com') {
           releaseLock: () => {}
         })
       },
-      Session: { getActiveUser: () => ({ getEmail: () => email }) },
+      Session: { getActiveUser: () => ({ getEmail: () => emailAtual }) },
       Logger: { log: (m) => registros.push(String(m)) },
       Utilities: {
-        formatDate: (data, fuso, formato) => String(data)
+        formatDate: (data) => String(data),
+        getUuid: () => crypto.randomUUID(),
+        DigestAlgorithm: { SHA_256: 'SHA_256' },
+        Charset: { UTF_8: 'UTF_8' },
+        /**
+         * SHA-256 DE VERDADE, e não um atalho.
+         *
+         * O simulador do sistema anterior já teve `computeDigest: () => [1]`.
+         * Os testes de senha passavam sem testar coisa alguma. Aqui usamos o
+         * mesmo algoritmo do Google, e devolvemos bytes com sinal (-128 a 127)
+         * como o Apps Script devolve — senão a conversão para hexadecimal
+         * seria testada errada.
+         */
+        computeDigest: (algoritmo, texto) => {
+          if (algoritmo !== 'SHA_256') {
+            throw new Error('Algoritmo não simulado: ' + algoritmo);
+          }
+          const resumo = crypto.createHash('sha256').update(String(texto), 'utf8').digest();
+          return Array.from(resumo).map((b) => (b > 127 ? b - 256 : b));
+        }
       },
       console
     }
   };
+
+  return ambiente;
 }
 
 module.exports = { criarAmbienteFalso, converterComoOPlanilhas };

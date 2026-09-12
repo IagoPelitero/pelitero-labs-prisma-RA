@@ -37,15 +37,15 @@ function formatarIdentificador_(numero) {
  * Ids deformados (texto que não é dígito) são ignorados de propósito: eles
  * não podem rebaixar nem levantar o piso.
  */
-function maiorIdentificadorDaAba_(nomeAba) {
-  var info = estruturaDaAba_(nomeAba);
-  var iId = posicaoDaColuna_(info, 'Id');
+function maiorIdentificadorDaAba_(nomeDaAba) {
+  var estrutura = estruturaDaAba_(nomeDaAba);
+  var iId = posicaoDaColuna_(estrutura, 'Id');
   if (iId < 0) return -1;
 
-  var totalDados = quantidadeDeRegistros_(info);
+  var totalDados = quantidadeDeRegistros_(estrutura);
   if (totalDados <= 0) return -1;
 
-  var coluna = info.aba.getRange(2, iId + 1, totalDados, 1).getValues();
+  var coluna = estrutura.aba.getRange(2, iId + 1, totalDados, 1).getValues();
   var maior = -1;
   for (var i = 0; i < coluna.length; i++) {
     var digitos = converterParaIdentificador_(coluna[i][0]);
@@ -60,24 +60,24 @@ function maiorIdentificadorDaAba_(nomeAba) {
  * O próximo Id da aba.
  * DEVE ser chamada dentro de uma trava — inserirVariosRegistros_ já segura a dela.
  */
-function proximoIdentificador_(nomeAba) {
+function proximoIdentificador_(nomeDaAba) {
   var props = PropertiesService.getScriptProperties();
-  var chave = RECC_PREFIXO_DA_SEQUENCIA + nomeAba;
+  var chave = RECC_PREFIXO_DA_SEQUENCIA + nomeDaAba;
   var guardado = props.getProperty(chave);
 
   var ultimo;
   if (guardado === null) {
     // Primeira emissão desta aba nesta instalação: alinha com o que já existe
     // na planilha, para nunca reemitir um Id que já está gravado.
-    ultimo = maiorIdentificadorDaAba_(nomeAba);
+    ultimo = maiorIdentificadorDaAba_(nomeDaAba);
   } else {
     ultimo = Number(guardado);
-    if (!isFinite(ultimo)) ultimo = maiorIdentificadorDaAba_(nomeAba);
+    if (!isFinite(ultimo)) ultimo = maiorIdentificadorDaAba_(nomeDaAba);
   }
 
   var proximo = ultimo + 1;
   if (proximo > RECC_MAIOR_IDENTIFICADOR) {
-    throw new Error('A sequência da aba "' + nomeAba + '" chegou ao teto de 10 ' +
+    throw new Error('A sequência da aba "' + nomeDaAba + '" chegou ao teto de 10 ' +
       'casas decimais (' + RECC_MAIOR_IDENTIFICADOR + ').');
   }
 
@@ -89,16 +89,16 @@ function proximoIdentificador_(nomeAba) {
  * Realinha a sequência com a planilha, sem nunca baixá-la.
  * Chamada depois de uma carga feita direto na planilha.
  */
-function realinharSequencia_(nomeAba) {
+function realinharSequencia_(nomeDaAba) {
   var props = PropertiesService.getScriptProperties();
-  var chave = RECC_PREFIXO_DA_SEQUENCIA + nomeAba;
+  var chave = RECC_PREFIXO_DA_SEQUENCIA + nomeDaAba;
   var guardado = Number(props.getProperty(chave));
   if (!isFinite(guardado)) guardado = -1;
 
-  var naAba = maiorIdentificadorDaAba_(nomeAba);
+  var naAba = maiorIdentificadorDaAba_(nomeDaAba);
   var piso = Math.max(guardado, naAba);
   props.setProperty(chave, String(piso));
-  return { aba: nomeAba, guardado: guardado, naAba: naAba, piso: piso };
+  return { aba: nomeDaAba, guardado: guardado, naAba: naAba, piso: piso };
 }
 
 /**
@@ -110,33 +110,33 @@ function realinharSequencia_(nomeAba) {
  *
  * Só lê e escreve a coluna de Id: não toca em mais nada da linha.
  */
-function normalizarIdentificadoresDaAba_(nomeAba) {
+function normalizarIdentificadoresDaAba_(nomeDaAba) {
   var trava = LockService.getScriptLock();
   if (!trava.tryLock(30000)) {
     throw new Error('A planilha está ocupada. Tente de novo.');
   }
   try {
-    esquecerEstruturaLida_(nomeAba);
-    var info = estruturaDaAba_(nomeAba, true);
-    var iId = posicaoDaColuna_(info, 'Id');
+    esquecerEstruturaLida_(nomeDaAba);
+    var estrutura = estruturaDaAba_(nomeDaAba, true);
+    var iId = posicaoDaColuna_(estrutura, 'Id');
     if (iId < 0) {
-      throw new Error('A aba "' + nomeAba + '" não tem coluna Id.');
+      throw new Error('A aba "' + nomeDaAba + '" não tem coluna Id.');
     }
 
-    var totalDados = quantidadeDeRegistros_(info);
+    var totalDados = quantidadeDeRegistros_(estrutura);
     if (totalDados <= 0) {
-      return { aba: nomeAba, carimbados: 0, repetidos: [], total: 0 };
+      return { aba: nomeDaAba, carimbados: 0, repetidos: [], total: 0 };
     }
 
-    realinharSequencia_(nomeAba);
+    realinharSequencia_(nomeDaAba);
 
     // Lê a aba inteira, e não só a coluna de Id: uma linha sem Id só se
     // distingue de uma linha em branco olhando as outras colunas.
-    var bloco = info.aba
-      .getRange(2, 1, totalDados, info.cabecalhos.length)
+    var bloco = estrutura.aba
+      .getRange(2, 1, totalDados, estrutura.cabecalhos.length)
       .getValues();
 
-    var faixa = info.aba.getRange(2, iId + 1, totalDados, 1);
+    var faixa = estrutura.aba.getRange(2, iId + 1, totalDados, 1);
     var coluna = faixa.getValues();
     var vistos = {};
     var repetidos = [];
@@ -146,7 +146,7 @@ function normalizarIdentificadoresDaAba_(nomeAba) {
       var atual = converterParaIdentificador_(coluna[i][0]);
       if (!atual) {
         if (linhaEstaVazia_(bloco[i])) continue;   // linha em branco não ganha Id
-        coluna[i][0] = proximoIdentificador_(nomeAba);
+        coluna[i][0] = proximoIdentificador_(nomeDaAba);
         carimbados++;
         continue;
       }
@@ -164,7 +164,7 @@ function normalizarIdentificadoresDaAba_(nomeAba) {
     faixa.setValues(coluna);
 
     return {
-      aba: nomeAba,
+      aba: nomeDaAba,
       total: totalDados,
       carimbados: carimbados,
       repetidos: repetidos

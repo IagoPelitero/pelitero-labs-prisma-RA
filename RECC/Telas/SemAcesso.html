@@ -1,0 +1,206 @@
+<!--
+  ============================================================================
+  RECC — SemAcesso.html · a tela de quem não está cadastrado
+  ============================================================================
+  Serve para uma coisa só: dizer com clareza que o acesso não está liberado e
+  o que a pessoa faz a seguir. Nenhum dado da planilha é carregado aqui.
+
+  Os trechos em scriptlet, que abrem com menor-que-interrogação, são
+  preenchidos pelo servidor antes de a página sair (ver doGet em Principal.gs).
+
+  CUIDADO: o Apps Script tenta executar QUALQUER scriptlet do arquivo,
+  inclusive um que esteja dentro de comentário de HTML. Por isso esta
+  explicação não escreve a sintaxe literal — se escrevesse, a página quebraria
+  ao ser montada. Foi um teste que pegou isso aqui.
+
+  A logo vem de CONFIG, não do código: quando a plataforma servir outra
+  operação, a marca troca junto com o nome, sem tocar aqui.
+  ============================================================================
+-->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title><?= identidade.nome ?> — acesso não liberado</title>
+  <style>
+    :root {
+      --azul: <?= identidade.corPrimaria ?>;
+      --azul-escuro: #06266B;
+      --tinta: #14213A;
+      --suave: #5A6A85;
+      --papel: #FFFFFF;
+      --fundo: #EEF3FA;
+      --linha: #D9E2EF;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(1100px 520px at 50% -10%,
+          color-mix(in srgb, var(--azul) 16%, transparent), transparent 70%),
+        var(--fundo);
+      color: var(--tinta);
+      font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+      line-height: 1.6;
+    }
+
+    .cartao {
+      width: min(560px, 100%);
+      background: var(--papel);
+      border: 1px solid var(--linha);
+      border-radius: 16px;
+      padding: 40px 36px 32px;
+      text-align: center;
+      box-shadow: 0 24px 60px -32px rgba(20, 33, 58, .45);
+    }
+
+    .marca {
+      display: grid;
+      place-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .marca img { max-height: 46px; max-width: 200px; }
+
+    /* Sem logo configurada, o nome do sistema faz as vezes dela — a tela
+       nunca fica com um espaço vazio ou um ícone quebrado. */
+    .marca .nome {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      color: var(--azul);
+    }
+    .marca .operacao {
+      font-size: 12px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--suave);
+    }
+
+    .selo {
+      width: 62px;
+      height: 62px;
+      margin: 0 auto 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--azul) 12%, transparent);
+    }
+    .selo svg { width: 30px; height: 30px; stroke: var(--azul); fill: none;
+      stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      letter-spacing: -.015em;
+      text-wrap: balance;
+    }
+
+    .explicacao {
+      margin: 0 auto 24px;
+      max-width: 42ch;
+      color: var(--suave);
+    }
+
+    .conta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      max-width: 100%;
+      padding: 10px 16px;
+      border: 1px solid var(--linha);
+      border-radius: 999px;
+      background: var(--fundo);
+      font-size: 14px;
+      margin-bottom: 26px;
+    }
+    .conta span:first-child { color: var(--suave); white-space: nowrap; }
+    .conta strong {
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .passos {
+      text-align: left;
+      border-top: 1px solid var(--linha);
+      padding-top: 22px;
+      margin: 0;
+    }
+    .passos h2 {
+      margin: 0 0 12px;
+      font-size: 13px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--suave);
+    }
+    .passos ol { margin: 0; padding-left: 20px; }
+    .passos li { margin-bottom: 8px; }
+    .passos li:last-child { margin-bottom: 0; }
+
+    .rodape {
+      margin-top: 26px;
+      font-size: 12px;
+      color: var(--suave);
+    }
+
+    @media (max-width: 480px) {
+      .cartao { padding: 30px 22px 26px; }
+      h1 { font-size: 21px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="cartao">
+    <div class="marca">
+      <? if (identidade.logo) { ?>
+        <img src="<?= identidade.logo ?>" alt="<?= identidade.operacao ?>">
+      <? } else { ?>
+        <div class="nome"><?= identidade.nome ?></div>
+      <? } ?>
+      <? if (identidade.operacao) { ?>
+        <div class="operacao"><?= identidade.operacao ?></div>
+      <? } ?>
+    </div>
+
+    <div class="selo" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <rect x="4" y="10.5" width="16" height="10" rx="2"></rect>
+        <path d="M8 10.5V7.5a4 4 0 0 1 8 0"></path>
+        <circle cx="12" cy="15.5" r="1.1"></circle>
+      </svg>
+    </div>
+
+    <h1>Seu acesso ainda não foi liberado</h1>
+    <p class="explicacao"><?= motivo ?></p>
+
+    <div class="conta">
+      <span>Você entrou como</span>
+      <strong><?= email ?></strong>
+    </div>
+
+    <div class="passos">
+      <h2>Como conseguir acesso</h2>
+      <ol>
+        <li>Peça a um administrador do <?= identidade.nome ?> para cadastrar
+            o e-mail acima.</li>
+        <li>Informe o seu <strong>cargo</strong> e o <strong>canal que você
+            atende</strong> — é o que define o que você vai enxergar.</li>
+        <li>Assim que o cadastro for feito, atualize esta página. Não é
+            preciso entrar de novo.</li>
+      </ol>
+    </div>
+
+    <p class="rodape">
+      Se você acredita que já deveria ter acesso, confira se entrou com a conta
+      corporativa correta.
+    </p>
+  </main>
+</body>
+</html>

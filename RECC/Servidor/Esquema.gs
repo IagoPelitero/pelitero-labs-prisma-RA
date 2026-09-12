@@ -389,10 +389,10 @@ const RECC_PREFIXO_ANALISE = 'ANALISE_';
  * A definição de uma aba, com as colunas de controle já anexadas.
  * É esta lista, e não `RECC_ESQUEMA[x].colunas`, que representa a aba inteira.
  */
-function esquemaDaAba_(nomeAba) {
-  var definicao = RECC_ESQUEMA[nomeAba];
+function esquemaDaAba_(nomeDaAba) {
+  var definicao = RECC_ESQUEMA[nomeDaAba];
   if (!definicao) {
-    throw new Error('Aba "' + nomeAba + '" não faz parte do esquema do RECC.');
+    throw new Error('Aba "' + nomeDaAba + '" não faz parte do esquema do RECC.');
   }
   var colunas = definicao.colunas.slice();
   if (definicao.controle) {

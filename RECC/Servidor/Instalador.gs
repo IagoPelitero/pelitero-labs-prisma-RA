@@ -43,8 +43,8 @@ function instalarRECC() {
   esquecerEstruturaLida_();
 
   var criadas = [];
-  nomesDasAbasDoContrato_().forEach(function (nomeAba) {
-    criadas.push(criarAbaDoContrato_(planilha, esquemaDaAba_(nomeAba)));
+  nomesDasAbasDoContrato_().forEach(function (nomeDaAba) {
+    criadas.push(criarAbaDoContrato_(planilha, esquemaDaAba_(nomeDaAba)));
   });
   esquecerEstruturaLida_();
 
@@ -80,11 +80,11 @@ function instalarRECC() {
 /** Instalação sobre planilha em uso não existe. */
 function abortarSeAPlanilhaTiverDado_(planilha) {
   var comDado = [];
-  nomesDasAbasDoContrato_().forEach(function (nomeAba) {
-    var aba = planilha.getSheetByName(nomeAba);
+  nomesDasAbasDoContrato_().forEach(function (nomeDaAba) {
+    var aba = planilha.getSheetByName(nomeDaAba);
     if (!aba) return;
     var preenchidas = quantasLinhasPreenchidas_(aba);
-    if (preenchidas > 0) comDado.push(nomeAba + ' (' + preenchidas + ' linhas)');
+    if (preenchidas > 0) comDado.push(nomeDaAba + ' (' + preenchidas + ' linhas)');
   });
   if (comDado.length) {
     throw new Error('Esta planilha já tem dado nas abas: ' + comDado.join(', ') +
@@ -343,8 +343,8 @@ function novaConfiguracao_(chave, valor, descricao) {
  * sistema, não do formulário. A coluna Id entra desativada — precisa estar no
  * mapa, mas ninguém digita um Id.
  */
-function camposDoFormularioDaBase_(nomeAba, mesaId) {
-  var esquema = esquemaDaAba_(nomeAba);
+function camposDoFormularioDaBase_(nomeDaAba, mesaId) {
+  var esquema = esquemaDaAba_(nomeDaAba);
   var campos = [];
   var ordem = 0;
 
@@ -358,7 +358,7 @@ function camposDoFormularioDaBase_(nomeAba, mesaId) {
 
     campos.push({
       MesaId: mesaId,
-      Aba: nomeAba,
+      Aba: nomeDaAba,
       ChaveTecnica: chave,
       Cabecalho: coluna.cabecalho,
       Rotulo: coluna.cabecalho,
