@@ -1,6 +1,6 @@
 # RECC — Arquitetura do sistema (documento de desenho)
 
-> **Estado: Etapa 1 (Fundação) construída e testada. Etapas 2 a 12 em desenho.**
+> **Estado: Etapas 1 a 3 construídas e testadas. Etapas 4 a 12 em desenho.**
 > Este documento existe para fechar o modelo de dados no Google Planilhas e o
 > funcionamento do Apps Script **antes** da implementação. Ele é o contrato:
 > o que estiver aqui é o que será construído.
@@ -458,8 +458,8 @@ Cada etapa entrega algo que funciona sozinho e pode ser conferido na planilha.
 | # | Etapa | Entrega | Estado |
 |---|---|---|---|
 | 1 | Fundação | `Esquema.gs`, `Planilha.gs`, `Sequencia.gs`, `Instalador.gs`, as 12 abas, Id de 10 casas, formato texto | **pronta** |
-| 2 | Acesso | Login pelo e-mail, `USUARIOS`, cargos, níveis, tela de não cadastrado | |
-| 3 | Casca | Menu lateral, barra superior, 4 temas, roteador | |
+| 2 | Acesso | Login pelo e-mail, `USUARIOS`, cargos, níveis, tela de não cadastrado | **pronta** |
+| 3 | Casca | Menu lateral, barra superior, 4 temas, roteador | **pronta** |
 | 4 | Cadastrar Caso | Formulário dirigido por `CAMPOS`, máscaras, validação, selo de SUSEP | |
 | 5 | Dashboard | Seletor de mesa, cards, fila de trabalho com filtros | |
 | 6 | Configurações | Campos, catálogo, usuários, níveis, senha de ADM, reconciliação de colunas | |
@@ -572,7 +572,7 @@ morava numa pasta temporária e se perdia quando o `%TEMP%` era limpo.
 node RECC/Testes/rodar.js
 ```
 
-São 32 testes sobre a Etapa 1. O critério é **5 execuções seguidas sem falha** —
+São 77 testes, separados por etapa. O critério é **5 execuções seguidas sem falha** —
 rodar uma vez não detecta teste instável.
 
 O simulador (`RECC/Testes/simulador.js`) **converte valores igual ao Google

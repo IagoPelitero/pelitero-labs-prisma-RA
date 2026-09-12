@@ -29,13 +29,43 @@ Testes/     a suíte, que roda no computador com node
 | `Servidor/Sequencia.gs` | O Id decimal de 10 casas, que nunca anda para trás |
 | `Servidor/Instalador.gs` | Cria as 12 abas numa planilha vazia e semeia o que é editável |
 
+**Etapa 2 — Acesso.**
+
+| Arquivo | O que faz |
+|---|---|
+| `Servidor/Acesso.gs` | Níveis, escopo, senha de administrador e auditoria |
+| `Servidor/Usuarios.gs` | O cadastro de quem pode entrar |
+| `Servidor/Principal.gs` | `doGet`, o pacote de partida e a identidade visual |
+| `Telas/SemAcesso.html` | A tela de quem não está cadastrado |
+
+**Etapa 3 — Casca.**
+
+| Arquivo | O que faz |
+|---|---|
+| `Telas/Index.html` | O esqueleto da página, que cola os outros dentro de si |
+| `Telas/Estilos.html` | Toda a aparência, e os quatro temas |
+| `Telas/Moldura.html` | Monta o menu lateral e a barra superior |
+| `Telas/Aplicacao.html` | A ponte com o servidor, o roteador e as telas |
+
 ## Instalar
 
 1. Crie uma planilha **nova e vazia** e um projeto do Apps Script vinculado.
-2. Copie os quatro `.gs` de `Servidor/`.
-3. No editor, execute **`instalarRECC()`** uma vez. Ela **recusa** rodar se
+2. Copie os arquivos. **O projeto do Apps Script não tem pastas** — as pastas
+   aqui são só organização do repositório. Um arquivo vira um arquivo lá,
+   com o mesmo nome e sem a pasta:
+
+   | Aqui no repositório | No editor do Apps Script |
+   |---|---|
+   | `RECC/Servidor/Acesso.gs` | `Acesso.gs` |
+   | `RECC/Telas/Index.html` | `Index.html` |
+   | `RECC/Testes/*` | **não vai** — roda só no seu computador |
+
+   A ordem da cópia não importa: o Apps Script avalia os `.gs` em ordem
+   alfabética e nenhum deles tem código de topo que dependa de outro.
+3. Publique como aplicativo da web (executar como você).
+4. No editor, execute **`instalarRECC()`** uma vez. Ela **recusa** rodar se
    qualquer aba do contrato já tiver dado.
-4. Confira com **`verificarEstruturaRECC()`** — só lê, e diz o que falta.
+5. Confira com **`verificarEstruturaRECC()`** — só lê, e diz o que falta.
 
 `instalarRECC()` cadastra **quem a executou como o primeiro Administrador**.
 Sem isso a base nasceria inacessível: o acesso é pelo e-mail autenticado
@@ -57,6 +87,35 @@ ao de verdade** (`Testes/simulador.js`): numa célula de formato Geral,
 `'00000010'` vira `10` e `'000000E1'` vira `0`. Simulador que não coage é
 simulador que mente — foi assim que o sistema anterior deixou passar a
 corrupção de 4.328 Ids.
+
+## Ver as telas sem publicar
+
+```bash
+node RECC/Testes/gerar-previa.js
+```
+
+Escreve `previa/sistema.html` e `previa/sem-acesso.html`, que abrem em
+qualquer navegador. As páginas são montadas pelo **mesmo código do servidor** —
+o que muda é só a ponte: no lugar do `google.script.run`, entra um substituto
+com o pacote de partida de verdade. Serve para conferir menu, temas e troca de
+telas sem publicar no Apps Script a cada mudança.
+
+## A logo da operação
+
+A logo **não fica no código**, fica em `CONFIG`, na chave
+`IDENTIDADE.LOGO_URL`. É o que permite a mesma plataforma servir outra
+operação trocando uma linha da planilha.
+
+Duas formas de definir, as duas sem precisar hospedar arquivo:
+
+| Forma | Quando usar |
+|---|---|
+| `https://…/marca.png` | A empresa já publica a imagem em algum endereço |
+| `data:image/png;base64,iVBORw0…` | A imagem inteira dentro da célula. Não depende de nada |
+
+Pode colar direto na célula da aba `CONFIG`, ou chamar `definirLogo(valor)`.
+Enquanto a chave estiver vazia, o nome do sistema faz as vezes da logo — nunca
+aparece um ícone quebrado.
 
 ## Manutenção da planilha
 

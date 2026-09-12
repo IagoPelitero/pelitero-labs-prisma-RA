@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-tema="padrao">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><?= identidade.nome ?></title>
+  <?!= incluir('Estilos') ?>
+</head>
+<body>
+  <!--
+    A casca do sistema. O menu lateral e a barra superior aparecem em TODAS as
+    telas; o miolo troca conforme a rota.
+
+    Nada aqui vem preenchido: quem monta o menu e a barra é o Moldura, a
+    partir do pacote de partida que o servidor devolve. Menu escrito à mão no
+    HTML ficaria fora de sincronia com as permissões no primeiro dia.
+  -->
+
+  <div class="carregando" id="carregando">
+    <div class="carregando-marca"><?= identidade.nome ?></div>
+    <div class="carregando-barra"><span></span></div>
+    <p>Conferindo o seu acesso…</p>
+  </div>
+
+  <div class="recusado" id="recusado" hidden>
+    <h1>Não consegui abrir o sistema</h1>
+    <p id="recusado-motivo"></p>
+    <button type="button" class="botao" onclick="location.reload()">
+      Tentar de novo
+    </button>
+  </div>
+
+  <div class="aplicacao" id="aplicacao" hidden>
+    <aside class="lateral" id="lateral"></aside>
+    <div class="veu" id="veu" hidden></div>
+    <div class="coluna">
+      <header class="superior" id="superior"></header>
+      <main class="miolo" id="miolo" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <?!= incluir('Moldura') ?>
+  <?!= incluir('Aplicacao') ?>
+</body>
+</html>

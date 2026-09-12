@@ -13,9 +13,11 @@
 const { resumo } = require('./ferramentas');
 const { rodarTestesDaFundacao } = require('./testes-fundacao');
 const { rodarTestesDeAcesso } = require('./testes-acesso');
+const { rodarTestesDaCasca } = require('./testes-casca');
 
 rodarTestesDaFundacao();
 rodarTestesDeAcesso();
+rodarTestesDaCasca();
 
 const { passaram, falhas } = resumo();
 console.log('\n' + '-'.repeat(60));

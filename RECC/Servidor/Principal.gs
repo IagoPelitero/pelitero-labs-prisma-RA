@@ -31,7 +31,12 @@ function doGet() {
   }
 
   registrarUltimoAcesso_(quem.usuario);
-  return HtmlService.createTemplateFromFile('Index').evaluate()
+
+  // A identidade PRECISA ser entregue ao template: o Index a usa no título e
+  // na marca de abertura. Sem isso a página nem chega a ser montada.
+  var pagina = HtmlService.createTemplateFromFile('Index');
+  pagina.identidade = identidade;
+  return pagina.evaluate()
     .setTitle(identidade.nome)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
@@ -102,9 +107,51 @@ function pacoteDePartida() {
     },
     menu: montarMenu_(quem.permissoes),
     mesas: mesasVisiveis_(),
-    temaPadrao: valorDaConfiguracao_('OPERACAO.TEMA_PADRAO', 'padrao'),
+    tema: temaDoUsuario_(),
     senhaDeAdministradorDefinida: existeSenhaDeAdministrador_()
   };
+}
+
+// ============================================================================
+// TEMA
+// ============================================================================
+
+const RECC_TEMAS = ['padrao', 'rosa', 'dark', 'brasil'];
+const RECC_CHAVE_DO_TEMA = 'RECC_TEMA_ESCOLHIDO';
+
+/**
+ * O tema escolhido pela pessoa, ou o padrão da operação.
+ *
+ * Fica em UserProperties, e não no navegador: assim a escolha acompanha a
+ * pessoa em qualquer computador que ela abrir o sistema.
+ */
+function temaDoUsuario_() {
+  var escolhido = PropertiesService.getUserProperties()
+    .getProperty(RECC_CHAVE_DO_TEMA);
+  if (escolhido && RECC_TEMAS.indexOf(escolhido) >= 0) return escolhido;
+
+  var daOperacao = valorDaConfiguracao_('OPERACAO.TEMA_PADRAO', 'padrao');
+  return RECC_TEMAS.indexOf(daOperacao) >= 0 ? daOperacao : 'padrao';
+}
+
+/**
+ * Guarda o tema escolhido. Chamada pelo navegador.
+ *
+ * Não exige permissão nenhuma de propósito: escolher a cor da própria tela
+ * não é uma decisão sobre dado. Exige apenas estar cadastrado — senão
+ * qualquer visitante encheria as propriedades da instalação.
+ */
+function salvarTemaDoUsuario(tema) {
+  var quem = usuarioAtual_();
+  if (!quem.cadastrado) {
+    throw new Error('Acesso negado: ' + quem.motivo);
+  }
+  if (RECC_TEMAS.indexOf(tema) < 0) {
+    throw new Error('Tema desconhecido: "' + tema + '". Os temas são ' +
+      RECC_TEMAS.join(', ') + '.');
+  }
+  PropertiesService.getUserProperties().setProperty(RECC_CHAVE_DO_TEMA, tema);
+  return tema;
 }
 
 /** O menu lateral, já filtrado pelo nível e com os nomes que o ADM escolheu. */
@@ -164,6 +211,47 @@ function valorDaConfiguracao_(chave, valorPadrao) {
 }
 
 /**
+ * Guarda a logo da operação. Chamada pelo navegador.
+ *
+ * Aceita duas formas, e as duas evitam hospedar arquivo:
+ *
+ *   1. um endereço https de uma imagem que a empresa já publica;
+ *   2. a própria imagem embutida em texto (data:image/...;base64,...),
+ *      que é o caminho sem dependência nenhuma — a imagem passa a morar
+ *      dentro da célula de CONFIG.
+ *
+ * A imagem NUNCA vai para o código. É assim que a mesma plataforma serve
+ * outra operação trocando só uma linha da planilha.
+ */
+function definirLogo(enderecoOuImagem) {
+  exigirPermissao_(RECC_ACOES.CONFIGURAR);
+
+  var valor = String(enderecoOuImagem || '').trim();
+  var ehEndereco = valor.indexOf('https://') === 0;
+  var ehImagemEmbutida = valor.indexOf('data:image/') === 0;
+
+  if (valor && !ehEndereco && !ehImagemEmbutida) {
+    throw new Error('A logo precisa ser um endereço https:// de imagem ou a ' +
+      'própria imagem em texto, começando com data:image/. Recebi: ' +
+      valor.substring(0, 40));
+  }
+
+  var linhas = lerRegistros_('CONFIG');
+  for (var i = 0; i < linhas.length; i++) {
+    if (normalizarParaComparar_(linhas[i].Chave) === normalizarParaComparar_('IDENTIDADE.LOGO_URL')) {
+      atualizarRegistro_('CONFIG', linhas[i].Id, {
+        Valor: valor,
+        AtualizadoPor: (usuarioAtual_().usuario || {}).Id || '',
+        Data: new Date()
+      });
+      registrarAuditoria_('identidade.logo', 'CONFIG', linhas[i].Id, '');
+      return true;
+    }
+  }
+  throw new Error('A chave IDENTIDADE.LOGO_URL não existe na aba CONFIG.');
+}
+
+/**
  * Nome, subtítulo, operação, logo e cor.
  *
  * Mora em CONFIG e não em código de propósito: a plataforma é o PGO, e o RECC
@@ -175,6 +263,6 @@ function lerIdentidadeVisual_() {
     nomeLongo: valorDaConfiguracao_('IDENTIDADE.NOME_LONGO', ''),
     operacao: valorDaConfiguracao_('IDENTIDADE.OPERACAO', ''),
     logo: valorDaConfiguracao_('IDENTIDADE.LOGO_URL', ''),
-    corPrimaria: valorDaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0F56D6')
+    corPrimaria: valorDaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0B77CE')
   };
 }

@@ -1,0 +1,389 @@
+<style>
+/* ============================================================================
+   RECC — Estilos.html · a aparência inteira do sistema
+   ============================================================================
+   Os QUATRO TEMAS vivem aqui, e vivem do mesmo jeito: cada um redefine as
+   mesmas variáveis de cor. Nenhum componente conhece um tema — todos leem as
+   variáveis. Trocar de tema é trocar um atributo no <html>, e nada mais.
+
+   Por isso NUNCA escreva uma cor direto num componente. Se escrever, ela vai
+   sobreviver à troca de tema e o rosa vai ficar com um pedaço azul.
+   ============================================================================ */
+
+:root {
+  /* ---- estrutura, igual em todos os temas ---- */
+  --lateral-largura: 248px;
+  --lateral-encolhida: 72px;
+  --raio: 10px;
+  --raio-pequeno: 6px;
+  --sombra: 0 1px 2px rgba(12, 27, 51, .06), 0 10px 28px -18px rgba(12, 27, 51, .35);
+  --transicao: 160ms ease;
+
+  --fonte: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --fonte-dado: "Consolas", "SFMono-Regular", "Courier New", monospace;
+
+  /* ---- semânticas: significam a mesma coisa em todo tema ---- */
+  --bom: #15794A;         --bom-tenue: #E1F3EA;
+  --atencao: #96590A;     --atencao-tenue: #FBEEDB;
+  --ruim: #A9241D;        --ruim-tenue: #FBE7E5;
+}
+
+/* ---------------------------------------------------------- tema PADRÃO ---
+   Azul Porto Seguro. A cor exata vem de CONFIG (IDENTIDADE.COR_PRIMARIA) e o
+   servidor a injeta em --destaque; o valor abaixo é só o ponto de partida. */
+:root, :root[data-tema="padrao"] {
+  --destaque: #0B77CE;
+  --destaque-escuro: #075A9E;
+  --destaque-tenue: #E4F1FB;
+  --destaque-sobre: #FFFFFF;
+
+  --fundo: #F4F7FB;
+  --superficie: #FFFFFF;
+  --superficie-2: #EDF2F8;
+  --linha: #DCE4EE;
+  --linha-forte: #BCC8D8;
+  --texto: #14213A;
+  --suave: #56667F;
+  --tenue: #8494A9;
+
+  --lateral-fundo: #0C1B33;
+  --lateral-texto: #A9B8CC;
+  --lateral-titulo: #FFFFFF;
+  --lateral-linha: #1C2F4D;
+  --lateral-ativo: #143E6E;
+}
+
+/* ------------------------------------------------------------- tema ROSA -- */
+:root[data-tema="rosa"] {
+  --destaque: #C2185B;
+  --destaque-escuro: #8E1145;
+  --destaque-tenue: #FCE7F0;
+  --destaque-sobre: #FFFFFF;
+
+  --fundo: #FCF5F8;
+  --superficie: #FFFFFF;
+  --superficie-2: #F8EAF1;
+  --linha: #EED6E1;
+  --linha-forte: #DCB4C7;
+  --texto: #2B1420;
+  --suave: #6E5260;
+  --tenue: #9C8290;
+
+  --lateral-fundo: #2A0F1E;
+  --lateral-texto: #D6B3C4;
+  --lateral-titulo: #FFFFFF;
+  --lateral-linha: #431A2E;
+  --lateral-ativo: #6E1E43;
+}
+
+/* ------------------------------------------------------------- tema DARK -- */
+:root[data-tema="dark"] {
+  --destaque: #5C9DFF;
+  --destaque-escuro: #7FB4FF;
+  --destaque-tenue: #14294A;
+  --destaque-sobre: #06182F;
+
+  --fundo: #0A101C;
+  --superficie: #121B2B;
+  --superficie-2: #182438;
+  --linha: #26344C;
+  --linha-forte: #3A4B69;
+  --texto: #E7EDF7;
+  --suave: #9AAAC2;
+  --tenue: #75879F;
+
+  --lateral-fundo: #070C16;
+  --lateral-texto: #93A4BD;
+  --lateral-titulo: #FFFFFF;
+  --lateral-linha: #1B2536;
+  --lateral-ativo: #1B3358;
+
+  --bom: #5CC894;         --bom-tenue: #123528;
+  --atencao: #E0A253;     --atencao-tenue: #3A2A12;
+  --ruim: #F08981;        --ruim-tenue: #3B1A18;
+}
+
+/* ----------------------------------------------------------- tema BRASIL -- */
+:root[data-tema="brasil"] {
+  --destaque: #0E7A3C;
+  --destaque-escuro: #0A5A2C;
+  --destaque-tenue: #E2F3E8;
+  --destaque-sobre: #FFFFFF;
+
+  --fundo: #F5FAF6;
+  --superficie: #FFFFFF;
+  --superficie-2: #E9F4EC;
+  --linha: #D3E5D8;
+  --linha-forte: #AECDB7;
+  --texto: #10251A;
+  --suave: #4E6656;
+  --tenue: #7C9585;
+
+  --lateral-fundo: #08301C;
+  --lateral-texto: #A6C7B2;
+  --lateral-titulo: #FFFFFF;
+  --lateral-linha: #12472B;
+  --lateral-ativo: #146034;
+
+  --atencao: #8A6300;     --atencao-tenue: #FBF0CF;
+}
+
+/* ============================================================== base ===== */
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: var(--fonte);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; }
+
+.botao {
+  border: 1px solid var(--destaque);
+  background: var(--destaque);
+  color: var(--destaque-sobre);
+  border-radius: var(--raio-pequeno);
+  padding: 9px 18px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.botao:hover { background: var(--destaque-escuro); border-color: var(--destaque-escuro); }
+
+:focus-visible { outline: 2px solid var(--destaque); outline-offset: 2px; border-radius: 4px; }
+
+/* ====================================================== abertura ========= */
+.carregando, .recusado {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+}
+.carregando-marca {
+  font-size: 30px; font-weight: 700; letter-spacing: -.02em; color: var(--destaque);
+}
+.carregando-barra {
+  width: 190px; height: 4px; border-radius: 3px;
+  background: var(--superficie-2); overflow: hidden;
+}
+.carregando-barra span {
+  display: block; height: 100%; width: 40%; border-radius: 3px;
+  background: var(--destaque); animation: desliza 1.1s ease-in-out infinite;
+}
+@keyframes desliza {
+  0% { transform: translateX(-110%); } 100% { transform: translateX(360%); }
+}
+.carregando p, .recusado p { color: var(--suave); margin: 0; max-width: 46ch; }
+.recusado h1 { font-size: 22px; margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .carregando-barra span { animation: none; width: 100%; }
+}
+
+/* ====================================================== a casca ========== */
+.aplicacao { display: flex; min-height: 100vh; }
+.coluna { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+
+/* -------------------------------------------------------- menu lateral -- */
+.lateral {
+  flex: 0 0 var(--lateral-largura);
+  width: var(--lateral-largura);
+  background: var(--lateral-fundo);
+  color: var(--lateral-texto);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  transition: flex-basis var(--transicao), width var(--transicao);
+}
+.aplicacao.encolhida .lateral {
+  flex-basis: var(--lateral-encolhida);
+  width: var(--lateral-encolhida);
+}
+
+.lateral-marca {
+  display: flex; align-items: center; gap: 10px;
+  padding: 20px 18px; min-height: 74px;
+  border-bottom: 1px solid var(--lateral-linha);
+}
+.lateral-marca img { max-height: 30px; max-width: 150px; }
+.lateral-marca .escrito {
+  font-size: 23px; font-weight: 700; letter-spacing: -.02em; color: var(--lateral-titulo);
+  white-space: nowrap;
+}
+.lateral-marca .escrito em { font-style: normal; color: var(--destaque); }
+
+.lateral-itens { list-style: none; margin: 0; padding: 14px 10px; flex: 1 1 auto; overflow-y: auto; }
+.lateral-itens li { margin-bottom: 2px; }
+
+.lateral-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 12px; border: 0; border-radius: var(--raio-pequeno);
+  background: transparent; color: var(--lateral-texto);
+  cursor: pointer; text-align: left; font-size: 14.5px;
+}
+.lateral-item:hover { background: var(--lateral-linha); color: var(--lateral-titulo); }
+.lateral-item[aria-current="page"] {
+  background: var(--lateral-ativo); color: var(--lateral-titulo); font-weight: 600;
+}
+.lateral-item svg { flex: 0 0 20px; width: 20px; height: 20px; }
+.lateral-item .rotulo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aplicacao.encolhida .lateral-item .rotulo { display: none; }
+.aplicacao.encolhida .lateral-marca .escrito { display: none; }
+.aplicacao.encolhida .lateral-item { justify-content: center; }
+
+.lateral-pe { padding: 12px 10px; border-top: 1px solid var(--lateral-linha); }
+.lateral-encolher {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--lateral-linha); background: transparent;
+  color: var(--lateral-texto); cursor: pointer;
+}
+.lateral-encolher:hover { background: var(--lateral-linha); color: var(--lateral-titulo); }
+.aplicacao.encolhida .lateral-encolher svg { transform: rotate(180deg); }
+
+/* ------------------------------------------------------ barra superior -- */
+.superior {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
+  padding: 14px 22px;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--linha);
+}
+.superior .titulo { min-width: 180px; flex: 1 1 240px; }
+.superior .titulo h1 {
+  margin: 0; font-size: 23px; letter-spacing: -.02em; line-height: 1.2;
+}
+.superior .titulo p { margin: 2px 0 0; font-size: 13.5px; color: var(--suave); }
+
+.abrir-menu {
+  display: none; width: 38px; height: 38px; border-radius: var(--raio-pequeno);
+  border: 1px solid var(--linha); background: var(--superficie); cursor: pointer;
+}
+
+.busca {
+  position: relative; flex: 1 1 260px; max-width: 420px; min-width: 180px;
+}
+.busca input {
+  width: 100%; padding: 9px 62px 9px 36px;
+  border: 1px solid var(--linha); border-radius: var(--raio-pequeno);
+  background: var(--superficie-2); color: var(--texto); font: inherit; font-size: 14px;
+}
+.busca input::placeholder { color: var(--tenue); }
+.busca svg {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; color: var(--tenue);
+}
+.busca kbd {
+  position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  font-family: var(--fonte); font-size: 11px; color: var(--tenue);
+  border: 1px solid var(--linha); border-radius: 4px; padding: 2px 6px;
+  background: var(--superficie);
+}
+
+.periodo {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; font-size: 13.5px;
+  border: 1px solid var(--linha); border-radius: var(--raio-pequeno);
+  background: var(--superficie); cursor: pointer; white-space: nowrap;
+}
+.periodo svg { width: 16px; height: 16px; color: var(--tenue); }
+
+/* -------------------------------------------------- as quatro bolinhas -- */
+.temas { display: flex; align-items: center; gap: 7px; }
+.tema {
+  width: 20px; height: 20px; border-radius: 50%; cursor: pointer;
+  border: 2px solid transparent; padding: 0;
+  /* O anel por FORA, e num cinza que aparece nos dois fundos. Por dentro, a
+     bolinha do tema escuro sumia dentro da barra do próprio tema escuro. */
+  box-shadow: 0 0 0 1px rgba(128, 128, 128, .55);
+}
+.tema[aria-pressed="true"] {
+  border-color: var(--texto);
+  box-shadow: 0 0 0 1px var(--superficie);
+}
+.tema-padrao { background: #0B77CE; }
+.tema-rosa   { background: #C2185B; }
+.tema-dark   { background: #2B3A52; }
+.tema-brasil { background: linear-gradient(135deg, #0E7A3C 50%, #F0B400 50%); }
+
+.pessoa { display: flex; align-items: center; gap: 10px; }
+.pessoa .iniciais {
+  width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--destaque); color: var(--destaque-sobre);
+  font-weight: 600; font-size: 13px;
+}
+.pessoa .quem { line-height: 1.25; }
+.pessoa .quem strong { display: block; font-size: 14px; font-weight: 600; }
+.pessoa .quem span { font-size: 12px; color: var(--suave); }
+
+/* -------------------------------------------------------------- miolo --- */
+.miolo { padding: 22px; flex: 1 1 auto; }
+
+.cartao {
+  background: var(--superficie);
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  padding: 22px;
+  box-shadow: var(--sombra);
+}
+
+.emconstrucao { max-width: 620px; }
+.emconstrucao .fita {
+  display: inline-block; margin-bottom: 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--atencao); background: var(--atencao-tenue);
+  border: 1px solid color-mix(in srgb, var(--atencao) 30%, transparent);
+  border-radius: 3px; padding: 3px 9px;
+}
+.emconstrucao h2 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.015em; }
+.emconstrucao p { margin: 0 0 14px; color: var(--suave); }
+.emconstrucao ul { margin: 0; padding-left: 20px; color: var(--suave); }
+.emconstrucao li { margin-bottom: 5px; }
+
+.veu { display: none; }
+
+/* ============================================== telas estreitas ========== */
+@media (max-width: 900px) {
+  .lateral {
+    position: fixed; left: 0; top: 0; z-index: 40;
+    transform: translateX(-100%);
+    transition: transform var(--transicao);
+    box-shadow: 0 0 40px rgba(0, 0, 0, .3);
+  }
+  .aplicacao.menu-aberto .lateral { transform: translateX(0); }
+  .aplicacao.encolhida .lateral { flex-basis: var(--lateral-largura); width: var(--lateral-largura); }
+  .aplicacao.encolhida .lateral-item .rotulo,
+  .aplicacao.encolhida .lateral-marca .escrito { display: block; }
+  .aplicacao.encolhida .lateral-item { justify-content: flex-start; }
+  .lateral-pe { display: none; }
+
+  .abrir-menu { display: grid; place-items: center; }
+  .veu {
+    position: fixed; inset: 0; z-index: 35;
+    background: rgba(6, 14, 28, .5);
+  }
+  .aplicacao.menu-aberto .veu { display: block; }
+
+  .superior { padding: 12px 16px; }
+  .superior .titulo h1 { font-size: 19px; }
+  .miolo { padding: 16px; }
+  .periodo .rotulo-periodo { display: none; }
+}
+
+@media (max-width: 560px) {
+  .busca { order: 5; flex-basis: 100%; max-width: none; }
+  .pessoa .quem { display: none; }
+}
+</style>

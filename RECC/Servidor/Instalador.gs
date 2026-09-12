@@ -254,7 +254,7 @@ function semearDadosIniciais_(emailDoInstalador) {
       'Operação atendida por esta instalação.'),
     novaConfiguracao_('IDENTIDADE.LOGO_URL', '',
       'URL da logo exibida na tela de usuário não cadastrado.'),
-    novaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0F56D6',
+    novaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0B77CE',
       'Cor do tema Padrão.'),
     novaConfiguracao_('OPERACAO.JANELA_DIAS', '30',
       'Quantos dias a fila de trabalho carrega. Acima disso, use Buscar Caso.'),

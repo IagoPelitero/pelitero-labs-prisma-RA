@@ -1,0 +1,150 @@
+<script>
+/* ============================================================================
+   RECC — Moldura.html · o menu lateral e a barra superior
+   ============================================================================
+   A moldura aparece em TODAS as telas e é a mesma em todas. Ela não é escrita
+   à mão no HTML: é montada a partir do pacote de partida, porque o menu
+   depende do nível de acesso de quem entrou. Menu fixo no HTML ficaria fora
+   de sincronia com as permissões no primeiro dia.
+   ============================================================================ */
+
+var Moldura = (function () {
+
+  /* Os desenhos de cada item. SVG escrito à mão para não depender de nenhuma
+     biblioteca de fora — o Apps Script serve a página num quadro isolado e
+     toda dependência externa é um ponto a mais que pode não carregar. */
+  var DESENHOS = {
+    dashboard: 'M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5',
+    cadastrarCaso: 'M12 5v14M5 12h14',
+    minhaPerformance: 'M5 20V10M12 20V4M19 20v-7',
+    buscarCaso: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4.2-4.2',
+    tabelaCorretoras: 'M4 5h16v14H4zM4 10h16M10 10v9',
+    painelAnalitico: 'M4 17.5 10 11l3.5 3.5L20 7M20 7h-4.5M20 7v4.5',
+    configuracoes: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z'
+      + 'M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1'
+      + 'v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1'
+      + 'A1.6 1.6 0 0 0 4.5 15a2 2 0 0 1-1.8 1.2h-.2a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 4.1 9.4'
+      + 'L4 9.3a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1A1.6 1.6 0 0 0 9.8 5.4v-.2'
+      + 'a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1'
+      + 'a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1'
+      + 'a1.6 1.6 0 0 0-1.4 1z'
+  };
+
+  var TEMAS = [
+    { chave: 'padrao', nome: 'Padrão — azul Porto Seguro' },
+    { chave: 'rosa', nome: 'Rosa' },
+    { chave: 'dark', nome: 'Escuro' },
+    { chave: 'brasil', nome: 'Brasil' }
+  ];
+
+  function icone(tela) {
+    var caminho = DESENHOS[tela] || DESENHOS.dashboard;
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"'
+      + ' aria-hidden="true"><path d="' + caminho + '"></path></svg>';
+  }
+
+  /** As iniciais do nome, para o círculo da barra superior. */
+  function iniciais(nome) {
+    var partes = String(nome || '').trim().split(/\s+/);
+    if (!partes[0]) return '?';
+    if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
+    return (partes[0].charAt(0) + partes[partes.length - 1].charAt(0)).toUpperCase();
+  }
+
+  function escapar(texto) {
+    return String(texto === null || texto === undefined ? '' : texto)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /** A marca do topo do menu: a logo de CONFIG, ou o nome quando não há logo. */
+  function marca(identidade) {
+    if (identidade.logo) {
+      return '<img src="' + escapar(identidade.logo) + '" alt="'
+        + escapar(identidade.operacao || identidade.nome) + '">';
+    }
+    // Sem logo, o nome vira a marca. As duas últimas letras ganham a cor de
+    // destaque — é o mesmo tratamento do "PGO" dos desenhos da tela.
+    var nome = String(identidade.nome || 'RECC');
+    var corte = Math.max(nome.length - 2, 1);
+    return '<span class="escrito">' + escapar(nome.substring(0, corte))
+      + '<em>' + escapar(nome.substring(corte)) + '</em></span>';
+  }
+
+  function montarLateral(pacote, telaAtual) {
+    var itens = pacote.menu.map(function (item) {
+      var atual = item.tela === telaAtual ? ' aria-current="page"' : '';
+      return '<li><button type="button" class="lateral-item"'
+        + ' data-tela="' + escapar(item.tela) + '"' + atual + '>'
+        + icone(item.tela)
+        + '<span class="rotulo">' + escapar(item.titulo) + '</span>'
+        + '</button></li>';
+    }).join('');
+
+    return '<div class="lateral-marca">' + marca(pacote.identidade) + '</div>'
+      + '<ul class="lateral-itens">' + itens + '</ul>'
+      + '<div class="lateral-pe">'
+      + '<button type="button" class="lateral-encolher" id="encolher"'
+      + ' title="Encolher o menu" aria-label="Encolher o menu">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"'
+      + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M14 6l-6 6 6 6"></path></svg>'
+      + '</button></div>';
+  }
+
+  function montarSuperior(pacote, tela) {
+    var bolinhas = TEMAS.map(function (tema) {
+      var marcado = tema.chave === pacote.tema ? 'true' : 'false';
+      return '<button type="button" class="tema tema-' + tema.chave + '"'
+        + ' data-tema="' + tema.chave + '" aria-pressed="' + marcado + '"'
+        + ' title="' + escapar(tema.nome) + '"'
+        + ' aria-label="Tema ' + escapar(tema.nome) + '"></button>';
+    }).join('');
+
+    return ''
+      + '<button type="button" class="abrir-menu" id="abrir-menu" aria-label="Abrir o menu">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"'
+      + ' stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>'
+      + '</button>'
+
+      + '<div class="titulo">'
+      + '<h1>' + escapar(tela.titulo) + '</h1>'
+      + '<p>' + escapar(tela.subtitulo) + '</p>'
+      + '</div>'
+
+      + '<div class="busca">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"'
+      + ' stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
+      + '<path d="M20 20l-4.2-4.2"></path></svg>'
+      + '<input type="search" id="busca-global" autocomplete="off"'
+      + ' placeholder="Buscar por apólice, segurado ou protocolo…"'
+      + ' aria-label="Busca geral">'
+      + '<kbd>Ctrl K</kbd>'
+      + '</div>'
+
+      + '<button type="button" class="periodo" id="periodo">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"'
+      + ' stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15" rx="2"></rect>'
+      + '<path d="M3.5 10h17M8 3.5v3M16 3.5v3"></path></svg>'
+      + '<span class="rotulo-periodo">' + escapar(Periodo.rotulo()) + '</span>'
+      + '</button>'
+
+      + '<div class="temas" role="group" aria-label="Cor do sistema">' + bolinhas + '</div>'
+
+      + '<div class="pessoa">'
+      + '<div class="iniciais" aria-hidden="true">'
+      + escapar(iniciais(pacote.usuario.nome)) + '</div>'
+      + '<div class="quem"><strong>' + escapar(pacote.usuario.nome) + '</strong>'
+      + '<span>' + escapar(pacote.usuario.cargo || pacote.usuario.nivelAcesso) + '</span>'
+      + '</div></div>';
+  }
+
+  return {
+    montarLateral: montarLateral,
+    montarSuperior: montarSuperior,
+    escapar: escapar,
+    iniciais: iniciais
+  };
+})();
+</script>

@@ -38,7 +38,7 @@ function escaparHtml(valor) {
     .replace(/"/g, '&quot;');
 }
 
-function montarTemplate(fonte, variaveis) {
+function montarTemplate(fonte, variaveis, globaisDoServidor) {
   let corpo = "var __saida = '';\n";
   let posicao = 0;
   const pedacos = /<\?(!?=)?([\s\S]*?)\?>/g;
@@ -52,9 +52,13 @@ function montarTemplate(fonte, variaveis) {
   }
   corpo += '__saida += ' + JSON.stringify(fonte.slice(posicao)) + ';\nreturn __saida;';
 
-  const nomes = Object.keys(variaveis);
-  const funcao = new Function(...nomes, '__escapar', corpo);
-  return funcao(...nomes.map((n) => variaveis[n]), escaparHtml);
+  // No Apps Script, um template enxerga TODAS as funções do servidor — é
+  // assim que <?!= incluir('Estilos') ?> funciona. O `with` reproduz esse
+  // alcance: sem ele o simulador seria mais restrito que o Apps Script e
+  // aprovaria uma página que quebraria em produção.
+  const funcao = new Function('__servidor', '__pagina', '__escapar',
+    'with (__servidor) { with (__pagina) {\n' + corpo + '\n} }');
+  return funcao(globaisDoServidor || {}, variaveis, escaparHtml);
 }
 
 function saidaHtml(html) {
@@ -278,7 +282,7 @@ function criarAmbienteFalso(email = 'analista@exemplo.com') {
               Object.keys(template).forEach((chave) => {
                 if (chave !== 'evaluate') variaveis[chave] = template[chave];
               });
-              return saidaHtml(montarTemplate(fonte, variaveis));
+              return saidaHtml(montarTemplate(fonte, variaveis, ambiente.globais));
             }
           };
           return template;
