@@ -247,7 +247,7 @@ formulário (no momento em que a SUSEP é digitada) e no dashboard.
 | `MESAS` | `Id` · `Nome` · `Descricao` · `Aba` · `Icone` · `Ordem` · `Ativo` | Registro das mesas. Mesa nova = linha nova, sem código |
 | `CAMPOS` | `Id` · `MesaId` · `Aba` · `ChaveTecnica` · `Cabecalho` · `Rotulo` · `Descricao` · `TipoCampo` · `Secao` · `Mascara` · `Obrigatorio` · `Protegido` · `Ativo` · `Ordem` · `VisivelPara` · `ValorPadrao` · `Configuracao` | O catálogo do formulário e o mapa coluna↔campo |
 | `CATALOGO` | `Id` · `MesaId` · `Tipo` · `Codigo` · `Nome` · `Rotulo` · `PaiId` · `Cor` · `Ordem` · `Ativo` · `Configuracao` | Status, motivos, origens, tipos, ramos, áreas responsáveis, cargos, níveis de acesso, segmentos |
-| `PAINEIS` | `Id` · `Tela` · `MesaId` · `Titulo` · `TipoWidget` · `CampoDimensao` · `CampoMedida` · `Agregacao` · `Limite` · `Filtro` · `Ordem` · `Largura` · `VisivelPara` · `Ativo` | Os cards e gráficos de cada tela, configuráveis |
+| `PAINEIS` | `Id` · `Tela` · `MesaId` · `Titulo` · `TipoComponente` · `CampoDimensao` · `CampoMedida` · `Agregacao` · `Limite` · `Filtro` · `Ordem` · `Largura` · `VisivelPara` · `Ativo` | Os cards e gráficos de cada tela, configuráveis |
 | `CONFIG` | `Id` · `Chave` · `Valor` · `Descricao` · `AtualizadoPor` · `Data` | Parâmetros gerais (nome do sistema, janela de dias, metas…) |
 | `AUDITORIA` | `Id` · `DataHora` · `UsuarioId` · `Acao` · `Entidade` · `RegistroId` · `Detalhe` | Trilha das ações relevantes. Sem dado pessoal |
 
@@ -260,7 +260,7 @@ Em Configurações › Análise, o ADM define: mesa, colunas, filtros, período.
 sistema cria/atualiza uma aba chamada `ANALISE_<nome>` com os dados achatados,
 prontos para tabela dinâmica ou Power BI.
 
-- **Snapshot** (padrão): valores gravados, atualizados por botão ou por gatilho
+- **Retrato** (padrão): valores gravados de uma vez, atualizados por botão ou por gatilho
   de horário. Estável, não pesa a planilha.
 - Nunca sobrescreve uma aba que não tenha o prefixo `ANALISE_`.
 - Recriar uma aba de análise existente exige senha de ADM.
@@ -287,9 +287,9 @@ prontos para tabela dinâmica ou Power BI.
 ### 4.1 Camadas
 
 ```
-NAVEGADOR (SPA servida por HtmlService)
+NAVEGADOR (uma página só, servida por HtmlService)
   Index.html ......... casca, roteador, injeção dos parciais
-  Layout.html ........ menu lateral + barra superior (todas as telas)
+  Moldura.html ....... menu lateral + barra superior (todas as telas)
   Tema.html .......... 4 paletas em CSS custom properties
   Telas .............. Dashboard · CadastrarCaso · MinhaPerformance
                        BuscarCaso · TabelaCorretoras · PainelAnalitico
@@ -309,7 +309,7 @@ APPS SCRIPT
   Casos.gs ........... criar, editar, ocultar caso
   Busca.gs ........... busca na base própria e em planilha legada
   Indicadores.gs ..... agregações (Dashboard, Painel, Performance)
-  Paineis.gs ......... layout de widgets
+  Paineis.gs ......... a disposição dos componentes de cada tela
   Analise.gs ......... gerador das abas ANALISE_*
   Auditoria.gs ....... trilha
   Diagnostico.gs ..... verificação de build e de contrato
@@ -329,7 +329,7 @@ só, o vínculo por cabeçalho e o formato texto antes da gravação.
 3. **Não encontrou** → serve `SemAcesso.html`: tela cheia, logo Porto Seguro,
    mensagem de usuário não cadastrado e como pedir acesso. Nenhum dado é
    carregado.
-4. **Encontrou** → serve a SPA e devolve, **numa única chamada**, o pacote de
+4. **Encontrou** → serve a página e devolve, **numa única chamada**, o pacote de
    partida: usuário, permissões, mesas, catálogo, campos, painéis e tema.
    Uma ida ao servidor, não sete.
 5. `ensureEstrutura()` só **confere** as abas obrigatórias. Faltando algo, para
@@ -344,9 +344,9 @@ O Apps Script tem ~6 minutos por execução e cada chamada ao Sheets é rede.
 | Ler **um bloco** com `getValues()`, nunca célula a célula | 1 chamada de rede em vez de 5.000 |
 | Gravar **um bloco** com `setValues()` | Idem |
 | A fila de trabalho lê só a **janela recente** (30 dias, configurável) | Não se lê 200 mil linhas para mostrar 40 |
-| Base é **append-only**: linha nova vai para o fim | O recente é sempre o fim da aba — leitura barata |
-| Catálogo em `CacheService`, invalidado por versão | O catálogo muda uma vez por semana, é lido a cada clique |
-| Agregações em cache por `hash(mesa+filtros+período)`, TTL curto | Dez pessoas abrindo o mesmo painel = um cálculo |
+| A base **só acrescenta no fim**, nunca reordena | O recente é sempre o fim da aba — leitura barata |
+| Catálogo guardado em memória (`CacheService`), renovado por versão | O catálogo muda uma vez por semana, é lido a cada clique |
+| Totais guardados em memória, com chave formada por mesa + filtros + período | Dez pessoas abrindo o mesmo painel = um cálculo |
 | `LockService` em toda gravação | Sheets não tem transação. Dois salvamentos simultâneos se atropelam |
 
 ### 4.4 Busca
@@ -355,7 +355,7 @@ O Apps Script tem ~6 minutos por execução e cada chamada ao Sheets é rede.
 
 | Alcance | Onde busca | Como |
 |---|---|---|
-| Recente (≤ 30 dias) | Janela em cache | Instantâneo |
+| Recente (≤ 30 dias) | Janela guardada em memória | Instantâneo |
 | Histórico | Base completa | Lê **só a coluna** escolhida → acha as posições → lê **só as linhas** que casaram |
 | Legado | Planilha externa, por ID | Abre somente leitura, lista as abas, lê a linha 1 como cabeçalho |
 
@@ -402,7 +402,7 @@ são 200 mil, e depois só as linhas que interessam.
 `barras + linha (dois eixos)` · `card indicador com minigráfico` ·
 `barra de progresso` · `ranking` · `tabela`
 
-Cada widget em `PAINEIS` é: **fonte** (mesa) + **dimensão** (agrupa por) +
+Cada componente em `PAINEIS` é: **fonte** (mesa) + **dimensão** (agrupa por) +
 **medida** (o que conta/soma) + **agregação** + **filtro** + **limite** +
 **quem vê**. Um gráfico novo é uma linha nova na aba, sem código.
 
@@ -428,7 +428,7 @@ faz**. Quatro coisas saem dele, e nenhuma sai do cargo:
 |---|---|
 | **Quais telas** aparecem no menu | Tela a tela |
 | **Quais campos** do formulário a pessoa vê | Campo a campo: `oculto` · `só leitura` · `edição` |
-| **Quais cards e gráficos** aparecem em cada painel | Widget a widget |
+| **Quais cards e gráficos** aparecem em cada painel | Um a um |
 | **Quais ações** pode executar | Criar · editar · ocultar · exportar · configurar |
 | **Que dados alcança** (escopo) | `PRÓPRIOS` · `EQUIPE` · `MESA` · `TODOS` |
 
@@ -440,7 +440,7 @@ superior.
 
 > A tela de Configurações do mockup mostra a caixa "Visibilidade por perfil" —
 > aquela lista é de **níveis de acesso**, e é o mesmo controle usado para telas,
-> campos e widgets.
+> campos e componentes.
 - **Ação de alto impacto exige senha de ADM**: criar/remover coluna, criar ou
   apagar mesa, mexer em níveis de acesso, gerar aba de análise sobre uma
   existente, normalizar base, ocultar dados em massa.
@@ -457,14 +457,14 @@ Cada etapa entrega algo que funciona sozinho e pode ser conferido na planilha.
 
 | # | Etapa | Entrega | Estado |
 |---|---|---|---|
-| 1 | Fundação | `Esquema.gs`, `Planilha.gs`, `Sequencia.gs`, `Instalador.gs`, as 12 abas, ID de 10 casas, formato texto | **pronta** |
+| 1 | Fundação | `Esquema.gs`, `Planilha.gs`, `Sequencia.gs`, `Instalador.gs`, as 12 abas, Id de 10 casas, formato texto | **pronta** |
 | 2 | Acesso | Login pelo e-mail, `USUARIOS`, cargos, níveis, tela de não cadastrado | |
 | 3 | Casca | Menu lateral, barra superior, 4 temas, roteador | |
 | 4 | Cadastrar Caso | Formulário dirigido por `CAMPOS`, máscaras, validação, selo de SUSEP | |
 | 5 | Dashboard | Seletor de mesa, cards, fila de trabalho com filtros | |
 | 6 | Configurações | Campos, catálogo, usuários, níveis, senha de ADM, reconciliação de colunas | |
 | 7 | Buscar Caso | Base própria + planilha legada | |
-| 8 | Painel Analítico | Widgets configuráveis, exportação | |
+| 8 | Painel Analítico | Componentes configuráveis, exportação | |
 | 9 | Minha Performance | Indicadores individuais, meta, ranking | |
 | 10 | Tabela de Corretoras | `CANAIS` + segmento + SUSEP bloqueada | |
 | 11 | Abas de análise | Gerador `ANALISE_*` | |
@@ -515,9 +515,9 @@ e uma reserva modesta de linhas, e as bases crescem conforme entram os dados.
 ### O teto que chega antes: desempenho
 
 Muito antes das 150 mil linhas, por volta de **50 mil por base**, leitura e
-agregação começam a pesar — é aí que o cache deixa de ser conforto e vira
+agregação começam a pesar — é aí que guardar em memória deixa de ser conforto e vira
 necessidade. O desenho já conta com isso: fila lê só a janela recente, base é
-append-only, agregação vive em cache.
+a base só acrescenta no fim, e os totais ficam guardados em memória.
 
 ### E depois disso
 
@@ -533,11 +533,33 @@ exatamente o formato que um banco de verdade ingere sem tratamento.
 | # | Pergunta | Resposta |
 |---|---|---|
 | 1 | Nome do produto | **PGO é a plataforma; RECC é esta operação.** A barra superior mostra `RECC`, e o nome é editável em `CONFIG` |
-| 2 | Perfis do mockup × cargos | Valem **os 5 cargos do texto**. Acesso não vem do cargo: o nível decide telas, campos, widgets e ações, item a item |
+| 2 | Perfis do mockup × cargos | Valem **os 5 cargos do texto**. Acesso não vem do cargo: o nível decide telas, campos, componentes e ações, item a item |
 | 3 | Código e descrição | **Duas colunas, sempre.** Vale para produto, proposta, sucursal, ramo e apólice. `CATALOGO` ganhou a coluna `Codigo` |
 | 4 | Tipos de dado | Confirmado: **data, dinheiro, texto e número** convertidos para leitura direta no Power BI |
 | 5 | Uma planilha ou duas | **Uma planilha, abas diferentes.** O teto está na seção 8 — e não é o que parecia |
 | 6 | Logo | Vai para `CONFIG` como **URL ou upload**, nunca para o repositório: assim a marca troca junto com o nome quando a plataforma servir outra operação |
+
+---
+
+## 9a. Como o código é escrito
+
+Regra única, registrada em [`PADRAO-DE-CODIGO.md`](PADRAO-DE-CODIGO.md):
+**tudo em português, por extenso, sem abreviação.** Quem abrir este código
+daqui a dois anos precisa entender sem perguntar para ninguém — inclusive
+estagiário no primeiro dia.
+
+| Não | Sim |
+|---|---|
+| `plLer_` | `lerRegistros_` |
+| `seqProximoId_` | `proximoIdentificador_` |
+| `{ c: 'CPF', t: 'id', p: true }` | `{ cabecalho: 'CPF', tipo: 'identificador', protegido: true }` |
+| `def`, `ss`, `qtd` | `esquema`, `planilha`, `quantidade` |
+
+As únicas exceções são os nomes do próprio Google (`SpreadsheetApp`,
+`getValues`, `onEdit`) e de produtos (`Power BI`), porque renomeá-los deixaria
+você sem conseguir procurar na documentação quando precisasse.
+
+E as pastas se chamam **`Servidor`** e **`Telas`**, não `Back` e `Front`.
 
 ---
 
@@ -550,10 +572,10 @@ morava numa pasta temporária e se perdia quando o `%TEMP%` era limpo.
 node RECC/Testes/rodar.js
 ```
 
-São 31 testes sobre a Etapa 1. O critério é **5 execuções seguidas sem falha** —
+São 32 testes sobre a Etapa 1. O critério é **5 execuções seguidas sem falha** —
 rodar uma vez não detecta teste instável.
 
-O simulador (`RECC/Testes/sandbox.js`) **converte valores igual ao Google
+O simulador (`RECC/Testes/simulador.js`) **converte valores igual ao Google
 Planilhas**: `'00000010'` numa célula de formato Geral vira o número `10`, e
 `'000000E1'` vira `0`. É o que dá valor ao teste — o simulador do sistema
 anterior gravava texto como texto, e por isso nenhum teste enxergou o bug que

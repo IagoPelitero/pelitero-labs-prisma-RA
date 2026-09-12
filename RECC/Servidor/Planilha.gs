@@ -19,20 +19,20 @@
  * ============================================================================
  */
 
-/** Cache da estrutura das abas, válido só durante uma execução. */
-var PL_CACHE_ = {};
+/** A estrutura já lida de cada aba, válida só durante esta execução. */
+var estruturasJaLidas = {};
 
-/** Tipos das colunas que NÃO estão no contrato, declarados na aba CAMPOS. */
-var PL_TIPOS_DECLARADOS_ = null;
-var PL_CARREGANDO_TIPOS_ = false;
+/** O tipo das colunas que NÃO estão no contrato, declarado na aba CAMPOS. */
+var tiposDeclaradosJaLidos = null;
+var lendoTiposDeclarados = false;
 
-function plLimparCache_(nomeAba) {
+function esquecerEstruturaLida_(nomeAba) {
   if (nomeAba) {
-    delete PL_CACHE_[nomeAba];
-    if (nomeAba === 'CAMPOS') PL_TIPOS_DECLARADOS_ = null;
+    delete estruturasJaLidas[nomeAba];
+    if (nomeAba === 'CAMPOS') tiposDeclaradosJaLidos = null;
   } else {
-    PL_CACHE_ = {};
-    PL_TIPOS_DECLARADOS_ = null;
+    estruturasJaLidas = {};
+    tiposDeclaradosJaLidos = null;
   }
 }
 
@@ -43,30 +43,30 @@ function plLimparCache_(nomeAba) {
  * declarado em CAMPOS — sem isso, uma coluna de moeda criada na tela receberia
  * "R$ 2.500,00" como texto, e o Power BI não somaria nada.
  *
- * A trava de reentrância existe porque ler CAMPOS passa por plInfo_, que é
+ * A trava de reentrância existe porque ler CAMPOS passa por estruturaDaAba_, que é
  * justamente quem pergunta pelos tipos.
  */
-function plTiposDeclarados_() {
-  if (PL_TIPOS_DECLARADOS_) return PL_TIPOS_DECLARADOS_;
-  if (PL_CARREGANDO_TIPOS_) return {};
+function tiposDeclaradosPeloAdministrador_() {
+  if (tiposDeclaradosJaLidos) return tiposDeclaradosJaLidos;
+  if (lendoTiposDeclarados) return {};
 
-  PL_CARREGANDO_TIPOS_ = true;
+  lendoTiposDeclarados = true;
   try {
     var mapa = {};
-    if (plPlanilha_().getSheetByName('CAMPOS')) {
-      plLer_('CAMPOS', { incluirOcultos: true }).forEach(function (campo) {
+    if (planilhaAtiva_().getSheetByName('CAMPOS')) {
+      lerRegistros_('CAMPOS', { incluirOcultos: true }).forEach(function (campo) {
         var aba = String(campo.Aba || '').trim();
         var cabecalho = String(campo.Cabecalho || '').trim();
         if (!aba || !cabecalho) return;
         if (!mapa[aba]) mapa[aba] = {};
-        mapa[aba][plNormalizar_(cabecalho)] =
-          RECC_CAMPO_TIPO[campo.TipoCampo] || RECC_TIPO.TEXTO;
+        mapa[aba][normalizarParaComparar_(cabecalho)] =
+          RECC_DO_CAMPO_PARA_O_DADO[campo.TipoCampo] || RECC_TIPO_DE_DADO.TEXTO;
       });
     }
-    PL_TIPOS_DECLARADOS_ = mapa;
+    tiposDeclaradosJaLidos = mapa;
     return mapa;
   } finally {
-    PL_CARREGANDO_TIPOS_ = false;
+    lendoTiposDeclarados = false;
   }
 }
 
@@ -81,7 +81,7 @@ function plTiposDeclarados_() {
  * Tolerância deliberada: acento, caixa, espaço, sublinhado e pontuação não
  * distinguem colunas. O que distingue são as letras e os números.
  */
-function plNormalizar_(texto) {
+function normalizarParaComparar_(texto) {
   return String(texto === null || texto === undefined ? '' : texto)
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -90,7 +90,7 @@ function plNormalizar_(texto) {
 }
 
 /** Só os dígitos. É assim que identificador é comparado e gravado. */
-function plSoDigitos_(texto) {
+function apenasDigitos_(texto) {
   return String(texto === null || texto === undefined ? '' : texto).replace(/\D/g, '');
 }
 
@@ -98,12 +98,13 @@ function plSoDigitos_(texto) {
 // ESTRUTURA — ler a linha 1 e montar o mapa cabeçalho → coluna
 // ============================================================================
 
-function plPlanilha_() {
-  var ss = SpreadsheetApp.getActive();
-  if (!ss) {
+function planilhaAtiva_() {
+  // SpreadsheetApp é o serviço do Google que dá acesso à planilha.
+  var planilha = SpreadsheetApp.getActive();
+  if (!planilha) {
     throw new Error('Nenhuma planilha vinculada a este projeto do Apps Script.');
   }
-  return ss;
+  return planilha;
 }
 
 /**
@@ -114,10 +115,10 @@ function plPlanilha_() {
  * é o caso de uma coluna acrescentada à mão, que o sistema respeita em vez
  * de ignorar.
  */
-function plInfo_(nomeAba, recarregar) {
-  if (!recarregar && PL_CACHE_[nomeAba]) return PL_CACHE_[nomeAba];
+function estruturaDaAba_(nomeAba, recarregar) {
+  if (!recarregar && estruturasJaLidas[nomeAba]) return estruturasJaLidas[nomeAba];
 
-  var aba = plPlanilha_().getSheetByName(nomeAba);
+  var aba = planilhaAtiva_().getSheetByName(nomeAba);
   if (!aba) {
     throw new Error('A aba "' + nomeAba + '" não existe nesta planilha. ' +
       'Rode instalarRECC() numa planilha vazia, ou confira o nome da aba.');
@@ -136,7 +137,7 @@ function plInfo_(nomeAba, recarregar) {
   var repetidos = [];
   for (var i = 0; i < cabecalhos.length; i++) {
     if (!cabecalhos[i]) continue;
-    var chave = plNormalizar_(cabecalhos[i]);
+    var chave = normalizarParaComparar_(cabecalhos[i]);
     if (!chave) continue;
     if (mapa[chave] !== undefined) {
       repetidos.push(cabecalhos[i]);
@@ -152,18 +153,18 @@ function plInfo_(nomeAba, recarregar) {
 
   var tiposDoContrato = {};
   if (RECC_ESQUEMA[nomeAba]) {
-    var def = reccEsquemaDaAba_(nomeAba);
-    for (var j = 0; j < def.colunas.length; j++) {
-      tiposDoContrato[plNormalizar_(def.colunas[j].c)] = def.colunas[j].t;
+    var esquema = esquemaDaAba_(nomeAba);
+    for (var j = 0; j < esquema.colunas.length; j++) {
+      tiposDoContrato[normalizarParaComparar_(esquema.colunas[j].cabecalho)] = esquema.colunas[j].tipo;
     }
   }
 
   // Ordem da decisão: o contrato manda; depois o que o administrador declarou
   // em CAMPOS; e só então texto, que é o padrão seguro.
-  var declarados = plTiposDeclarados_()[nomeAba] || {};
+  var declarados = tiposDeclaradosPeloAdministrador_()[nomeAba] || {};
   var tipos = cabecalhos.map(function (cab) {
-    var chave = plNormalizar_(cab);
-    return tiposDoContrato[chave] || declarados[chave] || RECC_TIPO.TEXTO;
+    var chave = normalizarParaComparar_(cab);
+    return tiposDoContrato[chave] || declarados[chave] || RECC_TIPO_DE_DADO.TEXTO;
   });
 
   var info = {
@@ -173,18 +174,18 @@ function plInfo_(nomeAba, recarregar) {
     mapa: mapa,
     tipos: tipos
   };
-  PL_CACHE_[nomeAba] = info;
+  estruturasJaLidas[nomeAba] = info;
   return info;
 }
 
 /** O índice (base 0) de uma coluna, ou -1 quando ela não existe. */
-function plIndice_(info, cabecalho) {
-  var i = info.mapa[plNormalizar_(cabecalho)];
+function posicaoDaColuna_(info, cabecalho) {
+  var i = info.mapa[normalizarParaComparar_(cabecalho)];
   return i === undefined ? -1 : i;
 }
 
-function plExigirIndice_(info, cabecalho) {
-  var i = plIndice_(info, cabecalho);
+function exigirPosicaoDaColuna_(info, cabecalho) {
+  var i = posicaoDaColuna_(info, cabecalho);
   if (i < 0) {
     throw new Error('A coluna "' + cabecalho + '" não existe na aba "' +
       info.nomeAba + '". Colunas encontradas: ' + info.cabecalhos.join(' | '));
@@ -193,7 +194,7 @@ function plExigirIndice_(info, cabecalho) {
 }
 
 // ============================================================================
-// COERÇÃO — o valor que chega vira o tipo que a célula espera
+// CONVERSÃO — o valor que chega vira o tipo que a célula espera
 // ============================================================================
 
 /**
@@ -202,20 +203,20 @@ function plExigirIndice_(info, cabecalho) {
  * Lista de valores (o caso de "telefones de contato") preserva o ";" como
  * separador e limpa cada parte — senão dois telefones virariam um número só.
  */
-function plCoagirId_(valor) {
+function converterParaIdentificador_(valor) {
   var bruto = String(valor === null || valor === undefined ? '' : valor).trim();
   if (!bruto) return '';
   if (bruto.indexOf(';') >= 0 || bruto.indexOf('/') >= 0) {
     return bruto.split(/[;/]/)
-      .map(function (parte) { return plSoDigitos_(parte); })
+      .map(function (parte) { return apenasDigitos_(parte); })
       .filter(function (parte) { return parte !== ''; })
       .join(';');
   }
-  return plSoDigitos_(bruto);
+  return apenasDigitos_(bruto);
 }
 
 /** Aceita 1234.56, "1234,56", "1.234,56" e "R$ 1.234,56". */
-function plCoagirNumero_(valor) {
+function converterParaNumero_(valor) {
   if (valor === null || valor === undefined || valor === '') return '';
   if (typeof valor === 'number') return isFinite(valor) ? valor : '';
 
@@ -243,7 +244,7 @@ function plCoagirNumero_(valor) {
 }
 
 /** Aceita Date, "dd/MM/yyyy" e "yyyy-MM-dd". */
-function plCoagirData_(valor) {
+function converterParaData_(valor) {
   if (valor === null || valor === undefined || valor === '') return '';
   if (Object.prototype.toString.call(valor) === '[object Date]') {
     return isNaN(valor.getTime()) ? '' : valor;
@@ -264,7 +265,7 @@ function plCoagirData_(valor) {
  * Sheets (30/12/1899) cai antes da padronização de fuso do Brasil — São Paulo
  * usava -03:06:28 —, e uma hora ancorada ali chega deslocada em minutos.
  */
-function plCoagirHora_(valor) {
+function converterParaHora_(valor) {
   if (valor === null || valor === undefined || valor === '') return '';
   if (Object.prototype.toString.call(valor) === '[object Date]') {
     return isNaN(valor.getTime()) ? '' : valor;
@@ -277,7 +278,7 @@ function plCoagirHora_(valor) {
   return new Date(1970, 0, 1, h, min, Number(m[3] || 0));
 }
 
-function plCoagirDataHora_(valor) {
+function converterParaDataEHora_(valor) {
   if (valor === null || valor === undefined || valor === '') return '';
   if (Object.prototype.toString.call(valor) === '[object Date]') {
     return isNaN(valor.getTime()) ? '' : valor;
@@ -286,36 +287,51 @@ function plCoagirDataHora_(valor) {
   return isNaN(d.getTime()) ? '' : d;
 }
 
-function plCoagirBooleano_(valor) {
+function converterParaSimOuNao_(valor) {
   if (valor === null || valor === undefined || valor === '') return '';
   if (valor === true) return 'SIM';
   if (valor === false) return 'NAO';
-  var t = plNormalizar_(valor);
+  var t = normalizarParaComparar_(valor);
   if (t === 'sim' || t === 's' || t === 'true' || t === '1' || t === 'verdadeiro') return 'SIM';
   if (t === 'nao' || t === 'n' || t === 'false' || t === '0' || t === 'falso') return 'NAO';
   return '';
 }
 
-function plCoagir_(valor, tipo) {
+function converterParaOTipoDaColuna_(valor, tipo) {
   switch (tipo) {
-    case RECC_TIPO.ID:         return plCoagirId_(valor);
-    case RECC_TIPO.NUMERO:     return plCoagirNumero_(valor);
-    case RECC_TIPO.DINHEIRO:   return plCoagirNumero_(valor);
-    case RECC_TIPO.DATA:       return plCoagirData_(valor);
-    case RECC_TIPO.HORA:       return plCoagirHora_(valor);
-    case RECC_TIPO.DATA_HORA:  return plCoagirDataHora_(valor);
-    case RECC_TIPO.BOOLEANO:   return plCoagirBooleano_(valor);
-    default:
+    case RECC_TIPO_DE_DADO.IDENTIFICADOR:
+      return converterParaIdentificador_(valor);
+    case RECC_TIPO_DE_DADO.NUMERO:
+    case RECC_TIPO_DE_DADO.DINHEIRO:
+      return converterParaNumero_(valor);
+    case RECC_TIPO_DE_DADO.DATA:
+      return converterParaData_(valor);
+    case RECC_TIPO_DE_DADO.HORA:
+      return converterParaHora_(valor);
+    case RECC_TIPO_DE_DADO.DATA_HORA:
+      return converterParaDataEHora_(valor);
+    case RECC_TIPO_DE_DADO.SIM_OU_NAO:
+      return converterParaSimOuNao_(valor);
+    case RECC_TIPO_DE_DADO.TEXTO:
+    case RECC_TIPO_DE_DADO.TEXTO_LONGO:
       if (valor === null || valor === undefined) return '';
       if (Object.prototype.toString.call(valor) === '[object Date]') return valor;
       return String(valor);
+    default:
+      // Nada de cair em texto silenciosamente. Se um tipo novo for criado no
+      // Esquema e esquecido aqui, um CPF viraria texto com pontuação e um
+      // valor viraria texto em vez de número — e ninguém perceberia até o
+      // Power BI não somar. Erro alto é melhor que dado errado calado.
+      throw new Error('Tipo de coluna desconhecido: "' + tipo + '". ' +
+        'Todo tipo declarado em RECC_TIPO_DE_DADO precisa ter um caso em ' +
+        'converterParaOTipoDaColuna_.');
   }
 }
 
 /** O formato de cada célula da linha, na ordem das colunas da aba. */
-function plFormatosDaLinha_(info) {
+function formatosDaLinha_(info) {
   return info.tipos.map(function (t) {
-    return RECC_FORMATO[t] || '@';
+    return RECC_FORMATO_DA_CELULA[t] || '@';
   });
 }
 
@@ -334,17 +350,17 @@ function plFormatosDaLinha_(info) {
  * então ficaria invisível para o "Normalizar base" — que existe justamente
  * para carimbá-la —, e a próxima inserção do sistema gravaria POR CIMA dela.
  */
-function plUltimaLinhaComDado_(info) {
+function ultimaLinhaComConteudo_(info) {
   return Math.max(info.aba.getLastRow(), 1);
 }
 
 /** Quantas linhas de dado a aba tem (sem contar o cabeçalho). */
-function plTotalDeDados_(info) {
-  return Math.max(plUltimaLinhaComDado_(info) - 1, 0);
+function quantidadeDeRegistros_(info) {
+  return Math.max(ultimaLinhaComConteudo_(info) - 1, 0);
 }
 
 /** Buraco no meio da aba não é registro. */
-function plLinhaVazia_(valores) {
+function linhaEstaVazia_(valores) {
   for (var i = 0; i < valores.length; i++) {
     var v = valores[i];
     if (v !== '' && v !== null && v !== undefined) return false;
@@ -353,7 +369,7 @@ function plLinhaVazia_(valores) {
 }
 
 /** Uma linha da planilha vira objeto, com as chaves iguais aos cabeçalhos. */
-function plObjeto_(info, valores, numeroDaLinha) {
+function montarRegistro_(info, valores, numeroDaLinha) {
   var reg = {};
   for (var i = 0; i < info.cabecalhos.length; i++) {
     if (!info.cabecalhos[i]) continue;
@@ -366,16 +382,16 @@ function plObjeto_(info, valores, numeroDaLinha) {
 /**
  * Lê registros de uma aba.
  *
- *   opcoes.ultimas         lê só as N últimas linhas. A base é append-only,
+ *   opcoes.ultimas         lê só as N últimas linhas. A a base só acrescenta no fim, nunca reordena,
  *                          então o recente é sempre o fim — é o que permite
  *                          a fila de trabalho não ler 200 mil linhas para
  *                          mostrar 40.
  *   opcoes.incluirOcultos  traz também as linhas com _Visivel = NAO.
  */
-function plLer_(nomeAba, opcoes) {
+function lerRegistros_(nomeAba, opcoes) {
   opcoes = opcoes || {};
-  var info = plInfo_(nomeAba);
-  var totalDados = plTotalDeDados_(info);
+  var info = estruturaDaAba_(nomeAba);
+  var totalDados = quantidadeDeRegistros_(info);
   if (totalDados <= 0) return [];
 
   var primeira = 2;
@@ -389,14 +405,14 @@ function plLer_(nomeAba, opcoes) {
     .getRange(primeira, 1, quantas, info.cabecalhos.length)
     .getValues();
 
-  var iVisivel = plIndice_(info, '_Visivel');
+  var iVisivel = posicaoDaColuna_(info, '_Visivel');
   var saida = [];
   for (var i = 0; i < valores.length; i++) {
-    if (plLinhaVazia_(valores[i])) continue;
+    if (linhaEstaVazia_(valores[i])) continue;
     if (!opcoes.incluirOcultos && iVisivel >= 0) {
-      if (plNormalizar_(valores[i][iVisivel]) === 'nao') continue;
+      if (normalizarParaComparar_(valores[i][iVisivel]) === 'nao') continue;
     }
-    saida.push(plObjeto_(info, valores[i], primeira + i));
+    saida.push(montarRegistro_(info, valores[i], primeira + i));
   }
   return saida;
 }
@@ -406,10 +422,10 @@ function plLer_(nomeAba, opcoes) {
  * 200 mil linhas por 39 colunas, ler tudo são 7,8 milhões de células; ler
  * uma coluna são 200 mil.
  */
-function plLerColuna_(nomeAba, cabecalho) {
-  var info = plInfo_(nomeAba);
-  var i = plExigirIndice_(info, cabecalho);
-  var totalDados = plTotalDeDados_(info);
+function lerColunaInteira_(nomeAba, cabecalho) {
+  var info = estruturaDaAba_(nomeAba);
+  var i = exigirPosicaoDaColuna_(info, cabecalho);
+  var totalDados = quantidadeDeRegistros_(info);
   if (totalDados <= 0) return [];
   return info.aba.getRange(2, i + 1, totalDados, 1).getValues().map(function (l) {
     return l[0];
@@ -417,13 +433,13 @@ function plLerColuna_(nomeAba, cabecalho) {
 }
 
 /** Lê só as linhas indicadas (números de linha da planilha). */
-function plLerLinhas_(nomeAba, numerosDeLinha) {
-  var info = plInfo_(nomeAba);
+function lerLinhasEspecificas_(nomeAba, numerosDeLinha) {
+  var info = estruturaDaAba_(nomeAba);
   var saida = [];
   for (var i = 0; i < numerosDeLinha.length; i++) {
     var n = numerosDeLinha[i];
     var valores = info.aba.getRange(n, 1, 1, info.cabecalhos.length).getValues()[0];
-    saida.push(plObjeto_(info, valores, n));
+    saida.push(montarRegistro_(info, valores, n));
   }
   return saida;
 }
@@ -433,38 +449,42 @@ function plLerLinhas_(nomeAba, numerosDeLinha) {
  * Identificador é comparado só pelos dígitos, então "1-2345678901" e
  * "12345678901" acham a mesma linha.
  */
-function plBuscar_(nomeAba, cabecalho, valor, limite) {
-  var info = plInfo_(nomeAba);
-  var i = plExigirIndice_(info, cabecalho);
+function buscarRegistros_(nomeAba, cabecalho, valor, limite) {
+  var info = estruturaDaAba_(nomeAba);
+  var i = exigirPosicaoDaColuna_(info, cabecalho);
   var tipo = info.tipos[i];
-  var ehId = (tipo === RECC_TIPO.ID);
+  var ehIdentificador = (tipo === RECC_TIPO_DE_DADO.IDENTIFICADOR);
 
-  var alvo = ehId ? plCoagirId_(valor) : plNormalizar_(valor);
+  var alvo = ehIdentificador
+    ? converterParaIdentificador_(valor)
+    : normalizarParaComparar_(valor);
   if (alvo === '') return [];
 
-  var coluna = plLerColuna_(nomeAba, cabecalho);
+  var coluna = lerColunaInteira_(nomeAba, cabecalho);
   var linhas = [];
   for (var k = 0; k < coluna.length; k++) {
-    var atual = ehId ? plCoagirId_(coluna[k]) : plNormalizar_(coluna[k]);
+    var atual = ehIdentificador
+      ? converterParaIdentificador_(coluna[k])
+      : normalizarParaComparar_(coluna[k]);
     if (atual === alvo) {
       linhas.push(k + 2);
       if (limite && linhas.length >= limite) break;
     }
   }
-  return plLerLinhas_(nomeAba, linhas);
+  return lerLinhasEspecificas_(nomeAba, linhas);
 }
 
 /** Encontra a linha de um Id. Id repetido é erro, nunca "usa a primeira". */
-function plLinhaDoId_(info, id) {
-  var iId = plExigirIndice_(info, 'Id');
-  var totalDados = plTotalDeDados_(info);
+function linhaDoRegistro_(info, id) {
+  var iId = exigirPosicaoDaColuna_(info, 'Id');
+  var totalDados = quantidadeDeRegistros_(info);
   if (totalDados <= 0) return -1;
 
-  var alvo = plCoagirId_(id);
+  var alvo = converterParaIdentificador_(id);
   var coluna = info.aba.getRange(2, iId + 1, totalDados, 1).getValues();
   var achadas = [];
   for (var i = 0; i < coluna.length; i++) {
-    if (plCoagirId_(coluna[i][0]) === alvo) achadas.push(i + 2);
+    if (converterParaIdentificador_(coluna[i][0]) === alvo) achadas.push(i + 2);
   }
   if (achadas.length > 1) {
     throw new Error('O Id ' + alvo + ' aparece em ' + achadas.length +
@@ -484,20 +504,20 @@ function plLinhaDoId_(info, id) {
  * `dados` pode vir com as chaves escritas de qualquer jeito: a busca é
  * normalizada.
  */
-function plMontarLinha_(info, dados, valoresAtuais) {
+function montarLinhaParaGravar_(info, dados, valoresAtuais) {
   var porChave = {};
   Object.keys(dados).forEach(function (k) {
     if (k === '__linha') return;
-    porChave[plNormalizar_(k)] = dados[k];
+    porChave[normalizarParaComparar_(k)] = dados[k];
   });
 
   var linha = [];
   for (var i = 0; i < info.cabecalhos.length; i++) {
-    var chave = plNormalizar_(info.cabecalhos[i]);
+    var chave = normalizarParaComparar_(info.cabecalhos[i]);
     if (!info.cabecalhos[i]) {
       linha.push(valoresAtuais ? valoresAtuais[i] : '');
     } else if (Object.prototype.hasOwnProperty.call(porChave, chave)) {
-      linha.push(plCoagir_(porChave[chave], info.tipos[i]));
+      linha.push(converterParaOTipoDaColuna_(porChave[chave], info.tipos[i]));
     } else {
       linha.push(valoresAtuais ? valoresAtuais[i] : '');
     }
@@ -506,10 +526,10 @@ function plMontarLinha_(info, dados, valoresAtuais) {
 }
 
 /** Formata a faixa e só então grava. A ordem é a regra inteira. */
-function plGravarFaixa_(info, primeiraLinha, linhas) {
+function formatarEGravar_(info, primeiraLinha, linhas) {
   var faixa = info.aba.getRange(
     primeiraLinha, 1, linhas.length, info.cabecalhos.length);
-  var formatoDaLinha = plFormatosDaLinha_(info);
+  var formatoDaLinha = formatosDaLinha_(info);
   var formatos = linhas.map(function () { return formatoDaLinha; });
   faixa.setNumberFormats(formatos);
   faixa.setValues(linhas);
@@ -519,12 +539,12 @@ function plGravarFaixa_(info, primeiraLinha, linhas) {
  * Insere um registro. Gera o Id se ele não vier pronto, marca a linha como
  * visível e registra que ela nasceu no sistema.
  */
-function plInserir_(nomeAba, dados, contexto) {
-  return plInserirVarios_(nomeAba, [dados], contexto)[0];
+function inserirRegistro_(nomeAba, dados, contexto) {
+  return inserirVariosRegistros_(nomeAba, [dados], contexto)[0];
 }
 
 /** Insere vários registros numa gravação só. */
-function plInserirVarios_(nomeAba, lista, contexto) {
+function inserirVariosRegistros_(nomeAba, lista, contexto) {
   if (!lista || !lista.length) return [];
   contexto = contexto || {};
 
@@ -533,10 +553,10 @@ function plInserirVarios_(nomeAba, lista, contexto) {
     throw new Error('A planilha está ocupada com outra gravação. Tente de novo.');
   }
   try {
-    plLimparCache_(nomeAba);
-    var info = plInfo_(nomeAba, true);
-    var temControle = plIndice_(info, '_Visivel') >= 0;
-    var iId = plIndice_(info, 'Id');
+    esquecerEstruturaLida_(nomeAba);
+    var info = estruturaDaAba_(nomeAba, true);
+    var temControle = posicaoDaColuna_(info, '_Visivel') >= 0;
+    var iId = posicaoDaColuna_(info, 'Id');
 
     var linhas = [];
     var gravados = [];
@@ -545,9 +565,9 @@ function plInserirVarios_(nomeAba, lista, contexto) {
       Object.keys(lista[i]).forEach(function (k) { dados[k] = lista[i][k]; });
 
       if (iId >= 0) {
-        var idInformado = plCoagirId_(dados[info.cabecalhos[iId]]);
+        var idInformado = converterParaIdentificador_(dados[info.cabecalhos[iId]]);
         if (!idInformado) {
-          dados[info.cabecalhos[iId]] = seqProximoId_(nomeAba);
+          dados[info.cabecalhos[iId]] = proximoIdentificador_(nomeAba);
         }
       }
       if (temControle) {
@@ -556,14 +576,14 @@ function plInserirVarios_(nomeAba, lista, contexto) {
           dados._Origem = contexto.origem || RECC_ORIGEM_SISTEMA;
         }
       }
-      linhas.push(plMontarLinha_(info, dados, null));
+      linhas.push(montarLinhaParaGravar_(info, dados, null));
       gravados.push(dados);
     }
 
-    var primeira = plUltimaLinhaComDado_(info) + 1;
+    var primeira = ultimaLinhaComConteudo_(info) + 1;
     if (primeira < 2) primeira = 2;
-    plGarantirLinhas_(info.aba, primeira + linhas.length - 1);
-    plGravarFaixa_(info, primeira, linhas);
+    garantirLinhasNaGrade_(info.aba, primeira + linhas.length - 1);
+    formatarEGravar_(info, primeira, linhas);
 
     for (var j = 0; j < gravados.length; j++) gravados[j].__linha = primeira + j;
     return gravados;
@@ -577,23 +597,23 @@ function plInserirVarios_(nomeAba, lista, contexto) {
  * Lê a linha, mescla as alterações e regrava a linha inteira já formatada —
  * assim uma coluna nunca fica com o formato de outro tipo.
  */
-function plAtualizar_(nomeAba, id, alteracoes) {
+function atualizarRegistro_(nomeAba, id, alteracoes) {
   var trava = LockService.getScriptLock();
   if (!trava.tryLock(25000)) {
     throw new Error('A planilha está ocupada com outra gravação. Tente de novo.');
   }
   try {
-    plLimparCache_(nomeAba);
-    var info = plInfo_(nomeAba, true);
-    var linha = plLinhaDoId_(info, id);
+    esquecerEstruturaLida_(nomeAba);
+    var info = estruturaDaAba_(nomeAba, true);
+    var linha = linhaDoRegistro_(info, id);
     if (linha < 0) {
-      throw new Error('Registro ' + plCoagirId_(id) + ' não encontrado na aba "' +
+      throw new Error('Registro ' + converterParaIdentificador_(id) + ' não encontrado na aba "' +
         nomeAba + '".');
     }
     var atuais = info.aba.getRange(linha, 1, 1, info.cabecalhos.length).getValues()[0];
-    var nova = plMontarLinha_(info, alteracoes, atuais);
-    plGravarFaixa_(info, linha, [nova]);
-    return plObjeto_(info, nova, linha);
+    var nova = montarLinhaParaGravar_(info, alteracoes, atuais);
+    formatarEGravar_(info, linha, [nova]);
+    return montarRegistro_(info, nova, linha);
   } finally {
     trava.releaseLock();
   }
@@ -603,16 +623,16 @@ function plAtualizar_(nomeAba, id, alteracoes) {
  * Exclusão do RECC: some da tela, permanece na planilha.
  * Nenhuma linha de base operacional é apagada — nunca.
  */
-function plOcultar_(nomeAba, id, usuarioId) {
-  return plAtualizar_(nomeAba, id, {
+function ocultarRegistro_(nomeAba, id, usuarioId) {
+  return atualizarRegistro_(nomeAba, id, {
     _Visivel: RECC_VISIVEL_NAO,
     _ExcluidoEm: new Date(),
     _ExcluidoPor: usuarioId || ''
   });
 }
 
-function plReexibir_(nomeAba, id) {
-  return plAtualizar_(nomeAba, id, {
+function reexibirRegistro_(nomeAba, id) {
+  return atualizarRegistro_(nomeAba, id, {
     _Visivel: RECC_VISIVEL_SIM,
     _ExcluidoEm: '',
     _ExcluidoPor: ''
@@ -624,7 +644,7 @@ function plReexibir_(nomeAba, id) {
 // ============================================================================
 
 /** A aba precisa ter linha suficiente na grade para receber a gravação. */
-function plGarantirLinhas_(aba, ateLinha) {
+function garantirLinhasNaGrade_(aba, ateLinha) {
   var faltam = ateLinha - aba.getMaxRows();
   if (faltam > 0) aba.insertRowsAfter(aba.getMaxRows(), faltam);
 }
@@ -635,10 +655,10 @@ function plGarantirLinhas_(aba, ateLinha) {
  * Só é chamada por ação explícita do administrador — jamais durante um
  * salvamento comum. Recusa cabeçalho que já exista, mesmo escrito diferente.
  */
-function plAdicionarColuna_(nomeAba, cabecalho, tipo) {
+function adicionarColuna_(nomeAba, cabecalho, tipo) {
   var texto = String(cabecalho || '').trim();
   if (!texto) throw new Error('Cabeçalho vazio.');
-  if (!RECC_FORMATO[tipo]) throw new Error('Tipo de coluna desconhecido: ' + tipo);
+  if (!RECC_FORMATO_DA_CELULA[tipo]) throw new Error('Tipo de coluna desconhecido: ' + tipo);
 
   var nova;
   var trava = LockService.getScriptLock();
@@ -646,9 +666,9 @@ function plAdicionarColuna_(nomeAba, cabecalho, tipo) {
     throw new Error('A planilha está ocupada. Tente de novo.');
   }
   try {
-    plLimparCache_(nomeAba);
-    var info = plInfo_(nomeAba, true);
-    if (plIndice_(info, texto) >= 0) {
+    esquecerEstruturaLida_(nomeAba);
+    var info = estruturaDaAba_(nomeAba, true);
+    if (posicaoDaColuna_(info, texto) >= 0) {
       throw new Error('A aba "' + nomeAba + '" já tem uma coluna equivalente a "' +
         texto + '".');
     }
@@ -661,16 +681,16 @@ function plAdicionarColuna_(nomeAba, cabecalho, tipo) {
     aba.getRange(1, nova).setNumberFormat('@');
     aba.getRange(1, nova).setValue(texto).setFontWeight('bold');
     var altura = Math.max(aba.getMaxRows() - 1, 1);
-    aba.getRange(2, nova, altura, 1).setNumberFormat(RECC_FORMATO[tipo]);
-    plLimparCache_(nomeAba);
+    aba.getRange(2, nova, altura, 1).setNumberFormat(RECC_FORMATO_DA_CELULA[tipo]);
+    esquecerEstruturaLida_(nomeAba);
   } finally {
     trava.releaseLock();
   }
 
-  // Fora da trava, de propósito: plInserirVarios_ pega a dela, e trava dentro
+  // Fora da trava, de propósito: inserirVariosRegistros_ pega a dela, e trava dentro
   // de trava é como um deadlock nasce.
-  plRegistrarCampo_(nomeAba, texto, tipo, nova);
-  plLimparCache_();
+  registrarColunaEmCampos_(nomeAba, texto, tipo, nova);
+  esquecerEstruturaLida_();
 
   return { aba: nomeAba, cabecalho: texto, tipo: tipo, coluna: nova };
 }
@@ -682,25 +702,25 @@ function plAdicionarColuna_(nomeAba, cabecalho, tipo) {
  * próxima execução a coluna voltaria a ser lida como texto — e uma coluna de
  * moeda guardaria "R$ 2.500,00" em vez de 2500.
  */
-function plRegistrarCampo_(nomeAba, cabecalho, tipo, ordem) {
-  if (!plPlanilha_().getSheetByName('CAMPOS')) return null;
+function registrarColunaEmCampos_(nomeAba, cabecalho, tipo, ordem) {
+  if (!planilhaAtiva_().getSheetByName('CAMPOS')) return null;
 
   var mesaId = '';
-  if (plPlanilha_().getSheetByName('MESAS')) {
-    var mesa = plLer_('MESAS').filter(function (m) {
-      return plNormalizar_(m.Aba) === plNormalizar_(nomeAba);
+  if (planilhaAtiva_().getSheetByName('MESAS')) {
+    var mesa = lerRegistros_('MESAS').filter(function (m) {
+      return normalizarParaComparar_(m.Aba) === normalizarParaComparar_(nomeAba);
     })[0];
     if (mesa) mesaId = mesa.Id;
   }
 
-  return plInserir_('CAMPOS', {
+  return inserirRegistro_('CAMPOS', {
     MesaId: mesaId,
     Aba: nomeAba,
-    ChaveTecnica: plNormalizar_(cabecalho),
+    ChaveTecnica: normalizarParaComparar_(cabecalho),
     Cabecalho: cabecalho,
     Rotulo: cabecalho,
     Descricao: '',
-    TipoCampo: RECC_TIPO_CAMPO[tipo] || 'texto',
+    TipoCampo: RECC_DO_DADO_PARA_O_CAMPO[tipo] || 'texto',
     Secao: 'Geral',
     Mascara: '',
     Obrigatorio: false,
@@ -722,12 +742,12 @@ function plRegistrarCampo_(nomeAba, cabecalho, tipo, ordem) {
  * Não cria, não renomeia, não apaga e não reordena nada: devolve o laudo
  * para a tela de reconciliação decidir com o administrador.
  */
-function plConferirEstrutura_() {
-  var ss = plPlanilha_();
+function conferirEstrutura_() {
+  var planilha = planilhaAtiva_();
   var laudo = { ok: true, abas: [] };
 
-  reccNomesDasAbas_().forEach(function (nomeAba) {
-    var def = reccEsquemaDaAba_(nomeAba);
+  nomesDasAbasDoContrato_().forEach(function (nomeAba) {
+    var esquema = esquemaDaAba_(nomeAba);
     var item = {
       aba: nomeAba,
       existe: false,
@@ -736,24 +756,24 @@ function plConferirEstrutura_() {
       linhas: 0
     };
 
-    var aba = ss.getSheetByName(nomeAba);
+    var aba = planilha.getSheetByName(nomeAba);
     if (!aba) {
       laudo.ok = false;
       laudo.abas.push(item);
       return;
     }
     item.existe = true;
-    var info = plInfo_(nomeAba, true);
-    item.linhas = plTotalDeDados_(info);
+    var info = estruturaDaAba_(nomeAba, true);
+    item.linhas = quantidadeDeRegistros_(info);
     var presentes = {};
     info.cabecalhos.forEach(function (c) {
-      if (c) presentes[plNormalizar_(c)] = c;
+      if (c) presentes[normalizarParaComparar_(c)] = c;
     });
 
     var esperados = {};
-    def.colunas.forEach(function (col) {
-      esperados[plNormalizar_(col.c)] = col.c;
-      if (presentes[plNormalizar_(col.c)] === undefined) item.faltando.push(col.c);
+    esquema.colunas.forEach(function (coluna) {
+      esperados[normalizarParaComparar_(coluna.cabecalho)] = coluna.cabecalho;
+      if (presentes[normalizarParaComparar_(coluna.cabecalho)] === undefined) item.faltando.push(coluna.cabecalho);
     });
 
     Object.keys(presentes).forEach(function (chave) {

@@ -25,11 +25,11 @@
  * ============================================================================
  */
 
-const RECC_TETO_CELULAS = 10000000;
+const RECC_TETO_DE_CELULAS = 10000000;
 
 /** Ponto de entrada da instalação. */
 function instalarRECC() {
-  var ss = plPlanilha_();
+  var planilha = planilhaAtiva_();
   var email = Session.getActiveUser().getEmail();
   if (!email) {
     throw new Error('Não foi possível identificar o e-mail de quem está ' +
@@ -37,26 +37,26 @@ function instalarRECC() {
       'autorizando o script.');
   }
 
-  instAbortarSeTiverDado_(ss);
+  abortarSeAPlanilhaTiverDado_(planilha);
 
-  ss.setSpreadsheetTimeZone(RECC_FUSO);
-  plLimparCache_();
+  planilha.setSpreadsheetTimeZone(RECC_FUSO_HORARIO);
+  esquecerEstruturaLida_();
 
   var criadas = [];
-  reccNomesDasAbas_().forEach(function (nomeAba) {
-    criadas.push(instPrepararAba_(ss, reccEsquemaDaAba_(nomeAba)));
+  nomesDasAbasDoContrato_().forEach(function (nomeAba) {
+    criadas.push(criarAbaDoContrato_(planilha, esquemaDaAba_(nomeAba)));
   });
-  plLimparCache_();
+  esquecerEstruturaLida_();
 
-  var semente = instSemear_(email);
-  var orcamento = instOrcamentoDeCelulas_(ss);
+  var semente = semearDadosIniciais_(email);
+  var orcamento = orcamentoDeCelulas_(planilha);
 
   var laudo = [
     'RECC instalado.',
     '',
     'Abas criadas: ' + criadas.length,
     'Primeiro administrador: ' + email,
-    'Fuso da planilha: ' + ss.getSpreadsheetTimeZone(),
+    'Fuso da planilha: ' + planilha.getSpreadsheetTimeZone(),
     '',
     'Semente:',
     '  níveis de acesso ..... ' + semente.niveis,
@@ -67,7 +67,7 @@ function instalarRECC() {
     '  chaves de configuração ' + semente.config,
     '',
     'Orçamento de células: ' + orcamento.usadas.toLocaleString('pt-BR') +
-      ' de ' + RECC_TETO_CELULAS.toLocaleString('pt-BR') +
+      ' de ' + RECC_TETO_DE_CELULAS.toLocaleString('pt-BR') +
       ' (' + orcamento.percentual + '%)',
     '',
     'Próximo passo: abrir Configurações › Segurança e definir a senha de ADM.'
@@ -78,12 +78,12 @@ function instalarRECC() {
 }
 
 /** Instalação sobre planilha em uso não existe. */
-function instAbortarSeTiverDado_(ss) {
+function abortarSeAPlanilhaTiverDado_(planilha) {
   var comDado = [];
-  reccNomesDasAbas_().forEach(function (nomeAba) {
-    var aba = ss.getSheetByName(nomeAba);
+  nomesDasAbasDoContrato_().forEach(function (nomeAba) {
+    var aba = planilha.getSheetByName(nomeAba);
     if (!aba) return;
-    var preenchidas = instLinhasPreenchidas_(aba);
+    var preenchidas = quantasLinhasPreenchidas_(aba);
     if (preenchidas > 0) comDado.push(nomeAba + ' (' + preenchidas + ' linhas)');
   });
   if (comDado.length) {
@@ -100,7 +100,7 @@ function instAbortarSeTiverDado_(ss) {
  * anterior pode ter deixado a aba criada e formatada, e formato não é dado.
  * Aqui a pergunta é se existe algum valor abaixo do cabeçalho.
  */
-function instLinhasPreenchidas_(aba) {
+function quantasLinhasPreenchidas_(aba) {
   var ultima = aba.getLastRow();
   var largura = aba.getLastColumn();
   if (ultima < 2 || largura < 1) return 0;
@@ -124,12 +124,12 @@ function instLinhasPreenchidas_(aba) {
  * 26.000 células do orçamento, todas em branco. Multiplicado por 12 abas isso
  * já seria 312 mil células guardando nada.
  */
-function instPrepararAba_(ss, def) {
-  var aba = ss.getSheetByName(def.aba);
-  if (!aba) aba = ss.insertSheet(def.aba);
+function criarAbaDoContrato_(planilha, esquema) {
+  var aba = planilha.getSheetByName(esquema.aba);
+  if (!aba) aba = planilha.insertSheet(esquema.aba);
 
-  var largura = def.colunas.length;
-  var altura = def.reserva + 1;
+  var largura = esquema.colunas.length;
+  var altura = esquema.reserva + 1;
 
   if (aba.getMaxColumns() < largura) {
     aba.insertColumnsAfter(aba.getMaxColumns(), largura - aba.getMaxColumns());
@@ -142,7 +142,7 @@ function instPrepararAba_(ss, def) {
     aba.deleteRows(altura + 1, aba.getMaxRows() - altura);
   }
 
-  var cabecalhos = def.colunas.map(function (c) { return c.c; });
+  var cabecalhos = esquema.colunas.map(function (coluna) { return coluna.cabecalho; });
   var linha1 = aba.getRange(1, 1, 1, largura);
   linha1.setNumberFormat('@');
   linha1.setValues([cabecalhos]);
@@ -151,53 +151,53 @@ function instPrepararAba_(ss, def) {
 
   // Pré-formata a área de dados coluna a coluna. Assim até uma linha digitada
   // à mão, sem passar pelo sistema, já cai na célula com o formato certo.
-  for (var i = 0; i < def.colunas.length; i++) {
-    var formato = RECC_FORMATO[def.colunas[i].t] || '@';
-    aba.getRange(2, i + 1, def.reserva, 1).setNumberFormat(formato);
+  for (var i = 0; i < esquema.colunas.length; i++) {
+    var formato = RECC_FORMATO_DA_CELULA[esquema.colunas[i].tipo] || '@';
+    aba.getRange(2, i + 1, esquema.reserva, 1).setNumberFormat(formato);
   }
 
-  return def.aba;
+  return esquema.aba;
 }
 
 // ============================================================================
 // SEMENTE — padrão, nunca fixado. Tudo editável e excluível depois.
 // ============================================================================
 
-function instSemear_(emailDoInstalador) {
+function semearDadosIniciais_(emailDoInstalador) {
   var contagem = { niveis: 0, cargos: 0, catalogo: 0, mesas: 0, campos: 0, config: 0 };
 
   // --- níveis de acesso -----------------------------------------------------
   // O nível é a unidade de permissão: telas, campos, widgets, ações e escopo
   // saem DAQUI. O cargo é só o rótulo organizacional.
-  var niveis = plInserirVarios_('CATALOGO', [
-    instNivel_('Administrador', 1, 'TODOS', true,
+  var niveis = inserirVariosRegistros_('CATALOGO', [
+    novoNivelDeAcesso_('Administrador', 1, 'TODOS', true,
       ['dashboard', 'cadastrarCaso', 'minhaPerformance', 'buscarCaso',
        'tabelaCorretoras', 'painelAnalitico', 'configuracoes']),
-    instNivel_('Coordenação', 2, 'TODOS', false,
+    novoNivelDeAcesso_('Coordenação', 2, 'TODOS', false,
       ['dashboard', 'cadastrarCaso', 'minhaPerformance', 'buscarCaso',
        'tabelaCorretoras', 'painelAnalitico']),
-    instNivel_('Operação', 3, 'PROPRIOS', false,
+    novoNivelDeAcesso_('Operação', 3, 'PROPRIOS', false,
       ['dashboard', 'cadastrarCaso', 'minhaPerformance', 'buscarCaso',
        'tabelaCorretoras']),
-    instNivel_('Consulta', 4, 'TODOS', false,
+    novoNivelDeAcesso_('Consulta', 4, 'TODOS', false,
       ['dashboard', 'buscarCaso', 'painelAnalitico'])
   ]);
   contagem.niveis = niveis.length;
   var idAdministrador = niveis[0]['Id'];
 
   // --- cargos ---------------------------------------------------------------
-  var cargos = plInserirVarios_('CATALOGO', [
-    instItem_('CARGO', '', 'Analista RET', 1),
-    instItem_('CARGO', '', 'Analista Mesa Diamante', 2),
-    instItem_('CARGO', '', 'ADM', 3),
-    instItem_('CARGO', '', 'Coordenação', 4),
-    instItem_('CARGO', '', 'Analista Sênior', 5)
+  var cargos = inserirVariosRegistros_('CATALOGO', [
+    novoItemDeCatalogo_('CARGO', '', 'Analista RET', 1),
+    novoItemDeCatalogo_('CARGO', '', 'Analista Mesa Diamante', 2),
+    novoItemDeCatalogo_('CARGO', '', 'ADM', 3),
+    novoItemDeCatalogo_('CARGO', '', 'Coordenação', 4),
+    novoItemDeCatalogo_('CARGO', '', 'Analista Sênior', 5)
   ]);
   contagem.cargos = cargos.length;
   var idCargoAdm = cargos[2]['Id'];
 
   // --- mesas ----------------------------------------------------------------
-  var mesas = plInserirVarios_('MESAS', [
+  var mesas = inserirVariosRegistros_('MESAS', [
     {
       Nome: 'RET Vida',
       Descricao: 'Relacionamento estratégico de clientes',
@@ -223,44 +223,44 @@ function instSemear_(emailDoInstalador) {
   var itens = [];
   ['Em tratativa', 'Aguardando segurado', 'Não tratado', 'Retorno agendado',
    'Concluído'].forEach(function (nome, i) {
-    itens.push(instItem_('STATUS', idRet, nome, i + 1));
+    itens.push(novoItemDeCatalogo_('STATUS', idRet, nome, i + 1));
   });
   ['Transmissão pendente', 'Pendente', '1º contato realizado',
    '2º contato realizado', 'Não trabalhado', 'Concluído'].forEach(function (nome, i) {
-    itens.push(instItem_('STATUS', idMesa, nome, i + 1));
+    itens.push(novoItemDeCatalogo_('STATUS', idMesa, nome, i + 1));
   });
   ['Diamante', 'Demais corretoras', 'Não encontrado'].forEach(function (nome, i) {
-    itens.push(instItem_('SEGMENTO', '', nome, i + 1));
+    itens.push(novoItemDeCatalogo_('SEGMENTO', '', nome, i + 1));
   });
-  contagem.catalogo = plInserirVarios_('CATALOGO', itens).length +
+  contagem.catalogo = inserirVariosRegistros_('CATALOGO', itens).length +
     contagem.niveis + contagem.cargos;
 
   // --- campos do formulário -------------------------------------------------
   // Gerados a partir do contrato: é isto que faz CAMPOS ser o mapa
   // campo ↔ coluna, e não uma segunda verdade que diverge da planilha.
   var campos = []
-    .concat(instCamposDaBase_('BASE_RET', idRet))
-    .concat(instCamposDaBase_('BASE_MESA', idMesa));
-  contagem.campos = plInserirVarios_('CAMPOS', campos).length;
+    .concat(camposDoFormularioDaBase_('BASE_RET', idRet))
+    .concat(camposDoFormularioDaBase_('BASE_MESA', idMesa));
+  contagem.campos = inserirVariosRegistros_('CAMPOS', campos).length;
 
   // --- configuração ---------------------------------------------------------
-  var config = plInserirVarios_('CONFIG', [
-    instConfig_('IDENTIDADE.NOME', 'RECC',
+  var config = inserirVariosRegistros_('CONFIG', [
+    novaConfiguracao_('IDENTIDADE.NOME', 'RECC',
       'Nome exibido na barra superior. Editável.'),
-    instConfig_('IDENTIDADE.NOME_LONGO',
+    novaConfiguracao_('IDENTIDADE.NOME_LONGO',
       'Relacionamento Estratégico de Clientes e Corretores',
       'Subtítulo da barra superior.'),
-    instConfig_('IDENTIDADE.OPERACAO', 'Porto Seguro',
+    novaConfiguracao_('IDENTIDADE.OPERACAO', 'Porto Seguro',
       'Operação atendida por esta instalação.'),
-    instConfig_('IDENTIDADE.LOGO_URL', '',
+    novaConfiguracao_('IDENTIDADE.LOGO_URL', '',
       'URL da logo exibida na tela de usuário não cadastrado.'),
-    instConfig_('IDENTIDADE.COR_PRIMARIA', '#0F56D6',
+    novaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0F56D6',
       'Cor do tema Padrão.'),
-    instConfig_('OPERACAO.JANELA_DIAS', '30',
+    novaConfiguracao_('OPERACAO.JANELA_DIAS', '30',
       'Quantos dias a fila de trabalho carrega. Acima disso, use Buscar Caso.'),
-    instConfig_('OPERACAO.TEMA_PADRAO', 'padrao',
+    novaConfiguracao_('OPERACAO.TEMA_PADRAO', 'padrao',
       'padrao | rosa | dark | brasil'),
-    instConfig_('MENU.TITULOS', JSON.stringify({
+    novaConfiguracao_('MENU.TITULOS', JSON.stringify({
       dashboard: 'Dashboard',
       cadastrarCaso: 'Cadastrar Caso',
       minhaPerformance: 'Minha Performance',
@@ -273,7 +273,7 @@ function instSemear_(emailDoInstalador) {
   contagem.config = config.length;
 
   // --- primeiro administrador ----------------------------------------------
-  plInserirVarios_('USUARIOS', [{
+  inserirVariosRegistros_('USUARIOS', [{
     Nome: emailDoInstalador.split('@')[0],
     Email: emailDoInstalador,
     'Canal que atende': '',
@@ -288,7 +288,7 @@ function instSemear_(emailDoInstalador) {
   return contagem;
 }
 
-function instNivel_(nome, ordem, escopo, tudoLiberado, telas) {
+function novoNivelDeAcesso_(nome, ordem, escopo, tudoLiberado, telas) {
   return {
     MesaId: '',
     Tipo: 'NIVEL_ACESSO',
@@ -311,7 +311,7 @@ function instNivel_(nome, ordem, escopo, tudoLiberado, telas) {
   };
 }
 
-function instItem_(tipo, mesaId, nome, ordem) {
+function novoItemDeCatalogo_(tipo, mesaId, nome, ordem) {
   return {
     MesaId: mesaId,
     Tipo: tipo,
@@ -326,7 +326,7 @@ function instItem_(tipo, mesaId, nome, ordem) {
   };
 }
 
-function instConfig_(chave, valor, descricao) {
+function novaConfiguracao_(chave, valor, descricao) {
   return {
     Chave: chave,
     Valor: valor,
@@ -343,15 +343,15 @@ function instConfig_(chave, valor, descricao) {
  * sistema, não do formulário. A coluna Id entra desativada — precisa estar no
  * mapa, mas ninguém digita um Id.
  */
-function instCamposDaBase_(nomeAba, mesaId) {
-  var def = reccEsquemaDaAba_(nomeAba);
+function camposDoFormularioDaBase_(nomeAba, mesaId) {
+  var esquema = esquemaDaAba_(nomeAba);
   var campos = [];
   var ordem = 0;
 
-  def.colunas.forEach(function (col) {
-    if (col.c.charAt(0) === '_') return;
+  esquema.colunas.forEach(function (coluna) {
+    if (coluna.cabecalho.charAt(0) === '_') return;
 
-    var chave = plNormalizar_(col.c);
+    var chave = normalizarParaComparar_(coluna.cabecalho);
     var ehId = (chave === 'id');
     var ehCpf = chave.indexOf('cpf') >= 0 || chave.indexOf('documento') >= 0;
     ordem++;
@@ -360,14 +360,14 @@ function instCamposDaBase_(nomeAba, mesaId) {
       MesaId: mesaId,
       Aba: nomeAba,
       ChaveTecnica: chave,
-      Cabecalho: col.c,
-      Rotulo: col.c,
+      Cabecalho: coluna.cabecalho,
+      Rotulo: coluna.cabecalho,
       Descricao: '',
-      TipoCampo: RECC_TIPO_CAMPO[col.t] || 'texto',
+      TipoCampo: RECC_DO_DADO_PARA_O_CAMPO[coluna.tipo] || 'texto',
       Secao: 'Geral',
       Mascara: ehCpf ? '000.000.000-00' : '',
       Obrigatorio: false,
-      Protegido: col.p === true,
+      Protegido: coluna.protegido === true,
       Ativo: !ehId,
       Ordem: ordem,
       VisivelPara: '',
@@ -388,7 +388,7 @@ function instCamposDaBase_(nomeAba, mesaId) {
  * Nenhum teste rodado fora do Apps Script pega uma aba que ficou para trás.
  */
 function verificarEstruturaRECC() {
-  var laudo = plConferirEstrutura_();
+  var laudo = conferirEstrutura_();
   var linhas = [laudo.ok ? 'ESTRUTURA OK' : 'ESTRUTURA INCOMPLETA', ''];
 
   laudo.abas.forEach(function (item) {
@@ -407,10 +407,10 @@ function verificarEstruturaRECC() {
     }
   });
 
-  var orcamento = instOrcamentoDeCelulas_(plPlanilha_());
+  var orcamento = orcamentoDeCelulas_(planilhaAtiva_());
   linhas.push('');
   linhas.push('Células: ' + orcamento.usadas.toLocaleString('pt-BR') + ' de ' +
-    RECC_TETO_CELULAS.toLocaleString('pt-BR') + ' (' + orcamento.percentual + '%)');
+    RECC_TETO_DE_CELULAS.toLocaleString('pt-BR') + ' (' + orcamento.percentual + '%)');
 
   var texto = linhas.join('\n');
   Logger.log(texto);
@@ -421,13 +421,13 @@ function verificarEstruturaRECC() {
  * Quanto do teto de 10 milhões de células a planilha já ocupa.
  * Conta a GRADE, não o preenchimento: célula vazia também pesa.
  */
-function instOrcamentoDeCelulas_(ss) {
+function orcamentoDeCelulas_(planilha) {
   var usadas = 0;
-  ss.getSheets().forEach(function (aba) {
+  planilha.getSheets().forEach(function (aba) {
     usadas += aba.getMaxRows() * aba.getMaxColumns();
   });
   return {
     usadas: usadas,
-    percentual: Math.round((usadas / RECC_TETO_CELULAS) * 1000) / 10
+    percentual: Math.round((usadas / RECC_TETO_DE_CELULAS) * 1000) / 10
   };
 }

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * RECC — sandbox.js · um Google Planilhas falso que MENTE menos
+ * RECC — simulador.js · um Google Planilhas falso que MENTE menos
  * ============================================================================
  * O simulador de testes do sistema anterior gravava string como string. Por
  * isso nenhum teste enxergou o bug que corrompeu 4.328 Ids em produção: no
@@ -15,10 +15,10 @@
  * ============================================================================
  */
 
-const NUMERICO = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+const PARECE_NUMERO = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 /** A conversão que o Sheets faz ao receber um valor numa célula. */
-function coagirComoSheets(valor, formato) {
+function converterComoOPlanilhas(valor, formato) {
   if (valor === null || valor === undefined) return '';
   if (formato === '@') {
     if (valor instanceof Date) return valor;
@@ -27,14 +27,14 @@ function coagirComoSheets(valor, formato) {
   if (typeof valor !== 'string') return valor;
   const limpo = valor.trim();
   if (limpo === '') return '';
-  if (NUMERICO.test(limpo)) {
+  if (PARECE_NUMERO.test(limpo)) {
     const n = Number(limpo);
     if (Number.isFinite(n)) return n;
   }
   return valor;
 }
 
-class Range {
+class Faixa {
   constructor(aba, linha, coluna, nLinhas, nColunas) {
     this.aba = aba;
     this.linha = linha;
@@ -61,7 +61,7 @@ class Range {
       for (let j = 0; j < this.nColunas; j++) {
         const l = this.linha - 1 + i;
         const c = this.coluna - 1 + j;
-        this.aba.valores[l][c] = coagirComoSheets(matriz[i][j], this.aba.formatos[l][c]);
+        this.aba.valores[l][c] = converterComoOPlanilhas(matriz[i][j], this.aba.formatos[l][c]);
       }
     }
     return this;
@@ -101,10 +101,10 @@ class Range {
     for (let l = this.linha - 1; l >= 0; l--) {
       const v = this.aba.valores[l][c];
       if (v !== '' && v !== null && v !== undefined) {
-        return new Range(this.aba, l + 1, this.coluna, 1, 1);
+        return new Faixa(this.aba, l + 1, this.coluna, 1, 1);
       }
     }
-    return new Range(this.aba, 1, this.coluna, 1, 1);
+    return new Faixa(this.aba, 1, this.coluna, 1, 1);
   }
 }
 
@@ -124,7 +124,7 @@ class Aba {
         ' por ' + nl + 'x' + nc + ') — grade ' + this.getMaxRows() + 'x' +
         this.getMaxColumns());
     }
-    return new Range(this, l, c, nl, nc);
+    return new Faixa(this, l, c, nl, nc);
   }
   getLastRow() {
     for (let l = this.valores.length - 1; l >= 0; l--) {
@@ -187,7 +187,7 @@ class Planilha {
 }
 
 /** Monta o ambiente global falso que os arquivos .gs enxergam. */
-function criarAmbiente(email = 'analista@exemplo.com') {
+function criarAmbienteFalso(email = 'analista@exemplo.com') {
   const planilha = new Planilha();
   const propriedades = new Map();
   const registros = [];
@@ -225,4 +225,4 @@ function criarAmbiente(email = 'analista@exemplo.com') {
   };
 }
 
-module.exports = { criarAmbiente, coagirComoSheets };
+module.exports = { criarAmbienteFalso, converterComoOPlanilhas };
