@@ -1,6 +1,6 @@
 # RECC — Arquitetura do sistema (documento de desenho)
 
-> **Estado: desenho. Nenhuma linha de código foi escrita ainda.**
+> **Estado: Etapa 1 (Fundação) construída e testada. Etapas 2 a 12 em desenho.**
 > Este documento existe para fechar o modelo de dados no Google Planilhas e o
 > funcionamento do Apps Script **antes** da implementação. Ele é o contrato:
 > o que estiver aqui é o que será construído.
@@ -13,8 +13,22 @@
 
 ## 1. O que é
 
-**RECC — Relacionamento Estratégico de Clientes e Corretores**, operado por
-Porto Seguro, construído sobre Google Planilhas + Google Apps Script.
+**PGO** é a plataforma — pensada para servir a diferentes operações de
+atendimento. **RECC — Relacionamento Estratégico de Clientes e Corretores** é a
+operação que está sendo montada agora, em Porto Seguro, sobre Google Planilhas +
+Google Apps Script.
+
+O nome que aparece na barra superior é **RECC**, e é **editável**: mora em
+`CONFIG`, junto com subtítulo, logo e cor primária. Usar a mesma plataforma em
+outra operação é trocar essas linhas, não é mexer em código.
+
+| Chave em `CONFIG` | Valor inicial |
+|---|---|
+| `IDENTIDADE.NOME` | `RECC` |
+| `IDENTIDADE.NOME_LONGO` | `Relacionamento Estratégico de Clientes e Corretores` |
+| `IDENTIDADE.OPERACAO` | `Porto Seguro` |
+| `IDENTIDADE.LOGO_URL` | (definido em Configurações) |
+| `IDENTIDADE.COR_PRIMARIA` | azul Porto Seguro |
 
 O sistema atende **duas mesas de trabalho** hoje, e precisa aceitar uma terceira
 sem tocar em código:
@@ -208,6 +222,12 @@ mentir quando alguém edita a área responsável direto na planilha.
 | `PRODUTOS` | `Id` · `Produto` · `CodigoProduto` |
 | `SUSEP_BLOQUEADAS` | `Id` · `SUSEP` · `NomeCorretora` · `CpfReincidente` · `Motivo` · `BloqueadaEm` |
 
+**Código e descrição nunca dividem a mesma célula.** `PRODUTOS` tem `Produto` e
+`CodigoProduto` em colunas separadas, e o mesmo vale para proposta, sucursal,
+ramo e apólice — é por isso que `CATALOGO` ganhou a coluna `Codigo`: qualquer
+item de catálogo carrega o código ao lado do nome, e o Power BI cruza pelo
+código sem depender do texto, que muda.
+
 **`USUARIOS` precisou crescer** além de `id · nome · canal que atende`: o acesso
 é pelo e-mail autenticado do Google conferido contra esta aba, e o nível de
 acesso decide o que a pessoa pode fazer. Sem `Email`, `NivelAcessoId` e `Ativo`
@@ -225,8 +245,8 @@ formulário (no momento em que a SUSEP é digitada) e no dashboard.
 | Aba | Colunas | Para quê |
 |---|---|---|
 | `MESAS` | `Id` · `Nome` · `Descricao` · `Aba` · `Icone` · `Ordem` · `Ativo` | Registro das mesas. Mesa nova = linha nova, sem código |
-| `CAMPOS` | `Id` · `MesaId` · `ChaveTecnica` · `Cabecalho` · `Rotulo` · `Descricao` · `TipoCampo` · `Secao` · `Mascara` · `Obrigatorio` · `Protegido` · `Ativo` · `Ordem` · `VisivelPara` · `ValorPadrao` · `Configuracao` | O catálogo do formulário e o mapa coluna↔campo |
-| `CATALOGO` | `Id` · `MesaId` · `Tipo` · `Nome` · `Rotulo` · `PaiId` · `Cor` · `Ordem` · `Ativo` · `Configuracao` | Status, motivos, origens, tipos, ramos, áreas responsáveis, cargos, níveis de acesso, segmentos |
+| `CAMPOS` | `Id` · `MesaId` · `Aba` · `ChaveTecnica` · `Cabecalho` · `Rotulo` · `Descricao` · `TipoCampo` · `Secao` · `Mascara` · `Obrigatorio` · `Protegido` · `Ativo` · `Ordem` · `VisivelPara` · `ValorPadrao` · `Configuracao` | O catálogo do formulário e o mapa coluna↔campo |
+| `CATALOGO` | `Id` · `MesaId` · `Tipo` · `Codigo` · `Nome` · `Rotulo` · `PaiId` · `Cor` · `Ordem` · `Ativo` · `Configuracao` | Status, motivos, origens, tipos, ramos, áreas responsáveis, cargos, níveis de acesso, segmentos |
 | `PAINEIS` | `Id` · `Tela` · `MesaId` · `Titulo` · `TipoWidget` · `CampoDimensao` · `CampoMedida` · `Agregacao` · `Limite` · `Filtro` · `Ordem` · `Largura` · `VisivelPara` · `Ativo` | Os cards e gráficos de cada tela, configuráveis |
 | `CONFIG` | `Id` · `Chave` · `Valor` · `Descricao` · `AtualizadoPor` · `Data` | Parâmetros gerais (nome do sistema, janela de dias, metas…) |
 | `AUDITORIA` | `Id` · `DataHora` · `UsuarioId` · `Acao` · `Entidade` · `RegistroId` · `Detalhe` | Trilha das ações relevantes. Sem dado pessoal |
@@ -398,6 +418,29 @@ Cada widget em `PAINEIS` é: **fonte** (mesa) + **dimensão** (agrupa por) +
   `Analista RET` · `Analista Mesa Diamante` · `ADM` · `Coordenação` ·
   `Analista Sênior`.
 - **ADM libera tudo para si e define, item a item, o que cada nível pode.**
+
+### O nível de acesso é a unidade de tudo
+
+Um nível de acesso não é uma etiqueta: é **o pacote inteiro do que a pessoa vê e
+faz**. Quatro coisas saem dele, e nenhuma sai do cargo:
+
+| O que o nível decide | Granularidade |
+|---|---|
+| **Quais telas** aparecem no menu | Tela a tela |
+| **Quais campos** do formulário a pessoa vê | Campo a campo: `oculto` · `só leitura` · `edição` |
+| **Quais cards e gráficos** aparecem em cada painel | Widget a widget |
+| **Quais ações** pode executar | Criar · editar · ocultar · exportar · configurar |
+| **Que dados alcança** (escopo) | `PRÓPRIOS` · `EQUIPE` · `MESA` · `TODOS` |
+
+Por isso `CAMPOS.VisivelPara` e `PAINEIS.VisivelPara` guardam **níveis de
+acesso**, nunca cargos. Duas pessoas com o mesmo cargo podem enxergar telas
+diferentes; duas pessoas com cargos diferentes podem enxergar a mesma coisa. O
+cargo é só o rótulo organizacional que aparece embaixo do nome na barra
+superior.
+
+> A tela de Configurações do mockup mostra a caixa "Visibilidade por perfil" —
+> aquela lista é de **níveis de acesso**, e é o mesmo controle usado para telas,
+> campos e widgets.
 - **Ação de alto impacto exige senha de ADM**: criar/remover coluna, criar ou
   apagar mesa, mexer em níveis de acesso, gerar aba de análise sobre uma
   existente, normalizar base, ocultar dados em massa.
@@ -412,50 +455,110 @@ Cada widget em `PAINEIS` é: **fonte** (mesa) + **dimensão** (agrupa por) +
 
 Cada etapa entrega algo que funciona sozinho e pode ser conferido na planilha.
 
-| # | Etapa | Entrega |
-|---|---|---|
-| 1 | Fundação | `Planilha.gs`, `Sequencia.gs`, criação das 12 abas, ID de 10 casas, formato texto |
-| 2 | Acesso | Login pelo e-mail, `USUARIOS`, cargos, níveis, tela de não cadastrado |
-| 3 | Casca | Menu lateral, barra superior, 4 temas, roteador |
-| 4 | Cadastrar Caso | Formulário dirigido por `CAMPOS`, máscaras, validação, selo de SUSEP |
-| 5 | Dashboard | Seletor de mesa, cards, fila de trabalho com filtros |
-| 6 | Configurações | Campos, catálogo, usuários, níveis, senha de ADM, reconciliação de colunas |
-| 7 | Buscar Caso | Base própria + planilha legada |
-| 8 | Painel Analítico | Widgets configuráveis, exportação |
-| 9 | Minha Performance | Indicadores individuais, meta, ranking |
-| 10 | Tabela de Corretoras | `CANAIS` + segmento + SUSEP bloqueada |
-| 11 | Abas de análise | Gerador `ANALISE_*` |
-| 12 | Diagnóstico | Verificação de build e de contrato |
+| # | Etapa | Entrega | Estado |
+|---|---|---|---|
+| 1 | Fundação | `Esquema.gs`, `Planilha.gs`, `Sequencia.gs`, `Instalador.gs`, as 12 abas, ID de 10 casas, formato texto | **pronta** |
+| 2 | Acesso | Login pelo e-mail, `USUARIOS`, cargos, níveis, tela de não cadastrado | |
+| 3 | Casca | Menu lateral, barra superior, 4 temas, roteador | |
+| 4 | Cadastrar Caso | Formulário dirigido por `CAMPOS`, máscaras, validação, selo de SUSEP | |
+| 5 | Dashboard | Seletor de mesa, cards, fila de trabalho com filtros | |
+| 6 | Configurações | Campos, catálogo, usuários, níveis, senha de ADM, reconciliação de colunas | |
+| 7 | Buscar Caso | Base própria + planilha legada | |
+| 8 | Painel Analítico | Widgets configuráveis, exportação | |
+| 9 | Minha Performance | Indicadores individuais, meta, ranking | |
+| 10 | Tabela de Corretoras | `CANAIS` + segmento + SUSEP bloqueada | |
+| 11 | Abas de análise | Gerador `ANALISE_*` | |
+| 12 | Diagnóstico | Verificação de build e de contrato | |
 
 ---
 
-## 8. Quando o Google Planilhas deixa de servir
+## 8. O teto do Google Planilhas
 
-Vale saber o teto desde já, porque ele chega por volume de linha:
+**O limite do Google Planilhas não é em linhas. É em células: 10 milhões por
+planilha**, somando todas as abas. Quantas linhas cabem depende de quantas
+colunas a aba tem:
 
-- Uma planilha aceita **10 milhões de células**. `BASE_RET` tem ~40 colunas →
-  cabem ~250 mil casos, contando todas as abas juntas.
-- Perto de **50 mil linhas** por base, leitura e agregação começam a pesar; é aí
-  que o cache deixa de ser conforto e vira necessidade.
-- Passando disso, o caminho é a base virar BigQuery (ou equivalente) e o
-  Planilhas continuar só como tela de entrada.
+```
+linhas disponíveis  =  10.000.000  ÷  colunas da aba
+```
 
-O desenho já favorece essa saída: uma linha por caso, colunas tipadas,
-identificador em texto, `_Visivel` para exclusão lógica. É exatamente o formato
-que um banco de verdade ingere sem tratamento.
+Isso explica o teto de 1 milhão de linhas que a base antiga bateu: uma aba de
+**10 colunas** chega a 1 milhão de linhas e fecha exatamente os 10 milhões de
+células. Não foi um limite de linha — foi o de célula, expresso em linhas
+naquele número de colunas.
+
+### O orçamento desta planilha
+
+| Aba | Colunas | Custo por linha |
+|---|---|---|
+| `BASE_RET` | 39 | 39 células |
+| `BASE_MESA` | 24 | 24 células |
+| As 10 abas de sistema e cadastro | 3 a 16 | poucos milhares no total |
+
+Com as duas bases crescendo juntas, cada caso novo custa ~63 células, então o
+teto fica em torno de **150 mil casos em cada base**, ao mesmo tempo. Se só uma
+crescer, `BASE_RET` sozinha vai a ~250 mil linhas.
+
+**Onde vocês estão hoje:** 30 mil linhas somadas gastam por volta de 900 mil
+células — **9% do limite**. Sobra muito espaço.
+
+### A pegadinha: célula vazia também conta
+
+Uma aba nova no Sheets nasce com 1.000 linhas × 26 colunas = **26.000 células
+ocupadas do orçamento, todas vazias**. Uma aba esquecida com 1 milhão de linhas
+em branco come 10% do teto sem guardar nada.
+
+Por isso o instalador **corta cada aba** para exatamente as colunas do contrato
+e uma reserva modesta de linhas, e as bases crescem conforme entram os dados.
+(Limite adicional que raramente aparece: 18.278 colunas por aba — coluna `ZZZ`.)
+
+### O teto que chega antes: desempenho
+
+Muito antes das 150 mil linhas, por volta de **50 mil por base**, leitura e
+agregação começam a pesar — é aí que o cache deixa de ser conforto e vira
+necessidade. O desenho já conta com isso: fila lê só a janela recente, base é
+append-only, agregação vive em cache.
+
+### E depois disso
+
+O caminho é a base virar BigQuery (ou equivalente) e o Planilhas continuar só
+como tela de entrada. O desenho já favorece essa saída: uma linha por caso,
+colunas tipadas, identificador em texto e `_Visivel` para exclusão lógica. É
+exatamente o formato que um banco de verdade ingere sem tratamento.
 
 ---
 
-## 9. Decisões pendentes (precisam do PO)
+## 9. Decisões fechadas com o PO
 
-| # | Pergunta | Por que trava |
+| # | Pergunta | Resposta |
 |---|---|---|
-| 1 | **Nome do produto: RECC ou PGO?** O mockup traz `RECC` no menu e `PGO` no rodapé | Aparece em tela, no título e no nome dos arquivos |
-| 2 | **Perfis do mockup × cargos do texto.** A tela de Configurações mostra Administrador, Corretor, Gerente, Parceiro, Analista, Visualizador; o texto define outros 5 cargos | Muda a semente de `CATALOGO` |
-| 3 | **`PRODUTOS`: "código e produto" são duas colunas ou uma?** Assumi `Produto` + `CodigoProduto` | Muda o cabeçalho da aba |
-| 4 | **Datas e valores nativos, confirmado?** Data como data e prêmio como número (a regra "sem pontuação" vale para identificador) | Muda o tipo de 8 colunas |
-| 5 | **Uma planilha só, ou bases separadas do sistema?** Recomendo uma só agora | Muda o instalador |
-| 6 | **Logo Porto Seguro** para a tela de não cadastrado | Preciso do arquivo; não vou versionar marca de terceiro sem sua autorização |
+| 1 | Nome do produto | **PGO é a plataforma; RECC é esta operação.** A barra superior mostra `RECC`, e o nome é editável em `CONFIG` |
+| 2 | Perfis do mockup × cargos | Valem **os 5 cargos do texto**. Acesso não vem do cargo: o nível decide telas, campos, widgets e ações, item a item |
+| 3 | Código e descrição | **Duas colunas, sempre.** Vale para produto, proposta, sucursal, ramo e apólice. `CATALOGO` ganhou a coluna `Codigo` |
+| 4 | Tipos de dado | Confirmado: **data, dinheiro, texto e número** convertidos para leitura direta no Power BI |
+| 5 | Uma planilha ou duas | **Uma planilha, abas diferentes.** O teto está na seção 8 — e não é o que parecia |
+| 6 | Logo | Vai para `CONFIG` como **URL ou upload**, nunca para o repositório: assim a marca troca junto com o nome quando a plataforma servir outra operação |
+
+---
+
+## 9b. Como rodar os testes
+
+A suíte **fica no repositório**, em `RECC/Testes/`. No sistema anterior ela
+morava numa pasta temporária e se perdia quando o `%TEMP%` era limpo.
+
+```bash
+node RECC/Testes/rodar.js
+```
+
+São 31 testes sobre a Etapa 1. O critério é **5 execuções seguidas sem falha** —
+rodar uma vez não detecta teste instável.
+
+O simulador (`RECC/Testes/sandbox.js`) **converte valores igual ao Google
+Planilhas**: `'00000010'` numa célula de formato Geral vira o número `10`, e
+`'000000E1'` vira `0`. É o que dá valor ao teste — o simulador do sistema
+anterior gravava texto como texto, e por isso nenhum teste enxergou o bug que
+corrompeu 4.328 Ids em produção. Há um teste dedicado só a provar que o
+simulador realmente corrompe quando o formato não é `@`.
 
 ---
 
