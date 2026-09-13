@@ -64,30 +64,6 @@ var Servidor = (function () {
   return { chamar: chamar };
 })();
 
-/* --------------------------------------------------------------- período */
-var Periodo = (function () {
-  var MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-    'jul', 'ago', 'set', 'out', 'nov', 'dez'];
-
-  var hoje = new Date();
-  var inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  var fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
-
-  function comZero(numero) { return (numero < 10 ? '0' : '') + numero; }
-
-  function escrever(data) {
-    return comZero(data.getDate()) + '/' + comZero(data.getMonth() + 1)
-      + '/' + data.getFullYear();
-  }
-
-  return {
-    inicio: function () { return inicio; },
-    fim: function () { return fim; },
-    rotulo: function () { return escrever(inicio) + ' – ' + escrever(fim); },
-    mesPorExtenso: function () { return MESES[hoje.getMonth()] + '/' + hoje.getFullYear(); }
-  };
-})();
-
 /* ----------------------------------------------------------------- rotas */
 var Rotas = (function () {
 
@@ -96,13 +72,13 @@ var Rotas = (function () {
    * vai ter ali e em que etapa. Tela em branco faria todo mundo achar que
    * quebrou.
    */
-  function emConstrucao(titulo, etapa, itens) {
+  function emConstrucao(etapa, itens) {
     var lista = itens.map(function (item) {
       return '<li>' + Moldura.escapar(item) + '</li>';
     }).join('');
+    // Sem repetir o nome da tela: quem nomeia é o cabeçalho, logo acima.
     return '<div class="cartao emconstrucao">'
       + '<span class="fita">chega na etapa ' + etapa + '</span>'
-      + '<h2>' + Moldura.escapar(titulo) + '</h2>'
       + '<p>A casca já está pronta: menu, barra superior, temas e a troca de '
       + 'telas funcionam. O que ainda não existe é o miolo desta tela.</p>'
       + '<ul>' + lista + '</ul>'
@@ -114,7 +90,7 @@ var Rotas = (function () {
       titulo: 'Dashboard',
       subtitulo: 'Visão do dia: indicadores e a fila de trabalho da sua equipe.',
       montar: function () {
-        return emConstrucao('Dashboard', 5, [
+        return emConstrucao(5, [
           'Seletor de mesa: RET Vida e Mesa Diamante',
           'Cards de total, transmissões pendentes, pendentes, contatos e não trabalhados',
           'Fila de trabalho com filtros de status, motivo, origem e próximo contato'
@@ -125,7 +101,7 @@ var Rotas = (function () {
       titulo: 'Cadastrar Caso',
       subtitulo: 'Registro e edição, com o formulário montado pelo canal.',
       montar: function () {
-        return emConstrucao('Cadastrar Caso', 4, [
+        return emConstrucao(4, [
           'Formulário montado a partir da aba CAMPOS, campo a campo',
           'Máscaras de CPF, protocolo e apólice — a planilha recebe só dígitos',
           'Selo de SUSEP OK ou bloqueada no momento em que a SUSEP é digitada'
@@ -136,7 +112,7 @@ var Rotas = (function () {
       titulo: 'Minha Performance',
       subtitulo: 'Acompanhe seus resultados, evolução e principais indicadores.',
       montar: function () {
-        return emConstrucao('Minha Performance', 9, [
+        return emConstrucao(9, [
           'Casos trabalhados, concluídos, pendentes, tempo médio e taxa de retorno',
           'Evolução da produtividade e distribuição por canal e status',
           'Progresso da meta, ranking da equipe e atividades recentes'
@@ -147,7 +123,7 @@ var Rotas = (function () {
       titulo: 'Buscar Caso',
       subtitulo: 'Encontre um caso pelo protocolo, pela apólice ou pelo segurado.',
       montar: function () {
-        return emConstrucao('Buscar Caso', 7, [
+        return emConstrucao(7, [
           'Busca na base própria, lendo só a coluna antes de ler as linhas',
           'Busca em planilha legada, com a primeira linha entendida como cabeçalho',
           'A comparação ignora máscara: 1-2345678901 acha 12345678901'
@@ -158,7 +134,7 @@ var Rotas = (function () {
       titulo: 'Tabela de Corretoras',
       subtitulo: 'Canais, corretores e agentes, com segmento e situação da SUSEP.',
       montar: function () {
-        return emConstrucao('Tabela de Corretoras', 10, [
+        return emConstrucao(10, [
           'Lista de canais, corretores e agentes com o segmento de cada um',
           'Diamante, demais corretoras ou não encontrado',
           'Situação da SUSEP: liberada ou bloqueada'
@@ -169,7 +145,7 @@ var Rotas = (function () {
       titulo: 'Painel Analítico',
       subtitulo: 'Explore dados e identifique oportunidades para a operação.',
       montar: function () {
-        return emConstrucao('Painel Analítico', 8, [
+        return emConstrucao(8, [
           'Componentes configuráveis: pizza, linha, barras em pé e deitadas',
           'Limite de TOP 5, TOP 10 ou o que for definido em PAINEIS',
           'Detalhamento dos protocolos e exportação'
@@ -180,7 +156,7 @@ var Rotas = (function () {
       titulo: 'Configurações',
       subtitulo: 'Personalize o sistema de acordo com a realidade da sua operação.',
       montar: function () {
-        return emConstrucao('Configurações', 6, [
+        return emConstrucao(6, [
           'Campos do formulário: criar, ordenar, mascarar e escolher quem vê',
           'Catálogo, usuários, níveis de acesso e senha de administrador',
           'Reconciliação de colunas quando um cabeçalho muda na planilha'
@@ -244,9 +220,13 @@ var Aplicacao = (function () {
     telaAtual = tela;
 
     var definicao = Rotas.pegar(tela);
-    elemento('superior').innerHTML = Moldura.montarSuperior(pacote, definicao);
+    elemento('superior').innerHTML = Moldura.montarSuperior(pacote);
     elemento('lateral').innerHTML = Moldura.montarLateral(pacote, tela);
-    elemento('miolo').innerHTML = definicao.montar();
+    elemento('miolo').innerHTML = '<div class="cabecalho-da-tela">'
+      + '<h2>' + Moldura.escapar(definicao.titulo) + '</h2>'
+      + '<p>' + Moldura.escapar(definicao.subtitulo) + '</p>'
+      + '</div>'
+      + definicao.montar();
     document.title = pacote.identidade.nome + ' — ' + definicao.titulo;
 
     ligarMoldura();
@@ -345,8 +325,11 @@ var Aplicacao = (function () {
         }
         pacote = resposta;
         if (pacote.identidade.corPrimaria) {
+          // Em --cor-da-operacao, e não em --destaque: escrever direto no
+          // destaque pintaria os quatro temas com a cor da operação, e o
+          // rosa ficaria com botões azuis.
           document.documentElement.style.setProperty(
-            '--destaque', pacote.identidade.corPrimaria);
+            '--cor-da-operacao', pacote.identidade.corPrimaria);
         }
         elemento('carregando').hidden = true;
         elemento('aplicacao').hidden = false;

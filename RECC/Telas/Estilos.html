@@ -29,12 +29,17 @@
 }
 
 /* ---------------------------------------------------------- tema PADRÃO ---
-   Azul Porto Seguro. A cor exata vem de CONFIG (IDENTIDADE.COR_PRIMARIA) e o
-   servidor a injeta em --destaque; o valor abaixo é só o ponto de partida. */
+   Azul Porto Seguro. A cor exata vem de CONFIG (IDENTIDADE.COR_PRIMARIA), e o
+   navegador a injeta em --cor-da-operacao.
+
+   Repare que ela NÃO é injetada em --destaque: se fosse, valeria também no
+   rosa, no escuro e no Brasil, e o azul da operação apareceria no meio deles.
+   Só o tema padrão consome a cor da operação; os outros trazem a sua. O valor
+   abaixo é o que vale enquanto CONFIG não disser outra coisa. */
 :root, :root[data-tema="padrao"] {
-  --destaque: #0B77CE;
-  --destaque-escuro: #075A9E;
-  --destaque-tenue: #E4F1FB;
+  --destaque: var(--cor-da-operacao, #0B77CE);
+  --destaque-escuro: color-mix(in srgb, var(--destaque) 78%, black);
+  --destaque-tenue: color-mix(in srgb, var(--destaque) 12%, white);
   --destaque-sobre: #FFFFFF;
 
   --fundo: #F4F7FB;
@@ -46,11 +51,15 @@
   --suave: #56667F;
   --tenue: #8494A9;
 
-  --lateral-fundo: #0C1B33;
-  --lateral-texto: #A9B8CC;
+  /* O menu lateral do padrão é o azul vivo da marca, com texto escuro e o
+     item atual numa pastilha branca. */
+  --lateral-fundo: #17A2E8;
+  --lateral-texto: #0A2A3D;
   --lateral-titulo: #FFFFFF;
-  --lateral-linha: #1C2F4D;
-  --lateral-ativo: #143E6E;
+  --lateral-marca-realce: #0A2A3D;
+  --lateral-linha: #47BAF0;
+  --lateral-ativo: #FFFFFF;
+  --lateral-ativo-texto: #0A2A3D;
 }
 
 /* ------------------------------------------------------------- tema ROSA -- */
@@ -69,11 +78,13 @@
   --suave: #6E5260;
   --tenue: #9C8290;
 
-  --lateral-fundo: #2A0F1E;
-  --lateral-texto: #D6B3C4;
+  --lateral-fundo: #E8489B;
+  --lateral-texto: #3A0A22;
   --lateral-titulo: #FFFFFF;
-  --lateral-linha: #431A2E;
-  --lateral-ativo: #6E1E43;
+  --lateral-marca-realce: #3A0A22;
+  --lateral-linha: #F084BE;
+  --lateral-ativo: #FFFFFF;
+  --lateral-ativo-texto: #3A0A22;
 }
 
 /* ------------------------------------------------------------- tema DARK -- */
@@ -92,11 +103,13 @@
   --suave: #9AAAC2;
   --tenue: #75879F;
 
-  --lateral-fundo: #070C16;
-  --lateral-texto: #93A4BD;
+  --lateral-fundo: #0E1725;
+  --lateral-texto: #9EB0C9;
   --lateral-titulo: #FFFFFF;
-  --lateral-linha: #1B2536;
-  --lateral-ativo: #1B3358;
+  --lateral-marca-realce: #5C9DFF;
+  --lateral-linha: #202D42;
+  --lateral-ativo: #1E3358;
+  --lateral-ativo-texto: #FFFFFF;
 
   --bom: #5CC894;         --bom-tenue: #123528;
   --atencao: #E0A253;     --atencao-tenue: #3A2A12;
@@ -119,11 +132,13 @@
   --suave: #4E6656;
   --tenue: #7C9585;
 
-  --lateral-fundo: #08301C;
-  --lateral-texto: #A6C7B2;
+  --lateral-fundo: #12A150;
+  --lateral-texto: #06301A;
   --lateral-titulo: #FFFFFF;
-  --lateral-linha: #12472B;
-  --lateral-ativo: #146034;
+  --lateral-marca-realce: #06301A;
+  --lateral-linha: #4DC181;
+  --lateral-ativo: #FFFFFF;
+  --lateral-ativo-texto: #06301A;
 
   --atencao: #8A6300;     --atencao-tenue: #FBF0CF;
 }
@@ -213,15 +228,26 @@ button { font: inherit; color: inherit; }
 
 .lateral-marca {
   display: flex; align-items: center; gap: 10px;
-  padding: 20px 18px; min-height: 74px;
+  padding: 18px 14px; min-height: 72px;
   border-bottom: 1px solid var(--lateral-linha);
 }
-.lateral-marca img { max-height: 30px; max-width: 150px; }
+.lateral-marca img { max-height: 30px; max-width: 140px; }
 .lateral-marca .escrito {
-  font-size: 23px; font-weight: 700; letter-spacing: -.02em; color: var(--lateral-titulo);
+  font-size: 24px; font-weight: 800; letter-spacing: -.02em; color: var(--lateral-titulo);
   white-space: nowrap;
 }
-.lateral-marca .escrito em { font-style: normal; color: var(--destaque); }
+.lateral-marca .escrito em { font-style: normal; color: var(--lateral-marca-realce); }
+
+/* O botão de encolher fica no topo, ao lado da marca — é onde a mão procura. */
+.lateral-encolher {
+  margin-left: auto; flex: 0 0 auto;
+  display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 8px;
+  border: 0; background: var(--lateral-marca-realce);
+  color: var(--lateral-fundo); cursor: pointer;
+}
+.lateral-encolher:hover { opacity: .85; }
+.lateral-encolher svg { width: 18px; height: 18px; }
 
 .lateral-itens { list-style: none; margin: 0; padding: 14px 10px; flex: 1 1 auto; overflow-y: auto; }
 .lateral-itens li { margin-bottom: 2px; }
@@ -232,9 +258,10 @@ button { font: inherit; color: inherit; }
   background: transparent; color: var(--lateral-texto);
   cursor: pointer; text-align: left; font-size: 14.5px;
 }
-.lateral-item:hover { background: var(--lateral-linha); color: var(--lateral-titulo); }
+.lateral-item:hover { background: var(--lateral-linha); }
 .lateral-item[aria-current="page"] {
-  background: var(--lateral-ativo); color: var(--lateral-titulo); font-weight: 600;
+  background: var(--lateral-ativo); color: var(--lateral-ativo-texto);
+  font-weight: 700;
 }
 .lateral-item svg { flex: 0 0 20px; width: 20px; height: 20px; }
 .lateral-item .rotulo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -242,14 +269,16 @@ button { font: inherit; color: inherit; }
 .aplicacao.encolhida .lateral-marca .escrito { display: none; }
 .aplicacao.encolhida .lateral-item { justify-content: center; }
 
-.lateral-pe { padding: 12px 10px; border-top: 1px solid var(--lateral-linha); }
-.lateral-encolher {
-  display: flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; border-radius: 50%;
-  border: 1px solid var(--lateral-linha); background: transparent;
-  color: var(--lateral-texto); cursor: pointer;
+/* O rodapé diz de quem é a plataforma. Vem de CONFIG, como todo o resto da
+   identidade — trocar de operação não pode exigir mexer em código. */
+.lateral-pe {
+  padding: 16px 16px 20px;
+  border-top: 1px solid var(--lateral-linha);
+  color: var(--lateral-texto);
+  font-size: 11.5px; line-height: 1.5; font-weight: 600;
 }
-.lateral-encolher:hover { background: var(--lateral-linha); color: var(--lateral-titulo); }
+.lateral-pe .fabricante { font-weight: 400; opacity: .85; }
+.aplicacao.encolhida .lateral-pe { display: none; }
 .aplicacao.encolhida .lateral-encolher svg { transform: rotate(180deg); }
 
 /* ------------------------------------------------------ barra superior -- */
@@ -260,11 +289,14 @@ button { font: inherit; color: inherit; }
   background: var(--superficie);
   border-bottom: 1px solid var(--linha);
 }
-.superior .titulo { min-width: 180px; flex: 1 1 240px; }
-.superior .titulo h1 {
-  margin: 0; font-size: 23px; letter-spacing: -.02em; line-height: 1.2;
+/* A barra superior mostra a IDENTIDADE do sistema, não o nome da tela. O
+   nome da tela fica no topo do conteúdo, junto do que ele nomeia. */
+.superior .identidade { min-width: 180px; flex: 1 1 260px; }
+.superior .identidade h1 {
+  margin: 0; font-size: 15.5px; font-weight: 700; letter-spacing: -.01em;
+  line-height: 1.3;
 }
-.superior .titulo p { margin: 2px 0 0; font-size: 13.5px; color: var(--suave); }
+.superior .identidade p { margin: 1px 0 0; font-size: 12.5px; color: var(--suave); }
 
 .abrir-menu {
   display: none; width: 38px; height: 38px; border-radius: var(--raio-pequeno);
@@ -291,13 +323,17 @@ button { font: inherit; color: inherit; }
   background: var(--superficie);
 }
 
-.periodo {
+/* A data do último registro. Não é filtro nem seletor: é o aviso de que a
+   base está — ou não está — atualizada. Data velha aqui significa carga que
+   não rodou, e é a primeira coisa que a operação olha de manhã. */
+.ultimo-registro {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; font-size: 13.5px;
-  border: 1px solid var(--linha); border-radius: var(--raio-pequeno);
-  background: var(--superficie); cursor: pointer; white-space: nowrap;
+  padding: 8px 13px; font-size: 13.5px; font-weight: 500;
+  border: 1px solid var(--linha); border-radius: 999px;
+  background: var(--superficie); white-space: nowrap;
 }
-.periodo svg { width: 16px; height: 16px; color: var(--tenue); }
+.ultimo-registro svg { width: 16px; height: 16px; color: var(--tenue); }
+.ultimo-registro.vazio { color: var(--tenue); font-weight: 400; }
 
 /* -------------------------------------------------- as quatro bolinhas -- */
 .temas { display: flex; align-items: center; gap: 7px; }
@@ -312,24 +348,35 @@ button { font: inherit; color: inherit; }
   border-color: var(--texto);
   box-shadow: 0 0 0 1px var(--superficie);
 }
-.tema-padrao { background: #0B77CE; }
+.tema-padrao { background: var(--cor-da-operacao, #0B77CE); }
 .tema-rosa   { background: #C2185B; }
 .tema-dark   { background: #2B3A52; }
 .tema-brasil { background: linear-gradient(135deg, #0E7A3C 50%, #F0B400 50%); }
 
-.pessoa { display: flex; align-items: center; gap: 10px; }
-.pessoa .iniciais {
-  width: 38px; height: 38px; border-radius: 50%;
-  display: grid; place-items: center;
+.pessoa {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 16px 5px 6px; border-radius: 999px;
   background: var(--destaque); color: var(--destaque-sobre);
-  font-weight: 600; font-size: 13px;
 }
-.pessoa .quem { line-height: 1.25; }
-.pessoa .quem strong { display: block; font-size: 14px; font-weight: 600; }
-.pessoa .quem span { font-size: 12px; color: var(--suave); }
+.pessoa .iniciais {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--destaque-sobre); color: var(--destaque);
+  font-weight: 700; font-size: 12.5px;
+}
+.pessoa .quem { line-height: 1.2; }
+.pessoa .quem strong { display: block; font-size: 14px; font-weight: 700; }
+.pessoa .quem span { font-size: 11.5px; opacity: .85; }
 
 /* -------------------------------------------------------------- miolo --- */
 .miolo { padding: 22px; flex: 1 1 auto; }
+
+.cabecalho-da-tela { margin-bottom: 18px; }
+.cabecalho-da-tela h2 {
+  margin: 0; font-size: 25px; font-weight: 700; letter-spacing: -.022em;
+  line-height: 1.2;
+}
+.cabecalho-da-tela p { margin: 3px 0 0; color: var(--suave); max-width: 70ch; }
 
 .cartao {
   background: var(--superficie);
@@ -377,13 +424,14 @@ button { font: inherit; color: inherit; }
   .aplicacao.menu-aberto .veu { display: block; }
 
   .superior { padding: 12px 16px; }
-  .superior .titulo h1 { font-size: 19px; }
   .miolo { padding: 16px; }
-  .periodo .rotulo-periodo { display: none; }
+  .cabecalho-da-tela h2 { font-size: 21px; }
 }
 
 @media (max-width: 560px) {
   .busca { order: 5; flex-basis: 100%; max-width: none; }
+  .pessoa { padding: 4px; }
   .pessoa .quem { display: none; }
+  .ultimo-registro .rotulo-data { display: none; }
 }
 </style>

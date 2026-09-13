@@ -302,7 +302,22 @@ function criarAmbienteFalso(email = 'analista@exemplo.com') {
       Session: { getActiveUser: () => ({ getEmail: () => emailAtual }) },
       Logger: { log: (m) => registros.push(String(m)) },
       Utilities: {
-        formatDate: (data) => String(data),
+        /**
+         * Formatação de verdade, e não String(data).
+         *
+         * Um formatador que devolve qualquer coisa faria o teste da barra
+         * superior passar mostrando "Mon Sep 13 2026 ..." — que é exatamente
+         * o que o produto NÃO pode mostrar.
+         */
+        formatDate: (data, fuso, padrao) => {
+          const doisDigitos = (n) => (n < 10 ? '0' : '') + n;
+          return String(padrao)
+            .replace('yyyy', data.getFullYear())
+            .replace('dd', doisDigitos(data.getDate()))
+            .replace('MM', doisDigitos(data.getMonth() + 1))
+            .replace('HH', doisDigitos(data.getHours()))
+            .replace('mm', doisDigitos(data.getMinutes()));
+        },
         getUuid: () => crypto.randomUUID(),
         DigestAlgorithm: { SHA_256: 'SHA_256' },
         Charset: { UTF_8: 'UTF_8' },

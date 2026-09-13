@@ -237,6 +237,11 @@ const RECC_ESQUEMA = {
       { cabecalho: 'Nome', tipo: 'texto', protegido: true },
       { cabecalho: 'Descricao', tipo: 'texto', protegido: false },
       { cabecalho: 'Aba', tipo: 'texto', protegido: true },
+      // Quais colunas da base guardam quando o caso entrou. É daqui que sai a
+      // "data do último registro" da barra superior. Ficam declaradas, e não
+      // adivinhadas, porque cada mesa nomeia essa coluna do seu jeito.
+      { cabecalho: 'ColunaDaData', tipo: 'texto', protegido: false },
+      { cabecalho: 'ColunaDaHora', tipo: 'texto', protegido: false },
       { cabecalho: 'Icone', tipo: 'texto', protegido: false },
       { cabecalho: 'Ordem', tipo: 'numero', protegido: false },
       { cabecalho: 'Ativo', tipo: 'simOuNao', protegido: true }

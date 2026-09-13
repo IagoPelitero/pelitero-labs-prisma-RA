@@ -49,6 +49,29 @@ function gerar(pastaDeSaida) {
 
   // Uma instalação inteira, do zero, igual à que o PO vai rodar no editor.
   chamar('instalarRECC()');
+
+  // Dois casos DE EXEMPLO, só na prévia. O instalador de verdade não semeia
+  // dado nenhum — mas uma prévia com a barra dizendo "nenhum registro ainda"
+  // não mostraria como a data do último registro se comporta.
+  chamar('inserirVariosRegistros_')('BASE_MESA', [
+    { Analista: 'Ana Martins', Status: 'Pendente',
+      'Data de entrada': '12/09/2026', 'Horário': '09:14' },
+    { Analista: 'Ana Martins', Status: '1º contato realizado',
+      'Data de entrada': '13/09/2026', 'Horário': '16:47' }
+  ]);
+
+  // Nome, cargo e canal de EXEMPLO, para a barra superior mostrar como fica
+  // na operação. O instalador cria o primeiro administrador com o nome tirado
+  // do e-mail, e quem ajusta depois é o próprio administrador.
+  const eu = chamar('usuarioAtual_()').usuario;
+  const cargo = chamar('lerRegistros_("CATALOGO")')
+    .find((item) => item.Tipo === 'CARGO' && item.Nome === 'Analista RET');
+  chamar('atualizarRegistro_')('USUARIOS', eu.Id, {
+    Nome: 'Ana Martins',
+    CargoId: cargo.Id,
+    'Canal que atende': 'Vida Individual'
+  });
+
   const pacote = chamar('pacoteDePartida()');
 
   // E a mesma instalação vista por quem não está cadastrado.

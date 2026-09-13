@@ -107,6 +107,7 @@ function pacoteDePartida() {
     },
     menu: montarMenu_(quem.permissoes),
     mesas: mesasVisiveis_(),
+    ultimoRegistro: dataDoUltimoRegistro_(),
     tema: temaDoUsuario_(),
     senhaDeAdministradorDefinida: existeSenhaDeAdministrador_()
   };
@@ -188,9 +189,80 @@ function mesasVisiveis_() {
         nome: mesa.Nome,
         descricao: mesa.Descricao,
         aba: mesa.Aba,
+        colunaDaData: mesa.ColunaDaData,
+        colunaDaHora: mesa.ColunaDaHora,
         icone: mesa.Icone
       };
     });
+}
+
+// ============================================================================
+// A DATA DO ÚLTIMO REGISTRO
+// ============================================================================
+
+/**
+ * Quando entrou o caso mais recente, entre todas as mesas ativas.
+ *
+ * Fica na barra superior e responde a uma pergunta que a operação faz o dia
+ * inteiro: "a base está atualizada?". Data velha ali é aviso de que alguma
+ * carga não rodou.
+ *
+ * Custa pouco: a base só acrescenta no fim, então basta olhar as últimas
+ * linhas de cada mesa — não se percorre a base para descobrir isso.
+ */
+function dataDoUltimoRegistro_() {
+  var maisRecente = null;
+  var deQualMesa = '';
+
+  mesasVisiveis_().forEach(function (mesa) {
+    if (!mesa.aba || !mesa.colunaDaData) return;
+
+    var ultimos;
+    try {
+      ultimos = lerRegistros_(mesa.aba, { ultimas: 5 });
+    } catch (erro) {
+      return;   // aba fora do contrato não pode derrubar a barra superior
+    }
+    if (!ultimos.length) return;
+
+    var registro = ultimos[ultimos.length - 1];
+    var momento = juntarDataEHora_(
+      registro[mesa.colunaDaData],
+      mesa.colunaDaHora ? registro[mesa.colunaDaHora] : '');
+    if (!momento) return;
+
+    if (!maisRecente || momento.getTime() > maisRecente.getTime()) {
+      maisRecente = momento;
+      deQualMesa = mesa.nome;
+    }
+  });
+
+  if (!maisRecente) {
+    return { texto: 'Nenhum registro ainda', mesa: '', existe: false };
+  }
+
+  var padrao = deQualMesa && !temHora_(maisRecente) ? 'dd/MM/yyyy' : 'dd/MM/yyyy HH:mm';
+  return {
+    texto: Utilities.formatDate(maisRecente, RECC_FUSO_HORARIO, padrao),
+    mesa: deQualMesa,
+    existe: true
+  };
+}
+
+/** Junta a coluna de data com a de hora, quando a mesa tem as duas. */
+function juntarDataEHora_(valorDaData, valorDaHora) {
+  var data = converterParaData_(valorDaData);
+  if (!data) return null;
+
+  var hora = converterParaHora_(valorDaHora);
+  if (!hora) return data;
+
+  return new Date(data.getFullYear(), data.getMonth(), data.getDate(),
+    hora.getHours(), hora.getMinutes(), 0);
+}
+
+function temHora_(data) {
+  return data.getHours() !== 0 || data.getMinutes() !== 0;
 }
 
 // ============================================================================
@@ -263,6 +335,8 @@ function lerIdentidadeVisual_() {
     nomeLongo: valorDaConfiguracao_('IDENTIDADE.NOME_LONGO', ''),
     operacao: valorDaConfiguracao_('IDENTIDADE.OPERACAO', ''),
     logo: valorDaConfiguracao_('IDENTIDADE.LOGO_URL', ''),
-    corPrimaria: valorDaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0B77CE')
+    corPrimaria: valorDaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0B77CE'),
+    plataforma: valorDaConfiguracao_('IDENTIDADE.PLATAFORMA', ''),
+    fabricante: valorDaConfiguracao_('IDENTIDADE.FABRICANTE', '')
   };
 }

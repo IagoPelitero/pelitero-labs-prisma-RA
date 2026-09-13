@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const { carregar, secao, teste, igual, verdadeiro, contem, lanca } =
   require('./ferramentas');
 const { gerar } = require('./gerar-previa');
@@ -21,6 +22,21 @@ const PASTA_DAS_TELAS = path.join(__dirname, '..', 'Telas');
 
 function lerTela(nome) {
   return fs.readFileSync(path.join(PASTA_DAS_TELAS, nome), 'utf8');
+}
+
+/**
+ * Carrega o script de uma tela para chamar as funções dele de verdade.
+ *
+ * Conferir se o HTML "tem a palavra tal" prova pouco. Chamar a função e olhar
+ * o que ela devolve prova o que o usuário vai ver.
+ */
+function carregarScriptDaTela(nome) {
+  const fonte = lerTela(nome)
+    .replace(/^<script>/, '')
+    .replace(/<\/script>\s*$/, '');
+  const contexto = vm.createContext({ console });
+  vm.runInContext(fonte, contexto, { filename: nome });
+  return contexto;
 }
 
 function rodarTestesDaCasca() {
@@ -108,6 +124,27 @@ function rodarTestesDaCasca() {
     igual(infratores.length, 0, 'cores fora das variáveis: ' + infratores.join(' | '));
   });
 
+  teste('a cor da operação vale só no tema padrão', () => {
+    // Injetar a cor de CONFIG direto em --destaque pintaria os quatro temas:
+    // o rosa ficaria com o pilar do usuário azul. Ela entra numa variável que
+    // só o tema padrão consome.
+    const aplicacao = lerTela('Aplicacao.html');
+    contem(aplicacao, "'--cor-da-operacao', pacote.identidade.corPrimaria");
+    verdadeiro(aplicacao.indexOf("setProperty(\n            '--destaque'") < 0
+      && aplicacao.indexOf("'--destaque',") < 0,
+      'a cor da operação não pode ser escrita direto em --destaque');
+
+    const estilos = lerTela('Estilos.html');
+    contem(estilos, '--destaque: var(--cor-da-operacao,',
+      'só o tema padrão consome a cor da operação');
+    ['rosa', 'dark', 'brasil'].forEach((tema) => {
+      const inicio = estilos.indexOf(':root[data-tema="' + tema + '"] {');
+      const bloco = estilos.substring(inicio, estilos.indexOf('}', inicio));
+      verdadeiro(bloco.indexOf('--cor-da-operacao') < 0,
+        'o tema ' + tema + ' precisa trazer o próprio destaque');
+    });
+  });
+
   teste('a marca do menu usa a logo quando ela existe', () => {
     const moldura = lerTela('Moldura.html');
     contem(moldura, 'if (identidade.logo)', 'a logo de CONFIG tem prioridade');
@@ -164,6 +201,100 @@ function rodarTestesDaCasca() {
     chamar('pacoteDePartida()').menu.forEach((item) => {
       contem(aplicacao, item.tela + ': {', 'falta a rota de ' + item.tela);
     });
+  });
+
+  secao('A barra superior e o menu');
+
+  teste('a barra superior traz as peças na ordem pedida', () => {
+    const { Moldura } = carregarScriptDaTela('Moldura.html');
+    const barra = Moldura.montarSuperior(chamar('pacoteDePartida()'));
+
+    const ordem = [
+      ['identidade', 'class="identidade"'],
+      ['busca', 'class="busca"'],
+      ['bolinhas de cor', 'class="temas"'],
+      ['data do último registro', 'class="ultimo-registro'],
+      ['pessoa', 'class="pessoa"']
+    ];
+
+    let anterior = -1;
+    ordem.forEach((peca) => {
+      const posicao = barra.indexOf(peca[1]);
+      verdadeiro(posicao >= 0, 'falta a peça: ' + peca[0]);
+      verdadeiro(posicao > anterior, peca[0] + ' está fora de ordem na barra');
+      anterior = posicao;
+    });
+  });
+
+  teste('a barra mostra a identidade do sistema, não o nome da tela', () => {
+    const { Moldura } = carregarScriptDaTela('Moldura.html');
+    const barra = Moldura.montarSuperior(chamar('pacoteDePartida()'));
+    contem(barra, 'RECC — Relacionamento Estratégico de Clientes e Corretores');
+    contem(barra, 'Porto Seguro', 'a operação vem embaixo');
+    verdadeiro(barra.indexOf('Dashboard') < 0,
+      'o nome da tela pertence ao conteúdo, não à barra');
+  });
+
+  teste('o nome da tela vai para o topo do conteúdo', () => {
+    const aplicacao = lerTela('Aplicacao.html');
+    contem(aplicacao, 'class="cabecalho-da-tela"');
+    contem(aplicacao, 'Moldura.escapar(definicao.titulo)');
+  });
+
+  teste('a pessoa aparece com nome e cargo, e o canal quando existe', () => {
+    const { Moldura } = carregarScriptDaTela('Moldura.html');
+    const pacote = chamar('pacoteDePartida()');
+    pacote.usuario.nome = 'Ana Martins';
+    pacote.usuario.cargo = 'Analista RET';
+    pacote.usuario.canalQueAtende = 'Vida Individual';
+
+    const barra = Moldura.montarSuperior(pacote);
+    contem(barra, '<strong>Ana Martins</strong>');
+    contem(barra, 'Analista RET · Vida Individual');
+    contem(barra, '>AM<', 'as iniciais no círculo');
+  });
+
+  teste('o menu traz o rodapé da plataforma, que vem de CONFIG', () => {
+    const { Moldura } = carregarScriptDaTela('Moldura.html');
+    const lateral = Moldura.montarLateral(chamar('pacoteDePartida()'), 'dashboard');
+    contem(lateral, 'PGO — Prisma Gestão Operacional');
+    contem(lateral, 'by Pelitero labs');
+    contem(lateral, 'id="encolher"', 'o botão de encolher fica junto da marca');
+    contem(lateral, 'aria-current="page"', 'o item atual precisa se marcar');
+  });
+
+  secao('A data do último registro');
+
+  teste('base vazia avisa que ainda não há registro, sem inventar data', () => {
+    const informacao = chamar('dataDoUltimoRegistro_()');
+    igual(informacao.existe, false);
+    igual(informacao.texto, 'Nenhum registro ainda');
+  });
+
+  teste('com registro, mostra dia e hora no formato brasileiro', () => {
+    chamar('inserirRegistro_')('BASE_MESA', {
+      Analista: 'Ana Martins',
+      'Data de entrada': '13/09/2026',
+      'Horário': '14:32'
+    });
+    const informacao = chamar('dataDoUltimoRegistro_()');
+    igual(informacao.existe, true);
+    igual(informacao.texto, '13/09/2026 14:32');
+    igual(informacao.mesa, 'Mesa Diamante');
+  });
+
+  teste('vence o registro mais recente entre as mesas', () => {
+    chamar('inserirRegistro_')('BASE_RET', {
+      analista: 'Diego Castilho',
+      'data de recepção do protocolo': '20/09/2026'
+    });
+    const informacao = chamar('dataDoUltimoRegistro_()');
+    igual(informacao.mesa, 'RET Vida', 'a RET tem o registro mais novo');
+    igual(informacao.texto, '20/09/2026', 'sem hora, mostra só o dia');
+  });
+
+  teste('a data do último registro chega no pacote de partida', () => {
+    igual(chamar('pacoteDePartida()').ultimoRegistro.texto, '20/09/2026');
   });
 
   secao('A prévia navegável');

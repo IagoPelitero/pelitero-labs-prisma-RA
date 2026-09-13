@@ -82,18 +82,41 @@ var Moldura = (function () {
         + '</button></li>';
     }).join('');
 
-    return '<div class="lateral-marca">' + marca(pacote.identidade) + '</div>'
-      + '<ul class="lateral-itens">' + itens + '</ul>'
-      + '<div class="lateral-pe">'
+    var rodape = '';
+    if (pacote.identidade.plataforma || pacote.identidade.fabricante) {
+      rodape = '<div class="lateral-pe">'
+        + '<div>' + escapar(pacote.identidade.plataforma) + '</div>'
+        + '<div class="fabricante">' + escapar(pacote.identidade.fabricante) + '</div>'
+        + '</div>';
+    }
+
+    return '<div class="lateral-marca">'
+      + marca(pacote.identidade)
       + '<button type="button" class="lateral-encolher" id="encolher"'
       + ' title="Encolher o menu" aria-label="Encolher o menu">'
-      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"'
-      + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-      + '<path d="M14 6l-6 6 6 6"></path></svg>'
-      + '</button></div>';
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+      + ' stroke-linecap="round" aria-hidden="true">'
+      + '<path d="M4 7h16M4 12h16M4 17h16"></path></svg>'
+      + '</button>'
+      + '</div>'
+      + '<ul class="lateral-itens">' + itens + '</ul>'
+      + rodape;
   }
 
-  function montarSuperior(pacote, tela) {
+  /**
+   * A barra superior.
+   *
+   * A ordem foi pedida assim, e cada peça responde a uma pergunta diferente:
+   *   identidade        que sistema é este, de que operação
+   *   busca             achar um caso sem sair de onde se está
+   *   bolinhas          a cor da tela, escolha de quem usa
+   *   último registro   a base está atualizada?
+   *   pessoa            quem sou eu aqui dentro, e com que cargo
+   *
+   * O nome da TELA não fica aqui: ele fica no topo do conteúdo, junto do que
+   * ele nomeia.
+   */
+  function montarSuperior(pacote) {
     var bolinhas = TEMAS.map(function (tema) {
       var marcado = tema.chave === pacote.tema ? 'true' : 'false';
       return '<button type="button" class="tema tema-' + tema.chave + '"'
@@ -108,9 +131,12 @@ var Moldura = (function () {
       + ' stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>'
       + '</button>'
 
-      + '<div class="titulo">'
-      + '<h1>' + escapar(tela.titulo) + '</h1>'
-      + '<p>' + escapar(tela.subtitulo) + '</p>'
+      + '<div class="identidade">'
+      + '<h1>' + escapar(pacote.identidade.nome)
+      + (pacote.identidade.nomeLongo
+        ? ' — ' + escapar(pacote.identidade.nomeLongo) : '')
+      + '</h1>'
+      + '<p>' + escapar(pacote.identidade.operacao) + '</p>'
       + '</div>'
 
       + '<div class="busca">'
@@ -123,21 +149,40 @@ var Moldura = (function () {
       + '<kbd>Ctrl K</kbd>'
       + '</div>'
 
-      + '<button type="button" class="periodo" id="periodo">'
-      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"'
-      + ' stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15" rx="2"></rect>'
-      + '<path d="M3.5 10h17M8 3.5v3M16 3.5v3"></path></svg>'
-      + '<span class="rotulo-periodo">' + escapar(Periodo.rotulo()) + '</span>'
-      + '</button>'
-
       + '<div class="temas" role="group" aria-label="Cor do sistema">' + bolinhas + '</div>'
+
+      + ultimoRegistro(pacote.ultimoRegistro)
 
       + '<div class="pessoa">'
       + '<div class="iniciais" aria-hidden="true">'
       + escapar(iniciais(pacote.usuario.nome)) + '</div>'
       + '<div class="quem"><strong>' + escapar(pacote.usuario.nome) + '</strong>'
-      + '<span>' + escapar(pacote.usuario.cargo || pacote.usuario.nivelAcesso) + '</span>'
+      + '<span>' + escapar(descricaoDaPessoa(pacote.usuario)) + '</span>'
       + '</div></div>';
+  }
+
+  /** "Analista RET · Vida Individual" — o cargo, e o canal quando existe. */
+  function descricaoDaPessoa(usuario) {
+    var cargo = usuario.cargo || usuario.nivelAcesso || '';
+    if (usuario.canalQueAtende) return cargo + ' · ' + usuario.canalQueAtende;
+    return cargo;
+  }
+
+  /** A data do último registro, ou o aviso de que ainda não há nenhum. */
+  function ultimoRegistro(dados) {
+    var informacao = dados || { texto: 'Nenhum registro ainda', existe: false };
+    var explicacao = informacao.existe && informacao.mesa
+      ? 'Último registro em ' + informacao.mesa
+      : 'Ainda não há registros nas mesas';
+
+    return '<div class="ultimo-registro' + (informacao.existe ? '' : ' vazio') + '"'
+      + ' title="' + escapar(explicacao) + '">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"'
+      + ' stroke-linecap="round" aria-hidden="true">'
+      + '<rect x="3.5" y="5" width="17" height="15" rx="2"></rect>'
+      + '<path d="M3.5 10h17M8 3.5v3M16 3.5v3"></path></svg>'
+      + '<span class="rotulo-data">' + escapar(informacao.texto) + '</span>'
+      + '</div>';
   }
 
   return {

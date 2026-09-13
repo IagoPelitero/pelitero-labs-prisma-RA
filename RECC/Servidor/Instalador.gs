@@ -202,6 +202,8 @@ function semearDadosIniciais_(emailDoInstalador) {
       Nome: 'RET Vida',
       Descricao: 'Relacionamento estratégico de clientes',
       Aba: 'BASE_RET',
+      ColunaDaData: 'data de recepção do protocolo',
+      ColunaDaHora: '',
       Icone: 'escudo',
       Ordem: 1,
       Ativo: true
@@ -210,6 +212,8 @@ function semearDadosIniciais_(emailDoInstalador) {
       Nome: 'Mesa Diamante',
       Descricao: 'Atendimento a casos prioritários',
       Aba: 'BASE_MESA',
+      ColunaDaData: 'Data de entrada',
+      ColunaDaHora: 'Horário',
       Icone: 'diamante',
       Ordem: 2,
       Ativo: true
@@ -256,6 +260,10 @@ function semearDadosIniciais_(emailDoInstalador) {
       'URL da logo exibida na tela de usuário não cadastrado.'),
     novaConfiguracao_('IDENTIDADE.COR_PRIMARIA', '#0B77CE',
       'Cor do tema Padrão.'),
+    novaConfiguracao_('IDENTIDADE.PLATAFORMA', 'PGO — Prisma Gestão Operacional',
+      'A plataforma, exibida no rodapé do menu lateral.'),
+    novaConfiguracao_('IDENTIDADE.FABRICANTE', 'by Pelitero labs',
+      'Quem construiu, exibido no rodapé do menu lateral.'),
     novaConfiguracao_('OPERACAO.JANELA_DIAS', '30',
       'Quantos dias a fila de trabalho carrega. Acima disso, use Buscar Caso.'),
     novaConfiguracao_('OPERACAO.TEMA_PADRAO', 'padrao',
