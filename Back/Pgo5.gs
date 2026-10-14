@@ -570,35 +570,6 @@ function pgo5PossuiUsuarios_() {
  * reportada, nunca "consertada" às cegas.
  */
 
-/**
- * (ADM) Acrescenta Cliente e CPF à aba Atendimentos de uma base PGO 5.0 de
- * desenvolvimento criada antes da correção de schema.
- *
- * Preserva todas as linhas: cada registro é remapeado pelo NOME da coluna,
- * então nenhum valor troca de lugar. A aba não é apagada nem recriada.
- *
- * @returns {Object} { estado, linhasPreservadas, erro }.
- *   estado: 'JA_ATUALIZADO' | 'CONVERTIDO' | 'ESTRUTURA_DESCONHECIDA'.
- */
-function ajustarSchemaClienteCpfPGO5() {
-  exigirPermissao_('configurarSistema');
-  return ajustarSchemaClienteCpfPGO5_();
-}
-
-/**
- * (ADM) Move Cliente/CPF que ficaram em ValoresAtendimento para as colunas
- * estruturais do atendimento, e remove SOMENTE essas linhas dinâmicas.
- *
- * Idempotente: rodar de novo não encontra nada para converter. Nenhum outro
- * valor dinâmico é tocado.
- *
- * @returns {Object} { atendimentosAtualizados, valoresRemovidos }.
- */
-function converterClienteCpfDinamicosPGO5() {
-  exigirPermissao_('configurarSistema');
-  return converterClienteCpfDinamicosPGO5_();
-}
-
 // ============================================================================
 // DETECÇÃO DE ESTRUTURA (4.x LEGADO × PGO 5.0)
 // ============================================================================
@@ -654,11 +625,6 @@ function detectarEstruturaBanco_(recalcular) {
 /** true quando o sistema está rodando sobre um banco PGO 5.0. */
 function emBasePGO5_() {
   return detectarEstruturaBanco_() === 'PGO5';
-}
-
-/** Limpa o memo da detecção (usado após inicializar/alterar a estrutura). */
-function limparMemoEstrutura_() {
-  PGO5_ESTRUTURA_MEMO_ = null;
 }
 
 // ============================================================================
@@ -911,6 +877,50 @@ function pgo5ColunaEhIdentificador_(nomeColuna) {
 }
 
 /**
+ * Colunas de uma aba cujo conteúdo precisa chegar à planilha como TEXTO.
+ *
+ * Três famílias, e cada uma por um motivo diferente:
+ *
+ * 1. IDENTIFICADORES (`Id`, `*Id`, CPF, Protocolo, Matrícula) — o Sheets
+ *    transforma "00000010" em 10 e "000000E1" em 0. Ver
+ *    pgo5ColunaEhIdentificador_.
+ *
+ * 2. DATAS (`Data*`, `UltimoAcesso`) — e este é o caso que trazia "a data de
+ *    ontem". DataAbertura é um DIA CIVIL ("2026-10-14"), não um instante.
+ *    Gravada em célula de formato Geral, o Sheets a converte num Date =
+ *    meia-noite no FUSO DA PLANILHA. A partir daí todo leitor precisa
+ *    escolher um fuso para reinterpretar aquele instante, e o sistema
+ *    escolhia dois diferentes: a tela de edição formatava em
+ *    America/Sao_Paulo (pgo5DataComoTextoCurto_) e o Dashboard serializava
+ *    em UTC (toIso_). Com a planilha em qualquer fuso diferente de
+ *    America/Sao_Paulo os dois discordavam — e a edição mostrava o dia
+ *    ANTERIOR. Pior: salvar o formulário com o dia errado já na tela
+ *    gravava o retrocesso de verdade.
+ *    Como TEXTO não existe instante nem fuso: o dia digitado é o dia
+ *    gravado e o dia exibido, com a planilha em qualquer fuso.
+ *
+ * 3. VALORES DINÂMICOS (`Valor` de ValoresAtendimento, `ValorPadrao`) — ali
+ *    cabe qualquer coisa que o ADM configurou: uma data, um código com
+ *    zeros à esquerda, um número de protocolo. O sistema não sabe o tipo na
+ *    hora de gravar, então preserva o texto.
+ *
+ * `Valor` da aba Configurações fica FORA de propósito: lá moram números
+ * (ordem, "Fora da SLA") que são lidos com Number().
+ *
+ * @param {string} nomeAba Aba de destino.
+ * @param {string} nomeColuna Nome da coluna no cabeçalho.
+ * @returns {boolean} true quando a célula deve ser gravada como texto.
+ */
+function pgo5ColunaEhTextoNaPlanilha_(nomeAba, nomeColuna) {
+  const nome = String(nomeColuna || '');
+  if (pgo5ColunaEhIdentificador_(nome)) return true;
+  if (/^Data/.test(nome) || nome === 'UltimoAcesso') return true;
+  if (nome === 'ValorPadrao') return true;
+  if (nome === 'Valor' && nomeAba === PGO5.SHEET_NAMES.VALORES_ATENDIMENTO) return true;
+  return false;
+}
+
+/**
  * Marca como TEXTO as células de identificador de UMA linha, antes de gravar.
  *
  * Formatar só na criação da aba não basta: a formatação cobria um intervalo
@@ -926,8 +936,9 @@ function pgo5ColunaEhIdentificador_(nomeColuna) {
  */
 function pgo5MarcarIdentificadoresComoTexto_(aba, linha, colunas) {
   try {
+    const nomeAba = aba.getName ? aba.getName() : '';
     const formatos = colunas.map(function(col) {
-      return pgo5ColunaEhIdentificador_(col) ? '@' : null;
+      return pgo5ColunaEhTextoNaPlanilha_(nomeAba, col) ? '@' : null;
     });
     if (formatos.indexOf('@') === -1) return;
 
@@ -962,8 +973,9 @@ function aplicarFormatoTextoEmIdentificadores_(aba, colunas) {
     // A aba inteira, e não um intervalo do tamanho de agora: quem cola uma
     // linha à mão na planilha também precisa cair no formato certo.
     const totalLinhas = aba.getMaxRows ? aba.getMaxRows() : 1000;
+    const nomeAba = aba.getName ? aba.getName() : '';
     colunas.forEach(function(nomeColuna, posicao) {
-      if (!pgo5ColunaEhIdentificador_(nomeColuna)) return;
+      if (!pgo5ColunaEhTextoNaPlanilha_(nomeAba, nomeColuna)) return;
       const intervalo = aba.getRange(2, posicao + 1, Math.max(1, totalLinhas - 1), 1);
       if (typeof intervalo.setNumberFormat === 'function') intervalo.setNumberFormat('@');
     });

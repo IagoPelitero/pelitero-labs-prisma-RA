@@ -153,6 +153,101 @@ var AcessoPGO5 = {
 };
 
 /* ============================================================
+   PinPGO5 — desafio do PIN administrativo, em UM lugar só
+
+   ⚠️ POR QUE ISTO EXISTE
+   O servidor protege as operações administrativas com DUAS chaves:
+   permissão e PIN. Quando falta o PIN ele recusa com "PIN_NECESSARIO: ...".
+   Só a tela de links protegidos sabia reconhecer essa recusa; as demais
+   mostravam o texto técnico num toast e paravam ali. O sintoma era um ADM
+   cadastrando outro ADM: a gravação era recusada, o pop-up do PIN NUNCA
+   aparecia e a tela só exibia "PIN_NECESSARIO: informe o PIN
+   administrativo..." — sem campo nenhum para informá-lo.
+
+   Agora o desafio vive aqui e qualquer tela o reaproveita: ela chama
+   PinPGO5.tratouErro(err, repetir) no seu withFailureHandler e, se a recusa
+   era por PIN, o pop-up abre e a operação original é REFEITA sozinha depois
+   do PIN aceito.
+   ============================================================ */
+var PinPGO5 = {
+  /** Quantidade de dígitos do PIN (o servidor é quem manda; 6 é o padrão). */
+  digitos: 6,
+
+  /** Campo de PIN — mascarado, sem autocompletar, com o tamanho exato. */
+  _campo: function(id) {
+    var d = this.digitos;
+    return '<div class="form-group"><label class="form-label" for="' + id + '">' +
+      'PIN <span class="required">*</span></label>' +
+      '<input class="form-control pgo5seg-pin-campo" id="' + id + '" type="password" ' +
+      'inputmode="numeric" autocomplete="off" maxlength="' + d + '" ' +
+      'placeholder="' + new Array(d + 1).join('•') + '"></div>';
+  },
+
+  /**
+   * Abre o pop-up do PIN e executa `aoLiberar` quando o servidor aceitar.
+   * @param {string} mensagem Por que o PIN está sendo pedido.
+   * @param {Function} aoLiberar O que fazer depois de liberado.
+   */
+  desafiar: function(mensagem, aoLiberar) {
+    var self = this;
+    Components.modal({
+      title: 'Informe o PIN administrativo',
+      body: (mensagem ? '<p class="pgo5cfg-ajuda">' + App.escapeHtml(mensagem) + '</p>' : '') +
+        self._campo('pgo5-pin-desafio') +
+        '<small class="pgo5cfg-nota">Depois de aceito, as ações protegidas ficam ' +
+        'liberadas por alguns minutos.</small>',
+      confirmText: 'Validar',
+      cancelText: 'Cancelar',
+      onConfirm: function() {
+        var campo = document.getElementById('pgo5-pin-desafio');
+        var pin = campo ? campo.value.trim() : '';
+        if (pin.length !== self.digitos) {
+          Components.toast('O PIN deve ter ' + self.digitos + ' dígitos.', 'warning');
+          return false;   // mantém o pop-up aberto
+        }
+        Components.showLoading('Validando...');
+        google.script.run
+          .withSuccessHandler(function() {
+            Components.hideLoading();
+            Components.toast('PIN aceito.', 'success');
+            if (typeof aoLiberar === 'function') aoLiberar();
+          })
+          .withFailureHandler(function(err) {
+            Components.hideLoading();
+            Components.toast(((err && err.message) || 'Não foi possível validar o PIN.'), 'error');
+          })
+          .validarPinPGO5(pin);
+      }
+    });
+  },
+
+  /**
+   * Trata uma recusa do servidor que seja por PIN.
+   *
+   * @param {Object} err Erro recebido no withFailureHandler.
+   * @param {Function} aoRepetir A MESMA operação, para refazer após o PIN.
+   * @returns {boolean} true quando a recusa era por PIN e já foi tratada —
+   *   nesse caso quem chamou não deve mostrar mais nada.
+   */
+  tratouErro: function(err, aoRepetir) {
+    var mensagem = (err && err.message) || '';
+
+    if (mensagem.indexOf('PIN_NECESSARIO') !== -1) {
+      // A mensagem técnica não vai para a tela: ela explica o que fazer.
+      this.desafiar('Esta ação exige o PIN administrativo.', aoRepetir);
+      return true;
+    }
+    if (mensagem.indexOf('PIN_NAO_DEFINIDO') !== -1) {
+      // Aqui o pop-up não ajudaria: não existe PIN para digitar ainda.
+      Components.toast('Nenhum PIN administrativo foi definido ainda. Defina-o em ' +
+        'Configurações › Segurança e repita esta ação.', 'warning', 8000);
+      return true;
+    }
+    return false;
+  }
+};
+
+/* ============================================================
    Pages.usuariosPGO5 — cadastro de pessoas
    ============================================================ */
 Pages.usuariosPGO5 = {
@@ -392,6 +487,13 @@ Pages.usuariosPGO5 = {
       .withFailureHandler(function(err) {
         self.state.salvando = false;
         Components.hideLoading();
+        // Conceder um nível com poderes administrativos exige PIN. Sem este
+        // tratamento a recusa virava um toast com o texto técnico e nenhum
+        // campo para digitar o PIN — era o bug do ADM que não conseguia
+        // cadastrar outro ADM.
+        if (PinPGO5.tratouErro(err, function() {
+          self._chamar(funcao, args, mensagemOk);
+        })) return;
         Components.toast(((err && err.message) || 'Não foi possível concluir a operação.'), 'error');
       });
     run[funcao].apply(run, args);
@@ -782,6 +884,9 @@ Pages.segurancaPGO5 = {
     google.script.run
       .withSuccessHandler(function(dados) {
         self.state.dados = dados || {};
+        // Quem manda na quantidade de dígitos é o servidor (PGO5_PIN_DIGITOS).
+        // O desafio compartilhado passa a usar o mesmo número.
+        if (self.state.dados.digitosDoPin) PinPGO5.digitos = self.state.dados.digitosDoPin;
         self._pintar();
       })
       .withFailureHandler(function(err) {
@@ -988,40 +1093,20 @@ Pages.segurancaPGO5 = {
    * @param {Function} aoLiberar Executada depois de validar.
    * @param {string} [mensagem] Texto extra explicando por que o PIN é pedido.
    */
+  /**
+   * Pede o PIN. É só um atalho para o desafio compartilhado (PinPGO5): havia
+   * duas implementações do mesmo pop-up, e só uma delas era alcançável pelas
+   * telas que precisavam dele.
+   *
+   * @param {Function} aoLiberar O que fazer depois do PIN aceito.
+   * @param {string} [mensagem] Por que o PIN está sendo pedido.
+   */
   _pedirPin: function(aoLiberar, mensagem) {
     var self = this;
-    var digitos = (self.state.dados && self.state.dados.digitosDoPin) || 6;
-
-    Components.modal({
-      title: 'Informe o PIN administrativo',
-      body: (mensagem ? '<p class="pgo5cfg-ajuda">' + App.escapeHtml(mensagem) + '</p>' : '') +
-        self._campoPin('pgo5seg-pin', 'PIN', digitos) +
-        '<small class="pgo5cfg-nota">Depois de aceito, as ações protegidas ficam ' +
-        'liberadas por alguns minutos.</small>',
-      confirmText: 'Validar',
-      cancelText: 'Cancelar',
-      onConfirm: function() {
-        var campo = document.getElementById('pgo5seg-pin');
-        var pin = campo ? campo.value.trim() : '';
-        if (pin.length !== digitos) {
-          Components.toast('O PIN deve ter ' + digitos + ' dígitos.', 'warning');
-          return false;
-        }
-        Components.showLoading('Validando...');
-        google.script.run
-          .withSuccessHandler(function() {
-            Components.hideLoading();
-            Components.toast('PIN aceito.', 'success');
-            if (typeof aoLiberar === 'function') aoLiberar();
-          })
-          .withFailureHandler(function(err) {
-            Components.hideLoading();
-            Components.toast(((err && err.message) || 'Não foi possível validar o PIN.'), 'error');
-            self.render();
-          })
-          .validarPinPGO5(pin);
-      }
-    });
+    if (self.state.dados && self.state.dados.digitosDoPin) {
+      PinPGO5.digitos = self.state.dados.digitosDoPin;
+    }
+    PinPGO5.desafiar(mensagem, aoLiberar);
   },
 
   /**

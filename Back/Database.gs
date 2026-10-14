@@ -590,63 +590,6 @@ function getById(sheetName, id) {
   return record || null;
 }
 
-/**
- * Obtém registros filtrados por um campo específico.
- * @param {string} sheetName - Nome da planilha
- * @param {string} field - Nome do campo a filtrar
- * @param {*} value - Valor a buscar
- * @returns {Object[]} Array de registros correspondentes
- */
-function getByField(sheetName, field, value) {
-  // Sem captura de erro (mesma correção de getById): uma falha de leitura
-  // aqui fazia a TIMELINE aparecer vazia, como se o atendimento não
-  // tivesse histórico. Agora o erro propaga e "[]" significa apenas:
-  // nenhum registro corresponde ao filtro.
-  const records = getAll(sheetName);
-  return records.filter(function(r) {
-    return String(r[field]) === String(value);
-  });
-}
-
-/**
- * Obtém dados filtrados por múltiplos critérios.
- * @param {string} sheetName - Nome da planilha
- * @param {Object} filters - Objeto com pares {campo: valor}
- * @returns {Object[]} Array de registros correspondentes
- */
-function getFilteredData(sheetName, filters) {
-  // Sem captura de erro (mesma correção de getById/getByField): falha de
-  // leitura nunca deve virar lista vazia.
-  const records = getAll(sheetName);
-
-  if (!filters || Object.keys(filters).length === 0) {
-    return records;
-  }
-
-  return records.filter(function(record) {
-    return Object.keys(filters).every(function(key) {
-      const filterValue = filters[key];
-
-      // Ignora filtros vazios
-      if (filterValue === null || filterValue === undefined || filterValue === '') {
-        return true;
-      }
-
-      const recordValue = record[key];
-
-      // Comparação por array (OR): se o filtro é array, basta ter um match
-      if (Array.isArray(filterValue)) {
-        return filterValue.some(function(fv) {
-          return String(recordValue) === String(fv);
-        });
-      }
-
-      // Comparação simples
-      return String(recordValue) === String(filterValue);
-    });
-  });
-}
-
 // ============================================================================
 // ESCRITA DE DADOS
 // ============================================================================
@@ -902,63 +845,6 @@ function remove(sheetName, id) {
   } catch (e) {
     Logger.log('Erro ao remover de ' + sheetName + ': ' + e.message);
     throw new Error('Erro ao remover registro: ' + e.message);
-  } finally {
-    if (!jaTravado) {
-      LOCK_HELD_ = false;
-      try { lock.releaseLock(); } catch (unlockErr) { /* ignora */ }
-    }
-  }
-}
-
-/**
- * Insere múltiplos registros de uma vez (batch).
- * Mais eficiente que inserir um por um.
- * @param {string} sheetName - Nome da planilha
- * @param {Object[]} dataArray - Array de objetos a inserir
- * @returns {number} Número de registros inseridos
- */
-function batchInsert(sheetName, dataArray) {
-  const lock = LockService.getScriptLock();
-  const jaTravado = LOCK_HELD_; // trava reentrante (ver withScriptLock_)
-
-  try {
-    if (!jaTravado) {
-      lock.waitLock(CONFIG.LOCK_TIMEOUT_MS);
-      LOCK_HELD_ = true;
-    }
-
-    if (!dataArray || dataArray.length === 0) return 0;
-    
-    const ss = getSpreadsheet();
-    const sheet = ss.getSheetByName(sheetName);
-    
-    if (!sheet) {
-      throw new Error('Planilha não encontrada: ' + sheetName);
-    }
-    
-    const columns = getColumnsForSheet(sheetName);
-    // A gravação em lote também é POSICIONAL (setValues na ordem de
-    // COLUMNS). Sem esta validação, uma aba desalinhada (ex.: coluna
-    // inserida manualmente) receberia as linhas do Histórico deslocadas,
-    // silenciosamente.
-    prepararAbaParaGravacao_(sheet, sheetName, columns);
-
-    const rows = dataArray.map(function(data) {
-      return toRowArray(data, columns);
-    });
-    
-    // Insere todas as linhas de uma vez
-    const lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow + 1, 1, rows.length, columns.length).setValues(rows);
-    
-    // Invalida cache após escrita
-    invalidateCache(sheetName);
-    
-    Logger.log('Batch insert em ' + sheetName + ': ' + rows.length + ' registros');
-    return rows.length;
-  } catch (e) {
-    Logger.log('Erro em batchInsert(' + sheetName + '): ' + e.message);
-    throw new Error('Erro ao inserir registros em lote: ' + e.message);
   } finally {
     if (!jaTravado) {
       LOCK_HELD_ = false;

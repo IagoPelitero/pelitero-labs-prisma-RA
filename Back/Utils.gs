@@ -39,65 +39,6 @@ function generateId(prefix) {
 // FORMATAÇÃO E VALIDAÇÃO DE CPF
 // ============================================================================
 
-/**
- * Formata um CPF no padrão XXX.XXX.XXX-XX.
- * Remove caracteres não numéricos antes de formatar.
- * @param {string} cpf - CPF a ser formatado
- * @returns {string} CPF formatado ou string original se inválido
- */
-function formatCPF(cpf) {
-  try {
-    if (!cpf) return '';
-    const nums = String(cpf).replace(/\D/g, '');
-    if (nums.length !== 11) return String(cpf);
-    return `${nums.substr(0, 3)}.${nums.substr(3, 3)}.${nums.substr(6, 3)}-${nums.substr(9, 2)}`;
-  } catch (e) {
-    Logger.log('Erro ao formatar CPF: ' + e.message);
-    return String(cpf);
-  }
-}
-
-/**
- * Valida um CPF verificando os dígitos verificadores.
- * @param {string} cpf - CPF a ser validado (com ou sem formatação)
- * @returns {boolean} true se o CPF é válido
- */
-function validateCPF(cpf) {
-  try {
-    if (!cpf) return false;
-    const nums = String(cpf).replace(/\D/g, '');
-
-    // Verifica se tem 11 dígitos
-    if (nums.length !== 11) return false;
-
-    // Verifica se todos os dígitos são iguais (ex: 111.111.111-11)
-    if (/^(\d)\1{10}$/.test(nums)) return false;
-
-    // Valida primeiro dígito verificador
-    let soma = 0;
-    for (let i = 0; i < 9; i++) {
-      soma += parseInt(nums.charAt(i), 10) * (10 - i);
-    }
-    let resto = (soma * 10) % 11;
-    if (resto === 10) resto = 0;
-    if (resto !== parseInt(nums.charAt(9), 10)) return false;
-
-    // Valida segundo dígito verificador
-    soma = 0;
-    for (let i = 0; i < 10; i++) {
-      soma += parseInt(nums.charAt(i), 10) * (11 - i);
-    }
-    resto = (soma * 10) % 11;
-    if (resto === 10) resto = 0;
-    if (resto !== parseInt(nums.charAt(10), 10)) return false;
-
-    return true;
-  } catch (e) {
-    Logger.log('Erro ao validar CPF: ' + e.message);
-    return false;
-  }
-}
-
 // ============================================================================
 // SANITIZAÇÃO
 // ============================================================================

@@ -99,10 +99,16 @@ silencioso em produção.
 3. **CPF e Protocolo são identificadores de TEXTO.** Aceitam `0`, `00`,
    `00123`; preservam zeros à esquerda; recusam qualquer caractere que não seja
    dígito; **não** têm dígito verificador no PGO 5.0.
-3b. **Toda coluna de identificador é gravada com formato de TEXTO (`@`)**, e
-   isso é aplicado na linha, imediatamente antes do `setValues`. Vale para
-   `Id`, para qualquer coluna terminada em `Id`, e para CPF, Protocolo e
-   Matrícula — ver `pgo5ColunaEhIdentificador_`. Ver a armadilha na seção 5.
+3b. **Identificadores E DATAS são gravados com formato de TEXTO (`@`)**,
+   aplicado na linha imediatamente antes do `setValues`. Vale para `Id`,
+   qualquer coluna terminada em `Id`, CPF, Protocolo, Matrícula, as colunas
+   `Data*`/`UltimoAcesso` e os valores dinâmicos (`Valor` de
+   ValoresAtendimento, `ValorPadrao`) — ver `pgo5ColunaEhTextoNaPlanilha_`.
+   Ver as duas armadilhas na seção 5.
+3c. **`DataAbertura` é um DIA CIVIL, não um instante.** Nunca a deixe virar
+   `Date` na planilha: um instante obriga cada leitor a escolher um fuso, e o
+   sistema já escolheu dois diferentes ao mesmo tempo. Como texto
+   `AAAA-MM-DD`, o dia digitado é o dia gravado e o dia exibido.
 4. **Data de abertura**: obrigatória, padrão hoje em `America/Sao_Paulo`
    (decidido pelo **servidor** — o Apps Script roda em UTC e São Paulo está 3h
    atrás), aceita passado, recusa futuro. **Edição preserva a data gravada.**
@@ -207,10 +213,29 @@ só depois de conferir que nada mais as consome.
   o piso da aba e voltava a **emitir Ids já em uso**.
   A proteção é formatar a linha como texto ANTES de gravar. Formatar depois
   não desfaz nada, e formatar só na criação da aba não cobre linha nova.
+- **"A data veio de ontem" era o Sheets convertendo o dia em instante.**
+  `DataAbertura` era gravada como o texto `"2026-10-14"` numa célula de
+  formato Geral, e o Sheets a convertia num `Date` = meia-noite no **fuso da
+  planilha**. A partir daí todo leitor precisava reinterpretar aquele
+  instante, e havia DOIS critérios no código: a tela de edição formatava em
+  `America/Sao_Paulo` (`pgo5DataComoTextoCurto_`) e o Dashboard serializava
+  em UTC (`toIso_`). Com a planilha em qualquer fuso diferente de São Paulo
+  os dois discordavam — e a edição mostrava o DIA ANTERIOR. Salvar o
+  formulário com aquele dia na tela gravava o retrocesso de verdade.
+  Medido com a planilha em quatro fusos: só `America/Sao_Paulo` acertava.
+- **O pop-up do PIN só existia numa tela.** O servidor recusa operação
+  administrativa sem PIN com `PIN_NECESSARIO:`, e só a tela de links
+  protegidos reconhecia isso. Um ADM cadastrando outro ADM via a recusa como
+  texto técnico num toast, sem nenhum campo para digitar o PIN. O desafio
+  agora vive em `PinPGO5` (AcessoPGO5.html) e qualquer tela o reaproveita
+  com `PinPGO5.tratouErro(err, repetir)` — que refaz a operação original
+  depois do PIN aceito.
 - **Simulador que não coage é simulador que mente.** A planilha falsa das
-  suítes gravava string como string, então nenhum teste via o problema acima.
-  Hoje ela converte igual ao Sheets e respeita o formato `@` — foi o que fez
-  as 13 falhas aparecerem de uma vez.
+  suítes gravava string como string, então nenhum teste via os problemas
+  acima. Hoje ela converte igual ao Sheets: número, notação científica e
+  **data**, respeitando o formato `@`. Ela também constrói os `Date` dentro
+  do mesmo realm do código `.gs` — sem isso `valor instanceof Date` falha no
+  teste e a suíte mede algo que não acontece em produção.
 - **Guarda `typeof` não protege `const` de outro arquivo.** `typeof X !== 'undefined'`
   salva de nome inexistente, mas um `const` de outro `.gs` ainda não avaliado lança
   "Cannot access X before initialization" e derruba a carga do projeto inteiro. Não

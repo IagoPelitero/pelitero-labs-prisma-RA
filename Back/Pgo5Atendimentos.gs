@@ -998,60 +998,6 @@ dataAtualizacao: pgo5ValorSeguroParaFront_(registro.DataAtualizacao, '')  };
 }
 
 /**
- * Lista os atendimentos do PGO 5.0 já com os IDs resolvidos em nomes,
- * prontos para a tabela do Dashboard.
- *
- * Referência apagada não quebra a tela: vira "-" (sem valor) ou
- * "Sem dados" (valor existe mas o registro sumiu).
- *
- * @returns {Object[]} Linhas prontas para exibição.
- */
-function listarAtendimentosPGO5_() {
-  const ator = getActor_();
-  const catalogo = pgo5CatalogoBruto_();
-  const rotulos = pgo5MapaRotulos_(catalogo);
-
-  // Nomes de usuário num mapa — evita buscar dentro do laço.
-  const nomeUsuario = {};
-  pgo5Ler(PGO5.SHEET_NAMES.USUARIOS).forEach(function(u) {
-    nomeUsuario[String(u.Id || '').trim()] = String(u.Nome || '');
-  });
-
-  // O que cada um enxerga vem do NÍVEL DE ACESSO, nunca do cargo.
-  // Nome técnico de cada status, para a tela decidir comportamento sem
-  // depender do rótulo (que o ADM pode renomear a qualquer momento).
-  const nomeTecnicoDeStatus = pgo5MapaNomeTecnicoDeStatus_(catalogo);
-
-  return pgo5FiltrarAtendimentosPorEscopo_(
-    ator, pgo5Ler(PGO5.SHEET_NAMES.ATENDIMENTOS), 'ver'
-  ).map(function(a) {
-    const respId = String(a.ResponsavelId || '').trim();
-    return {
-      id: String(a.Id || ''),
-      dataAbertura: a.DataAbertura,
-      protocolo: pgo5TextoDeIdentificador_(a.Protocolo) || '-',
-      produto: pgo5Rotulo_(rotulos, a.ProdutoId),
-      categoria: pgo5Rotulo_(rotulos, a.CategoriaId),
-      subcategoria: pgo5Rotulo_(rotulos, a.SubcategoriaId),
-      responsavel: respId ? (nomeUsuario[respId] || 'Sem dados') : '-',
-      responsavelId: respId,
-      aguardandoRetorno: pgo5Rotulo_(rotulos, a.AguardandoRetornoId),
-      canal: pgo5Rotulo_(rotulos, a.CanalId),
-      canalId: String(a.CanalId || ''),
-      status: pgo5Rotulo_(rotulos, a.StatusId),
-      statusId: String(a.StatusId || ''),
-      // Chave ESTÁVEL do status. "status" acima é só o rótulo de exibição:
-      // decisões de comportamento na tela usam este campo.
-      statusNomeTecnico: nomeTecnicoDeStatus[String(a.StatusId || '').trim()] || '',
-      observacoes: String(a.Observacoes || ''),
-      criadoPorId: String(a.CriadoPorId || ''),
-      dataCriacao: a.DataCriacao,
-      dataAtualizacao: a.DataAtualizacao
-    };
-  });
-}
-
-/**
  * Converte os atendimentos do PGO 5.0 para o FORMATO DO MODELO 4.x, com os
  * IDs já resolvidos em nomes.
  *

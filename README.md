@@ -126,6 +126,8 @@ Estas não são preferências de estilo — são o que mantém o dado íntegro.
 | Status decide pelo **nome técnico**, não pelo rótulo | O rótulo é renomeável a qualquer momento |
 | CPF e Protocolo são **texto**, aceitam `0` e `00123` | São identificadores digitados, não números |
 | Toda coluna de identificador é gravada com formato **texto** | O Sheets lê `00000010` como 10 e `000000E1` como 0 — Ids diferentes acabavam com o mesmo valor |
+| A data de abertura é um **dia**, gravado como texto `AAAA-MM-DD` | Virando instante, cada leitor escolhe um fuso — e a tela passava a mostrar o dia anterior |
+| Operação administrativa pede **permissão + PIN**, com pop-up em qualquer tela | A recusa sem pop-up deixava o ADM sem como cadastrar outro ADM |
 | Data de abertura em **America/Sao_Paulo**, decidida pelo servidor | O Apps Script roda em UTC e viraria o dia às 21 h |
 | Data de abertura aceita o passado, **recusa o futuro** | Descreve algo que já aconteceu |
 | Editar **nunca** reescreve a data de um registro antigo | Histórico não muda sozinho |
@@ -166,11 +168,36 @@ Estas não são preferências de estilo — são o que mantém o dado íntegro.
 | **5.2** | ago/2026 | Operação rápida: data e status automáticos, `Ctrl+Enter`, foco no Protocolo, formulário compacto e catálogo em memória |
 | **5.3** | ago/2026 | Importar Base Legada, diagnóstico de build, consolidação dos arquivos e remoção do caminho 4.x |
 | **5.4** | set/2026 | Estrutura da planilha imutável, Matrícula e detalhamento de Em Análise nativos, canais padrão revisados |
-| **5.5** | set/2026 | **Versão atual.** Identificadores gravados como texto (o Sheets corrompia Ids), e a instalação nova já nasce com um Administrador |
+| **5.5** | set/2026 | Identificadores gravados como texto (o Sheets corrompia Ids), e a instalação nova já nasce com um Administrador |
+| **5.6** | out/2026 | **Versão atual.** Data de abertura imune ao fuso da planilha, pop-up do PIN em qualquer tela e remoção de 31 funções sem uso |
 
 > A **versão do produto** (5.4) e a **versão do esquema** das abas são coisas
 > diferentes e mudam em ritmos diferentes: o esquema é o contrato das cinco abas
 > e das suas colunas, e continua onde estava — a 5.4 não alterou nenhuma coluna.
+
+### O que a 5.6 corrigiu
+
+**A data de abertura vinha um dia atrás.** Ela era gravada como o texto
+`"2026-10-14"`, e o Sheets convertia isso num instante: meia-noite no fuso da
+planilha. Daí em diante cada leitor tinha de reinterpretar aquele instante, e
+o sistema usava dois critérios diferentes — a tela de edição formatava em
+`America/Sao_Paulo` e o Dashboard serializava em UTC. Com a planilha em
+qualquer fuso diferente de São Paulo, os dois discordavam e a edição exibia o
+dia anterior; salvar o formulário gravava esse retrocesso. Agora a data é
+gravada como **texto**, então não existe instante nem fuso: o dia digitado é o
+dia gravado e o dia exibido. Verificado com a planilha em quatro fusos.
+
+**O pop-up do PIN não aparecia para um ADM cadastrar outro ADM.** Conceder um
+nível com poderes administrativos exige permissão **e** PIN, e o servidor
+recusava corretamente — mas só a tela de links protegidos sabia reconhecer
+essa recusa. Nas outras, a mensagem técnica virava um toast e não havia campo
+para informar o PIN. O desafio passou a ser compartilhado: o pop-up abre em
+qualquer tela e, depois do PIN aceito, **a operação original é refeita
+sozinha**.
+
+**31 funções sem uso saíram**, entre elas duas que eram públicas (chamáveis do
+navegador) e já estavam quebradas, porque chamavam rotinas de conversão
+removidas na 5.4. Sobrou o caminho 4.x só de leitura.
 
 ### O que a 5.5 corrigiu
 
